@@ -2,9 +2,9 @@ using System;
 using System.Diagnostics.CodeAnalysis;
 using Avalonia.Controls;
 using Avalonia.Controls.Templates;
-using SmartMike.App.ViewModels;
+using Plural.App.ViewModels;
 
-namespace SmartMike.App;
+namespace Plural.App;
 
 /// <summary>
 /// Given a view model, returns the corresponding view if possible.

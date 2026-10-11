@@ -1,9 +1,9 @@
 using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
-using SmartMike.Core.Platform;
+using Plural.Core.Platform;
 using Vortice.MediaFoundation;
 
-namespace SmartMike.Platform.Windows;
+namespace Plural.Platform.Windows;
 
 /// <summary>Creates AAC-LC encoders on the Microsoft Media Foundation AAC encoder MFT.</summary>
 [SupportedOSPlatform("windows")]

@@ -22,8 +22,8 @@ Conventions used in all docs:
 - [Protocol/Audio.md](Protocol/Audio.md) — audio stream format and codecs
 - [Protocol/Authentication.md](Protocol/Authentication.md) — handshake (`libjni-authenticate`)
 
-## SmartMike Hub (our app)
-- [MikeHub/Design.md](MikeHub/Design.md) — architecture, platform strategy, status
+## Plural (our app)
+- [Plural/Design.md](Plural/Design.md) — architecture, platform strategy, status
 
 ## Other
 - [Sources.md](Sources.md) — external references

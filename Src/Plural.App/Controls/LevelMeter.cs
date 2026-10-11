@@ -3,7 +3,7 @@ using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Media;
 
-namespace SmartMike.App.Controls;
+namespace Plural.App.Controls;
 
 /// <summary>Horizontal level bar (0..100) with a green-yellow-red gradient and a peak-hold tick.</summary>
 public class LevelMeter : Control

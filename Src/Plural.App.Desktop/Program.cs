@@ -1,7 +1,7 @@
 using Avalonia;
 using System;
 
-namespace SmartMike.App.Desktop;
+namespace Plural.App.Desktop;
 
 sealed class Program
 {

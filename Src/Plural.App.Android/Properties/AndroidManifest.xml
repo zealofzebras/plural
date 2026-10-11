@@ -5,15 +5,24 @@
 	<uses-permission android:name="android.permission.BLUETOOTH_ADMIN" android:maxSdkVersion="30" />
 	<!-- Android 12+: runtime permission to list paired devices and open RFCOMM sockets. No scanning needed. -->
 	<uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
-	<uses-feature android:name="android.hardware.bluetooth" android:required="true" />
+	<uses-feature android:name="android.hardware.bluetooth" android:required="false" />
+	<!-- Local mics (phone, wired/USB, Bluetooth headset) as extra streams; MODIFY_AUDIO_SETTINGS routes a Bluetooth headset mic. -->
+	<uses-permission android:name="android.permission.RECORD_AUDIO" />
+	<uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
+	<uses-feature android:name="android.hardware.microphone" android:required="false" />
+	<!-- Remote mode: find and control other Plural apps on the same Wi-Fi (TCP + UDP discovery broadcasts). -->
+	<uses-permission android:name="android.permission.INTERNET" />
+	<uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+	<uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
+	<uses-permission android:name="android.permission.CHANGE_WIFI_MULTICAST_STATE" />
 	<!-- Video recording (optional: audio-only works without a camera). -->
 	<uses-permission android:name="android.permission.CAMERA" />
 	<uses-feature android:name="android.hardware.camera.any" android:required="false" />
 
-	<application android:label="SmartMike Hub" android:icon="@drawable/Icon">
+	<application android:label="Plural" android:icon="@drawable/Icon">
 		<!-- Shares recordings (app-specific storage) with other apps. -->
 		<provider android:name="androidx.core.content.FileProvider"
-		          android:authorities="com.zealofzebras.smartmikehub.files"
+		          android:authorities="net.getplural.app.files"
 		          android:exported="false"
 		          android:grantUriPermissions="true">
 			<meta-data android:name="android.support.FILE_PROVIDER_PATHS" android:resource="@xml/file_paths" />

@@ -1,7 +1,7 @@
 using System.Reflection;
 using System.Runtime.InteropServices;
 
-namespace SmartMike.Core.Codec;
+namespace Plural.Core.Codec;
 
 /// <summary>Stock CELT 0.7.1 decoder (native <c>celt071</c>), as used by the SmartMike+ QCELT stream.</summary>
 public sealed partial class CeltDecoder : IDisposable

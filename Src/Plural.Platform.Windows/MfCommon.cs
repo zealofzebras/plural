@@ -2,7 +2,7 @@ using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
 using Vortice.MediaFoundation;
 
-namespace SmartMike.Platform.Windows;
+namespace Plural.Platform.Windows;
 
 /// <summary>Media Foundation process-wide startup and small interop helpers shared by the AAC and video code.</summary>
 [SupportedOSPlatform("windows")]

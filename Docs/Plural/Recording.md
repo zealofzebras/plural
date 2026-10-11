@@ -16,7 +16,7 @@ Decided 2026-10-11 with Peter. Every mic is always its own stream (track or file
 - Take folder: `<RecordingRoot>/<yyyyMMdd_HHmmss>/`; single-file formats write `<yyyyMMdd_HHmmss>.<ext>` inside it.
 
 ## Encoders: platform-native, containers managed
-Contracts: `SmartMike.Core/Platform/Media.cs`, `SmartMike.Core/Recording/RecordingSettings.cs`.
+Contracts: `Plural.Core/Platform/Media.cs`, `Plural.Core/Recording/RecordingSettings.cs`.
 - **Core (managed, all platforms):** WAV, FLAC encoder, Matroska writer, MP4/M4A writer, zip export, track sync.
 - **Core + native lib:** MP3 via LAME 3.100 (`libmp3lame`), built per RID like CELT (`Native/lame/build-windows.sh`, `build-android.sh`).
 - **Platform:** `IAacEncoderFactory` (Android MediaCodec `audio/mp4a-latm`; Windows Media Foundation AAC encoder MFT) and `IVideoPlatform` (Android Camera2 + MediaCodec `video/avc`; Windows Media Foundation source reader + H.264 encoder MFT).
@@ -29,7 +29,7 @@ Contracts: `SmartMike.Core/Platform/Media.cs`, `SmartMike.Core/Recording/Recordi
 - Video samples carry `MediaClock` timestamps from the platform; the writer subtracts `t0`. The first video sample written must be a key frame (earlier ones are dropped).
 
 ## Implementation status (2026-10-11)
-Built in `SmartMike.Core/Recording` (`FlacEncoder`, `MatroskaWriter`, `Mp4Writer`, `H264`, `LameMp3Encoder`, `ClockLockedTrack`, `TakeRecorder`, `RecordedTake`, `TakeExport`). Platform: `AndroidAacEncoder`, `AndroidVideoPlatform`/`AndroidVideoCapture` (Android); `MfAacEncoder`, `MfVideoPlatform`/`MfVideoCapture` (Windows).
+Built in `Plural.Core/Recording` (`FlacEncoder`, `MatroskaWriter`, `Mp4Writer`, `H264`, `LameMp3Encoder`, `ClockLockedTrack`, `TakeRecorder`, `RecordedTake`, `TakeExport`). Platform: `AndroidAacEncoder`, `AndroidVideoPlatform`/`AndroidVideoCapture` (Android); `MfAacEncoder`, `MfVideoPlatform`/`MfVideoCapture` (Windows).
 
 | Part | State |
 |---|---|
@@ -46,7 +46,7 @@ Open items:
 - Camera privacy-denied path (Windows and Android) untested.
 
 ## Containers
-- **Matroska:** EBML header, Segment with unknown size, Info (TimestampScale 1 ms, MuxingApp/WritingApp "SmartMike Hub", Title), Tracks, then Clusters (unknown size, ≤ 1 s or 5 MB) of SimpleBlocks interleaved by timestamp; Cues and segment size patched on close if possible. Unknown sizes keep a crashed recording playable.
+- **Matroska:** EBML header, Segment with unknown size, Info (TimestampScale 1 ms, MuxingApp/WritingApp "Plural", Title), Tracks, then Clusters (unknown size, ≤ 1 s or 5 MB) of SimpleBlocks interleaved by timestamp; Cues and segment size patched on close if possible. Unknown sizes keep a crashed recording playable.
   - Video `V_MPEG4/ISO/AVC` + CodecPrivate avcC (from SPS/PPS); blocks in length-prefixed (AVCC) form.
   - Audio `A_FLAC` + CodecPrivate `fLaC`+STREAMINFO (block size 4096), or `A_PCM/INT/LIT` (16-bit), `A_AAC` + ASC.
 - **MP4/M4A:** `ftyp` (isom/mp42; M4A brand `M4A `), `mdat` (64-bit size), `moov` written at the end: `mvhd`, one `trak` per stream (`tkhd`, `mdia`/`mdhd`/`hdlr`/`minf`/`stbl` with `stsd` avc1+avcC or mp4a+esds, `stts`, `stsz`, `stsc`, `co64`, `stss` for video), track names via `udta/name`. All audio tracks enabled.

@@ -1,16 +1,17 @@
 using Android.Bluetooth;
 using Android.Content;
 using Java.Util;
-using SmartMike.Core.Platform;
+using Plural.Core.Platform;
+using Plural.Core.Remote;
 
-namespace SmartMike.Platform.Android;
+namespace Plural.Platform.Android;
 
 /// <summary>
 /// Android classic Bluetooth. Lists bonded (paired) devices and opens an RFCOMM socket to the
 /// Serial Port Profile UUID; Android resolves the channel through SDP.
 /// Needs BLUETOOTH_CONNECT at runtime on Android 12+ (requested by the app head).
 /// </summary>
-public sealed class AndroidBluetooth(Context context) : IBluetoothPlatform
+public sealed class AndroidBluetooth(Context context) : IBluetoothPlatform, IBluetoothServicePlatform
 {
     private static readonly UUID Spp = UUID.FromString("00001101-0000-1000-8000-00805F9B34FB")!;
 
@@ -27,23 +28,70 @@ public sealed class AndroidBluetooth(Context context) : IBluetoothPlatform
         }
         return adapter.BondedDevices?
             .Where(d => d.Address is not null)
-            .Select(d => new PairedDevice(BluetoothAddress.Parse(d.Address!), d.Name ?? d.Address!))
+            .Select(d => new PairedDevice(BluetoothAddress.Parse(d.Address!), d.Name ?? d.Address!,
+                (uint)(d.BluetoothClass?.DeviceClass ?? 0)))
             .ToList() ?? [];
     }
 
-    public Task<Stream> ConnectSppAsync(BluetoothAddress address, CancellationToken ct) =>
+    public Task<Stream> ConnectSppAsync(BluetoothAddress address, CancellationToken ct) => Connect(address, Spp, ct);
+
+    public Task<Stream> ConnectAsync(BluetoothAddress address, Guid service, CancellationToken ct) =>
+        Connect(address, UUID.FromString(service.ToString())!, ct);
+
+    private Task<Stream> Connect(BluetoothAddress address, UUID uuid, CancellationToken ct) =>
         Task.Run<Stream>(() =>
         {
             var device = Adapter.GetRemoteDevice(address.ToString())
                 ?? throw new InvalidOperationException($"Unknown device {address}");
             try
             {
-                return Connect(device.CreateRfcommSocketToServiceRecord(Spp)!, ct);
+                return Connect(device.CreateRfcommSocketToServiceRecord(uuid)!, ct);
             }
             catch (Java.IO.IOException) when (!ct.IsCancellationRequested)
             {
                 // Some stacks refuse an authenticated link to an already-bonded device; retry without.
-                return Connect(device.CreateInsecureRfcommSocketToServiceRecord(Spp)!, ct);
+                return Connect(device.CreateInsecureRfcommSocketToServiceRecord(uuid)!, ct);
+            }
+        }, ct);
+
+    /// <summary>
+    /// RFCOMM server advertised in SDP under <paramref name="service"/> (insecure: devices are paired already, and this avoids
+    /// a second authentication prompt on some stacks). Blocking accepts run on a worker until <paramref name="ct"/> is cancelled.
+    /// </summary>
+    public Task ListenAsync(Guid service, string name, Func<Stream, Task> onAccept, CancellationToken ct) =>
+        Task.Run(() =>
+        {
+            var adapter = Adapter;
+            if (!adapter.IsEnabled)
+            {
+                throw new InvalidOperationException("Bluetooth is off.");
+            }
+            var server = adapter.ListenUsingInsecureRfcommWithServiceRecord(name, UUID.FromString(service.ToString()))
+                ?? throw new InvalidOperationException("Could not start the Bluetooth service.");
+            using var reg = ct.Register(server.Close);
+            try
+            {
+                while (!ct.IsCancellationRequested)
+                {
+                    BluetoothSocket? socket;
+                    try
+                    {
+                        socket = server.Accept();
+                    }
+                    catch (Java.IO.IOException) when (ct.IsCancellationRequested)
+                    {
+                        return;
+                    }
+                    if (socket is not null)
+                    {
+                        var stream = new BluetoothSocketStream(socket);
+                        _ = Task.Run(() => onAccept(stream), CancellationToken.None);
+                    }
+                }
+            }
+            finally
+            {
+                server.Close();
             }
         }, ct);
 

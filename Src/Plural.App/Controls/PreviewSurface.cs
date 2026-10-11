@@ -4,9 +4,9 @@ using Avalonia;
 using Avalonia.Media.Imaging;
 using Avalonia.Platform;
 using Avalonia.Threading;
-using SmartMike.Core.Platform;
+using Plural.Core.Platform;
 
-namespace SmartMike.App.Controls;
+namespace Plural.App.Controls;
 
 /// <summary>
 /// Receives preview frames on the camera thread, copies them into a private buffer and presents them

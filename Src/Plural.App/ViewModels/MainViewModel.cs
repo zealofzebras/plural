@@ -10,13 +10,13 @@ using System.Threading.Tasks;
 using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
-using SmartMike.App.Controls;
-using SmartMike.App.Services;
-using SmartMike.Core.Platform;
-using SmartMike.Core.Recording;
-using SmartMike.Core.Session;
+using Plural.App.Controls;
+using Plural.App.Services;
+using Plural.Core.Platform;
+using Plural.Core.Recording;
+using Plural.Core.Session;
 
-namespace SmartMike.App.ViewModels;
+namespace Plural.App.ViewModels;
 
 public partial class MainViewModel : ViewModelBase, IAsyncDisposable
 {
@@ -34,11 +34,14 @@ public partial class MainViewModel : ViewModelBase, IAsyncDisposable
     private RecordingFormat _audioFormat = RecordingFormat.Wav;
     private RecordingFormat _videoFormat = RecordingFormat.Mkv;
     private CancellationTokenSource? _toastCts;
+    private List<SavedInput> _savedInputs = [];
+    private Task<bool>? _micPermission;
 
     public ObservableCollection<MikeViewModel> Mikes { get; } = [];
     public ObservableCollection<TakeViewModel> Takes { get; } = [];
     public ObservableCollection<Choice> FormatOptions { get; } = [];
     public ObservableCollection<CameraInfo> Cameras { get; } = [];
+    public ObservableCollection<AudioInputDevice> AvailableInputs { get; } = [];
     public IReadOnlyList<OutputOption> Outputs { get; private set; } = [new OutputOption(null)];
     public PreviewSurface Preview { get; } = new();
 
@@ -54,7 +57,7 @@ public partial class MainViewModel : ViewModelBase, IAsyncDisposable
     [ObservableProperty] public partial bool IsStopping { get; set; }
     [ObservableProperty] public partial string RecordingTime { get; set; } = "00:00";
     [ObservableProperty] public partial string RecordingRoot { get; set; } =
-        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "SmartMike Recordings");
+        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "Plural Recordings");
     [ObservableProperty] public partial bool CanRecord { get; set; }
     [ObservableProperty] public partial string RecordHint { get; set; } = "";
 
@@ -64,6 +67,8 @@ public partial class MainViewModel : ViewModelBase, IAsyncDisposable
     [ObservableProperty] public partial bool HasMikes { get; set; }
     [ObservableProperty] public partial string Summary { get; set; } = "No mics yet";
     [ObservableProperty] public partial bool HasLiveMic { get; set; }
+    [ObservableProperty] public partial bool IsAddMicOpen { get; set; }
+    [ObservableProperty] public partial bool HasAvailableInputs { get; set; }
 
     // Mode and camera
     [ObservableProperty] public partial bool IsVideoMode { get; set; }
@@ -99,6 +104,26 @@ public partial class MainViewModel : ViewModelBase, IAsyncDisposable
     [ObservableProperty] public partial bool ToastIsError { get; set; }
     [ObservableProperty] public partial TakeViewModel? ToastTake { get; set; }
 
+    // Layout state (derived in UpdateLayoutState)
+    [ObservableProperty] public partial bool IsTakesOpen { get; set; }
+    [ObservableProperty] public partial bool IsImmersive { get; set; }
+    [ObservableProperty] public partial string ModeLabel { get; set; } = "Audio";
+    [ObservableProperty] public partial string FormatShort { get; set; } = "WAV";
+    [ObservableProperty] public partial bool ImmersiveActive { get; set; }
+    [ObservableProperty] public partial bool ShowPreviewPanel { get; set; }
+    [ObservableProperty] public partial bool ShowControls { get; set; } = true;
+    [ObservableProperty] public partial bool ShowModeSeg { get; set; }
+    [ObservableProperty] public partial bool ShowVideoTools { get; set; }
+    [ObservableProperty] public partial bool ShowRecordingCenter { get; set; }
+    [ObservableProperty] public partial bool HasToastTake { get; set; }
+
+    // Recording clean-up animation phases
+    [ObservableProperty] public partial bool HideCards { get; set; }
+    [ObservableProperty] public partial bool CardsGone { get; set; }
+    [ObservableProperty] public partial bool StripVisible { get; set; }
+    [ObservableProperty] public partial bool StripOn { get; set; }
+
+    public bool IsRecordingUi => IsRecording || IsStopping;
     public bool IsAudioMode => !IsVideoMode;
     public bool IsNotRecording => !IsRecording;
     public bool HasRecordHint => RecordHint.Length > 0;
@@ -107,6 +132,8 @@ public partial class MainViewModel : ViewModelBase, IAsyncDisposable
     public bool CanChangeRecordingRoot => _host?.CanChangeRecordingRoot ?? true;
     public bool CanShare => _host?.CanShare ?? false;
     public bool CanOpenFolder => _host?.CanOpenFolder ?? false;
+    /// <summary>The platform can capture from OS microphones (built-in, USB, Bluetooth headset, ...).</summary>
+    public bool CanAddMics => _hub?.Inputs is not null;
 
     /// <summary>Design-time constructor.</summary>
     public MainViewModel()
@@ -119,9 +146,13 @@ public partial class MainViewModel : ViewModelBase, IAsyncDisposable
     {
         _host = host;
         _hub = host.CreateHub();
+        // Change handlers save settings; until they are loaded that would overwrite the file with defaults.
+        _loading = true;
         RecordingRoot = host.RecordingRoot;
         HasVideo = _hub.Video is not null;
         LoadSettings();
+        CreateRemote(host, _hub);
+        UpdateLayoutState();
         _timer = new DispatcherTimer(TimeSpan.FromMilliseconds(100), DispatcherPriority.Background, (_, _) => Tick());
         _timer.Start();
         Preview.Updated += () => HasPreview = Preview.HasFrame;
@@ -139,6 +170,7 @@ public partial class MainViewModel : ViewModelBase, IAsyncDisposable
         _initialized = true;
         _ = LoadTakesAsync();
         await ScanAsync();
+        StartRemoteListening();
     }
 
     /// <summary>Called from the view when the app goes to the background / returns; the camera only runs while visible.</summary>
@@ -175,6 +207,7 @@ public partial class MainViewModel : ViewModelBase, IAsyncDisposable
         _audioFormat = s.AudioFormat;
         _videoFormat = s.VideoFormat;
         IsVideoMode = s.VideoMode && HasVideo;
+        IsImmersive = s.Immersive;
         SelectedMatroska = Pick(MatroskaOptions, (int)s.MatroskaAudio, 0);
         SelectedAac = Pick(AacOptions, s.AacBitRate, 3);
         SelectedMp3 = Pick(Mp3Options, s.Mp3BitRate, 3);
@@ -183,6 +216,10 @@ public partial class MainViewModel : ViewModelBase, IAsyncDisposable
         AutoBitRate = s.AutoBitRate;
         BitRateMbps = Math.Clamp(s.BitRateMbps, 2, 60);
         _savedCameraId = s.CameraId;
+        _savedInputs = s.LocalMics.Where(m => m.Id.Length > 0).ToList();
+        _deviceId = s.DeviceId ?? "";
+        AllowRemoteControl = s.AllowRemoteControl;
+        _trustedControllers = [.. s.TrustedControllers];
         if (CanChangeRecordingRoot && !string.IsNullOrWhiteSpace(s.RecordingRoot))
         {
             RecordingRoot = s.RecordingRoot;
@@ -201,6 +238,7 @@ public partial class MainViewModel : ViewModelBase, IAsyncDisposable
         var s = new AppSettings
         {
             VideoMode = IsVideoMode,
+            Immersive = IsImmersive,
             AudioFormat = _audioFormat,
             VideoFormat = _videoFormat,
             MatroskaAudio = (MatroskaAudioCodec)(SelectedMatroska?.Value ?? 0),
@@ -212,6 +250,10 @@ public partial class MainViewModel : ViewModelBase, IAsyncDisposable
             BitRateMbps = BitRateMbps,
             CameraId = _savedCameraId,
             RecordingRoot = CanChangeRecordingRoot ? RecordingRoot : null,
+            LocalMics = _savedInputs,
+            DeviceId = _deviceId.Length > 0 ? _deviceId : null,
+            AllowRemoteControl = AllowRemoteControl,
+            TrustedControllers = _trustedControllers,
         };
         try
         {
@@ -276,6 +318,7 @@ public partial class MainViewModel : ViewModelBase, IAsyncDisposable
             RecordingFormat.Mp3 => $"{mp3 / 1000}",
             _ => codec == MatroskaAudioCodec.Flac ? "FLAC" : "PCM",
         };
+        FormatShort = format.ShortName();
         FormatChip = format == RecordingFormat.Wav ? "WAV" : $"{format.ShortName()} · {detail}";
         BitRateText = AutoBitRate ? $"Auto · {video.BitRate / 1_000_000.0:0.#} Mbps" : $"{BitRateMbps:0.#} Mbps";
         RefreshRecordState();
@@ -358,6 +401,7 @@ public partial class MainViewModel : ViewModelBase, IAsyncDisposable
     partial void OnIsVideoModeChanged(bool value)
     {
         OnPropertyChanged(nameof(IsAudioMode));
+        UpdateLayoutState();
         if (_loading)
         {
             return;
@@ -371,11 +415,116 @@ public partial class MainViewModel : ViewModelBase, IAsyncDisposable
     partial void OnIsRecordingChanged(bool value)
     {
         OnPropertyChanged(nameof(IsNotRecording));
-        _host?.OnRecordingChanged(value);
+        UpdateLayoutState();
+        _host?.OnRecordingChanged(value || IsControlled);
         RefreshRecordState();
     }
 
-    partial void OnIsStoppingChanged(bool value) => RefreshRecordState();
+    partial void OnIsStoppingChanged(bool value)
+    {
+        RefreshRecordState();
+        UpdateLayoutState();
+    }
+
+    partial void OnIsTakesOpenChanged(bool value) => UpdateLayoutState();
+
+    partial void OnIsImmersiveChanged(bool value)
+    {
+        UpdateLayoutState();
+        SaveSettings();
+    }
+
+    partial void OnHasMultipleCamerasChanged(bool value) => UpdateLayoutState();
+
+    private bool _lastRecUi;
+    private int _uiVersion;
+
+    private void UpdateLayoutState()
+    {
+        var rec = IsRecordingUi;
+        ImmersiveActive = IsVideoMode && IsImmersive;
+        ShowPreviewPanel = IsVideoMode && !IsImmersive;
+        ShowControls = !rec;
+        ShowModeSeg = HasVideo && !rec;
+        ShowVideoTools = IsVideoMode && !rec;
+        ShowRecordingCenter = rec && !IsVideoMode;
+        ModeLabel = IsVideoMode ? "Video" : "Audio";
+        OnPropertyChanged(nameof(IsRecordingUi));
+        if (rec != _lastRecUi)
+        {
+            _lastRecUi = rec;
+            _ = AnimateRecordingUiAsync(rec);
+        }
+    }
+
+    /// <summary>Cards fade and slide away and the compact strip slides in (and back on stop); these phases drive the XAML transitions.</summary>
+    private async Task AnimateRecordingUiAsync(bool rec)
+    {
+        var v = ++_uiVersion;
+        if (rec)
+        {
+            StripVisible = true;
+            HideCards = true;
+            await Task.Delay(50);
+            if (v != _uiVersion) { return; }
+            StripOn = true;
+            await Task.Delay(280);
+            if (v != _uiVersion) { return; }
+            CardsGone = true;
+        }
+        else
+        {
+            CardsGone = false;
+            StripOn = false;
+            await Task.Delay(50);
+            if (v != _uiVersion) { return; }
+            HideCards = false;
+            await Task.Delay(280);
+            if (v != _uiVersion) { return; }
+            StripVisible = false;
+        }
+    }
+
+    [RelayCommand]
+    private void OpenTakes()
+    {
+        IsTakesOpen = true;
+        _ = LoadTakesAsync();
+    }
+
+    [RelayCommand]
+    private void CloseTakes() => IsTakesOpen = false;
+
+    [RelayCommand]
+    private void ViewTakes()
+    {
+        IsToastVisible = false;
+        OpenTakes();
+    }
+
+    [RelayCommand]
+    private void ToggleMode()
+    {
+        if (IsRecordingUi || !HasVideo)
+        {
+            return;
+        }
+        IsVideoMode = !IsVideoMode;
+    }
+
+    [RelayCommand]
+    private void ToggleImmersive() => IsImmersive = !IsImmersive;
+
+    [RelayCommand]
+    private void NextCamera()
+    {
+        if (Cameras.Count < 2 || IsRecordingUi)
+        {
+            return;
+        }
+        var i = SelectedCamera is null ? -1 : Cameras.IndexOf(SelectedCamera);
+        SelectedCamera = Cameras[(i + 1) % Cameras.Count];
+    }
     partial void OnIsCameraReadyChanged(bool value) => RefreshRecordState();
     partial void OnHasLiveMicChanged(bool value) => RefreshRecordState();
 
@@ -387,19 +536,30 @@ public partial class MainViewModel : ViewModelBase, IAsyncDisposable
         if (IsStopping)
         {
             CanRecord = false;
-            RecordHint = "Saving…";
+            RecordHint = IsRecording ? "Saving…" : "Starting…";
+        }
+        else if (IsRecording && IsControllerConnected && _remote?.Responder.HasRemoteTake == true)
+        {
+            // The controller stops this take; locally only if it is gone.
+            CanRecord = false;
+            RecordHint = ControllerText;
         }
         else if (IsRecording)
         {
             CanRecord = true;
             RecordHint = "";
         }
-        else if (!HasLiveMic)
+        else if (IsControllerConnected)
+        {
+            CanRecord = false;
+            RecordHint = ControllerText;
+        }
+        else if (!HasLiveMic && !HasConnectedRemote)
         {
             CanRecord = false;
             RecordHint = "Connect a mic to record";
         }
-        else if (IsVideoMode && !IsCameraReady)
+        else if (IsVideoMode && !IsCameraReady && HasLiveMic)
         {
             CanRecord = false;
             RecordHint = "Waiting for the camera";
@@ -607,14 +767,22 @@ public partial class MainViewModel : ViewModelBase, IAsyncDisposable
             return;
         }
         IsScanning = true;
+        var sw = Stopwatch.StartNew();
         try
         {
+            RefreshOutputs(_hub);
+            RefreshLocalMics(_hub);
             if (!await _host.EnsurePermissionsAsync())
             {
                 Status = "Bluetooth permission is needed to find paired SmartMikes.";
+                UpdateSummary();
                 return;
             }
-            ScanCore(_hub);
+            await ScanCoreAsync(_hub);
+            if (sw.ElapsedMilliseconds < 800)
+            {
+                await Task.Delay(800 - (int)sw.ElapsedMilliseconds);
+            }
         }
         catch (Exception ex)
         {
@@ -626,17 +794,68 @@ public partial class MainViewModel : ViewModelBase, IAsyncDisposable
         }
     }
 
-    private void ScanCore(MikeHub hub)
+    private void RefreshOutputs(MikeHub hub)
     {
         Outputs = [new OutputOption(null), .. hub.Audio.GetOutputDevices().Select(d => new OutputOption(d))];
         OnPropertyChanged(nameof(Outputs));
+    }
 
+    /// <summary>Brings back the local mics the user added (they stay listed, marked, while unplugged).</summary>
+    private void RefreshLocalMics(MikeHub hub)
+    {
+        if (hub.Inputs is null)
+        {
+            return;
+        }
+        IReadOnlyList<AudioInputDevice> present;
+        try
+        {
+            present = hub.FindInputs();
+        }
+        catch (Exception ex)
+        {
+            Status = ex.Message;
+            return;
+        }
+        foreach (var saved in _savedInputs)
+        {
+            var id = LocalMic.IdFor(new AudioInputDevice(saved.Id, saved.Name));
+            if (Mikes.All(m => m.Channel.Source.Id != id))
+            {
+                var dev = present.FirstOrDefault(d => d.Id == saved.Id) ?? new AudioInputDevice(saved.Id, saved.Name);
+                Mikes.Add(new MikeViewModel(hub.Add(dev), this));
+            }
+        }
+        foreach (var m in Mikes.Where(m => m.Channel.LocalMic is not null))
+        {
+            m.NotPaired = present.All(d => d.Id != m.Channel.LocalMic!.Device.Id);
+        }
+        HasMikes = Mikes.Count > 0;
+    }
+
+    private async Task ScanCoreAsync(MikeHub hub)
+    {
         var found = hub.FindSmartMikes();
         foreach (var dev in found)
         {
-            if (Mikes.All(m => m.Channel.Session.Device.Address != dev.Address))
+            if (Mikes.All(m => m.Channel.Session?.Device.Address != dev.Address))
             {
                 Mikes.Add(new MikeViewModel(hub.Add(dev), this));
+            }
+        }
+        if (!IsRecordingUi)
+        {
+            // SmartMikes that are no longer paired disappear, unless they are connected or recording (those stay, marked).
+            foreach (var m in Mikes.Where(m => m.Channel.Session is not null).ToList())
+            {
+                var session = m.Channel.Session!;
+                var paired = found.Any(d => d.Address == session.Device.Address);
+                m.NotPaired = !paired;
+                if (!paired && !m.IsBusy && m.Channel.RecordingPath is null
+                    && session.State is MikeState.Disconnected or MikeState.Failed)
+                {
+                    await RemoveMikeCoreAsync(m);
+                }
             }
         }
         HasMikes = Mikes.Count > 0;
@@ -645,6 +864,112 @@ public partial class MainViewModel : ViewModelBase, IAsyncDisposable
             ? "No virtual cable found. Install one (e.g. VB-CABLE) to use the mics in other apps."
             : "";
         UpdateSummary();
+    }
+
+    /// <summary>
+    /// Disconnects the mic and drops it from the hub. A SmartMike comes back on the next scan if it is still paired;
+    /// a local mic is forgotten until it is added again.
+    /// </summary>
+    public async Task RemoveMikeAsync(MikeViewModel mike)
+    {
+        if (IsRecordingUi || mike.IsRecording)
+        {
+            return;
+        }
+        if (mike.Channel.LocalMic is { } local && _savedInputs.RemoveAll(s => s.Id == local.Device.Id) > 0)
+        {
+            SaveSettings();
+        }
+        await RemoveMikeCoreAsync(mike);
+        UpdateSummary();
+    }
+
+    /// <summary>One permission prompt at a time, shared by mics connecting together (e.g. Connect all).</summary>
+    public Task<bool> EnsureMicrophonePermissionAsync()
+    {
+        if (_host is null)
+        {
+            return Task.FromResult(false);
+        }
+        if (_micPermission is null || (_micPermission.IsCompleted && !_micPermission.Result))
+        {
+            _micPermission = _host.EnsureMicrophonePermissionAsync();
+        }
+        return _micPermission;
+    }
+
+    [RelayCommand]
+    private void OpenAddMic()
+    {
+        if (_hub is null || IsRecordingUi)
+        {
+            return;
+        }
+        AvailableInputs.Clear();
+        try
+        {
+            var added = Mikes.Select(m => m.Channel.Source.Id).ToHashSet();
+            foreach (var d in _hub.FindInputs().Where(d => !added.Contains(LocalMic.IdFor(d))))
+            {
+                AvailableInputs.Add(d);
+            }
+        }
+        catch (Exception ex)
+        {
+            Status = ex.Message;
+        }
+        HasAvailableInputs = AvailableInputs.Count > 0;
+        IsAddMicOpen = true;
+    }
+
+    [RelayCommand]
+    private void CloseAddMic() => IsAddMicOpen = false;
+
+    /// <summary>Adds a local mic as its own stream, remembers it and connects it.</summary>
+    [RelayCommand]
+    private async Task AddInputAsync(AudioInputDevice? device)
+    {
+        if (_hub is null || device is null || IsRecordingUi)
+        {
+            return;
+        }
+        IsAddMicOpen = false;
+        if (_savedInputs.All(s => s.Id != device.Id))
+        {
+            _savedInputs.Add(new SavedInput { Id = device.Id, Name = device.Name });
+            SaveSettings();
+        }
+        var id = LocalMic.IdFor(device);
+        var vm = Mikes.FirstOrDefault(m => m.Channel.Source.Id == id);
+        if (vm is null)
+        {
+            vm = new MikeViewModel(_hub.Add(device), this);
+            Mikes.Add(vm);
+        }
+        HasMikes = true;
+        UpdateSummary();
+        await vm.ConnectAsync();
+    }
+
+    private async Task RemoveMikeCoreAsync(MikeViewModel mike)
+    {
+        Mikes.Remove(mike);
+        HasMikes = Mikes.Count > 0;
+        try
+        {
+            if (mike.Channel.Source.State != MikeState.Disconnected)
+            {
+                await mike.DisconnectAsync();
+            }
+            if (_hub is not null)
+            {
+                await _hub.RemoveAsync(mike.Channel);
+            }
+        }
+        catch (Exception ex)
+        {
+            Status = ex.Message;
+        }
     }
 
     [RelayCommand]
@@ -673,7 +998,18 @@ public partial class MainViewModel : ViewModelBase, IAsyncDisposable
         }
         if (IsRecording)
         {
-            await StopRecordingAsync(_hub);
+            if (_ctrlTake is { } take)
+            {
+                await StopWithRemotesAsync(_hub, take);
+            }
+            else
+            {
+                await StopRecordingAsync(_hub);
+            }
+        }
+        else if (ConnectedRemotes() is { Count: > 0 } remotes)
+        {
+            await StartWithRemotesAsync(_hub, remotes);
         }
         else
         {
@@ -694,6 +1030,12 @@ public partial class MainViewModel : ViewModelBase, IAsyncDisposable
             return;
         }
         _recMics = hub.Channels.Count(c => c.RecordingPath is not null);
+        EnterRecordingUi();
+    }
+
+    private void EnterRecordingUi()
+    {
+        IsTakesOpen = false;
         _recordClock.Restart();
         RecordingTime = "00:00";
         IsToastVisible = false;
@@ -713,6 +1055,10 @@ public partial class MainViewModel : ViewModelBase, IAsyncDisposable
             _recordClock.Reset();
             IsRecording = false;
             IsStopping = false;
+            if (_remote?.Responder.HasRemoteTake == true)
+            {
+                _remote.Responder.TakeFinished(new RecordedTake(RecordingRoot, hub.RecordingSettings.Format, [], TimeSpan.Zero) { Errors = [ex.Message] });
+            }
             ShowToast("Recording failed", ex.Message, true, null);
             RequestCameraSync();
             return;
@@ -721,6 +1067,11 @@ public partial class MainViewModel : ViewModelBase, IAsyncDisposable
         IsRecording = false;
         IsStopping = false;
         _takeInfo[take.Folder] = (take.Duration, _recMics);
+        if (_remote?.Responder.HasRemoteTake == true)
+        {
+            // Recorded for a controller: queue the files for it (sent now, or when it reconnects).
+            _remote.Responder.TakeFinished(take);
+        }
 
         var multi = take.Format.IsMultiTrack();
         var count = multi ? _recMics : take.Files.Count;
@@ -744,6 +1095,7 @@ public partial class MainViewModel : ViewModelBase, IAsyncDisposable
             m.Refresh();
         }
         UpdateSummary();
+        RefreshRemote();
         if (IsRecording)
         {
             var e = _recordClock.Elapsed;
@@ -828,6 +1180,7 @@ public partial class MainViewModel : ViewModelBase, IAsyncDisposable
         ToastDetail = detail;
         ToastIsError = isError;
         ToastTake = take;
+        HasToastTake = take is not null;
         IsToastVisible = true;
         _toastCts?.Cancel();
         var cts = _toastCts = new CancellationTokenSource();
@@ -856,6 +1209,10 @@ public partial class MainViewModel : ViewModelBase, IAsyncDisposable
         _toastCts?.Cancel();
         _appVisible = false;
         await CloseCameraAsync().ConfigureAwait(false);
+        if (_remote is not null)
+        {
+            await _remote.DisposeAsync().ConfigureAwait(false);
+        }
         if (_hub is not null)
         {
             await _hub.DisposeAsync().ConfigureAwait(false);

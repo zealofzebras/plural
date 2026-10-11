@@ -1,10 +1,10 @@
 <Solution>
-  <Project Path="SmartMike.App/SmartMike.App.csproj" />
-  <Project Path="SmartMike.App.Desktop/SmartMike.App.Desktop.csproj" />
-  <Project Path="SmartMike.App.Android/SmartMike.App.Android.csproj" />
-  <Project Path="SmartMike.Cli/SmartMike.Cli.csproj" />
-  <Project Path="SmartMike.Core.Tests/SmartMike.Core.Tests.csproj" />
-  <Project Path="SmartMike.Core/SmartMike.Core.csproj" />
-  <Project Path="SmartMike.Platform.Windows/SmartMike.Platform.Windows.csproj" />
-  <Project Path="SmartMike.Platform.Android/SmartMike.Platform.Android.csproj" />
+  <Project Path="Plural.App/Plural.App.csproj" />
+  <Project Path="Plural.App.Desktop/Plural.App.Desktop.csproj" />
+  <Project Path="Plural.App.Android/Plural.App.Android.csproj" />
+  <Project Path="Plural.Cli/Plural.Cli.csproj" />
+  <Project Path="Plural.Core.Tests/Plural.Core.Tests.csproj" />
+  <Project Path="Plural.Core/Plural.Core.csproj" />
+  <Project Path="Plural.Platform.Windows/Plural.Platform.Windows.csproj" />
+  <Project Path="Plural.Platform.Android/Plural.Platform.Android.csproj" />
 </Solution>

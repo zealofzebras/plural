@@ -1,6 +1,6 @@
 using System.Buffers.Binary;
 
-namespace SmartMike.Core.Recording;
+namespace Plural.Core.Recording;
 
 /// <summary>Receives one encoded FLAC frame and the number of samples it contains.</summary>
 public delegate void FlacFrameHandler(ReadOnlySpan<byte> frame, int sampleCount);

@@ -1,6 +1,6 @@
-using SmartMike.Core.Recording;
+using Plural.Core.Recording;
 
-namespace SmartMike.Core.Platform;
+namespace Plural.Core.Platform;
 
 // Platform media services used by the recorder. Containers (WAV, FLAC, Matroska, MP4) and MP3 (LAME)
 // live in Core; only hardware/OS codecs and cameras are platform-specific.
@@ -64,6 +64,12 @@ public interface IVideoCapture : IAsyncDisposable
     /// using the value at the start of the take. Frames themselves are not rotated.
     /// </summary>
     int RotationDegrees => 0;
+
+    /// <summary>
+    /// Clockwise rotation the recorder should store as a display hint for the encoded frames. 0 when the platform
+    /// already encodes upright frames (players handle hints inconsistently, especially in Matroska).
+    /// </summary>
+    int EncodedRotationDegrees => RotationDegrees;
 
     /// <summary>True when the preview should be mirrored (front cameras).</summary>
     bool MirrorPreview => false;

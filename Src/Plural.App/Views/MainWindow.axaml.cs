@@ -1,6 +1,6 @@
 using Avalonia.Controls;
 
-namespace SmartMike.App.Views;
+namespace Plural.App.Views;
 
 public partial class MainWindow : Window
 {

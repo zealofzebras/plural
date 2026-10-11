@@ -1,7 +1,7 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <ItemGroup>
-    <ProjectReference Include="..\SmartMike.Core\SmartMike.Core.csproj" />
+    <ProjectReference Include="..\Plural.Core\Plural.Core.csproj" />
   </ItemGroup>
 
   <ItemGroup>

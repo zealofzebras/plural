@@ -1,13 +1,13 @@
 using System.Buffers.Binary;
 using System.Text;
-using SmartMike.Core.Audio;
-using SmartMike.Core.Codec;
-using SmartMike.Core.Platform;
-using SmartMike.Core.Protocol;
-using SmartMike.Core.Recording;
-using SmartMike.Core.Session;
+using Plural.Core.Audio;
+using Plural.Core.Codec;
+using Plural.Core.Platform;
+using Plural.Core.Protocol;
+using Plural.Core.Recording;
+using Plural.Core.Session;
 
-namespace SmartMike.Core.Tests;
+namespace Plural.Core.Tests;
 
 public class FlacTests
 {
@@ -193,7 +193,7 @@ public class MatroskaTests
 
         var info = seg.One(0x1549A966)!;
         Assert.Equal("Test take", info.One(0x7BA9)!.Text);
-        Assert.Equal("SmartMike Hub", info.One(0x5741)!.Text);
+        Assert.Equal("Plural", info.One(0x5741)!.Text);
         Assert.Equal(1_000_000UL, info.One(0x2AD7B1)!.UInt);
         Assert.True(info.One(0x4489)!.Float > 2500);
 
@@ -206,7 +206,7 @@ public class MatroskaTests
         Assert.Equal("fLaC", Encoding.ASCII.GetString(tracks[1].One(0x63A2)!.Data[..4]));
         var video = tracks[0].One(0xE0)!;
         Assert.Equal(1280UL, video.One(0xB0)!.UInt);
-        Assert.Equal(90.0, video.One(0x7670)!.One(0x7675)!.Float);
+        Assert.Equal(270.0, video.One(0x7670)!.One(0x7675)!.Float); // 90° clockwise = 270° counter-clockwise roll
         Assert.Equal(44100.0, tracks[1].One(0xE1)!.One(0xB5)!.Float);
 
         var clusters = seg.All(0x1F43B675).ToList();
@@ -543,7 +543,7 @@ public class TakeExportTests
 {
     private static string TempDir()
     {
-        var d = Path.Combine(Path.GetTempPath(), "smartmike_take_" + Guid.NewGuid().ToString("N"), "20260101_120000");
+        var d = Path.Combine(Path.GetTempPath(), "plural_take_" + Guid.NewGuid().ToString("N"), "20260101_120000");
         Directory.CreateDirectory(d);
         return d;
     }
@@ -606,7 +606,7 @@ public class HubRecordingTests
     public void Start_WithoutCameraOrMics_ThrowsReadableErrors()
     {
         var hub = new MikeHub(new FakeBt(), new FakeAudio());
-        var root = Path.Combine(Path.GetTempPath(), "smartmike_hub_" + Guid.NewGuid().ToString("N"));
+        var root = Path.Combine(Path.GetTempPath(), "plural_hub_" + Guid.NewGuid().ToString("N"));
         hub.RecordingSettings = new RecordingSettings { Format = RecordingFormat.Mkv };
         var ex = Assert.Throws<InvalidOperationException>(() => hub.StartRecordingAll(root));
         Assert.False(string.IsNullOrWhiteSpace(ex.Message));
@@ -646,7 +646,7 @@ public class EndToEndTests
     {
         var input = CaptureLeft();
         Assert.True(input.Length > 200_000);
-        var dir = Path.Combine(Path.GetTempPath(), "smartmike_e2e_" + Guid.NewGuid().ToString("N"));
+        var dir = Path.Combine(Path.GetTempPath(), "plural_e2e_" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(dir);
         try
         {
@@ -799,8 +799,8 @@ public class HubTakeTests
         for (var i = 0; i < mics; i++)
         {
             var ch = hub.Add(new PairedDevice(new BluetoothAddress(0x2836380D5E00UL + (ulong)i), "SmartMike+"));
-            typeof(MikeSession).GetProperty("State")!.SetValue(ch.Session, MikeState.Streaming);
-            sessions.Add(ch.Session);
+            typeof(MikeSession).GetProperty("State")!.SetValue(ch.Session!, MikeState.Streaming);
+            sessions.Add(ch.Session!);
         }
         return (hub, sessions);
     }
@@ -838,7 +838,7 @@ public class HubTakeTests
     [InlineData(RecordingFormat.Mp4, 2, 1)]
     public async Task RecordsTake(RecordingFormat format, int mics, int expectedFiles)
     {
-        var root = Path.Combine(Path.GetTempPath(), "smartmike_hubtake_" + Guid.NewGuid().ToString("N"));
+        var root = Path.Combine(Path.GetTempPath(), "plural_hubtake_" + Guid.NewGuid().ToString("N"));
         try
         {
             var (hub, sessions) = NewHub(mics, true);
@@ -866,7 +866,7 @@ public class HubTakeTests
             Assert.Equal(expectedFiles == 1, share.EndsWith(format.Extension()));
             if (format == RecordingFormat.Mp4 || format == RecordingFormat.Mkv)
             {
-                Assert.True(File.ReadAllBytes(take.Files[0]).AsSpan().IndexOf(Encoding.UTF8.GetBytes(hub.Channels[0].Session.DisplayName)) > 0);
+                Assert.True(File.ReadAllBytes(take.Files[0]).AsSpan().IndexOf(Encoding.UTF8.GetBytes(hub.Channels[0].Source.DisplayName)) > 0);
             }
         }
         finally

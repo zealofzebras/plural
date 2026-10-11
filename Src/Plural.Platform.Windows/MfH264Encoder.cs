@@ -1,10 +1,10 @@
 using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
 using SharpGen.Runtime;
-using SmartMike.Core.Platform;
+using Plural.Core.Platform;
 using Vortice.MediaFoundation;
 
-namespace SmartMike.Platform.Windows;
+namespace Plural.Platform.Windows;
 
 /// <summary>
 /// H.264 encoder MFT wrapper (NV12 in, Annex-B out). Hardware MFTs are tried first, then software ones; both synchronous and

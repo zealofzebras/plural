@@ -2,11 +2,11 @@ using System;
 using Avalonia;
 using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Markup.Xaml;
-using SmartMike.App.Services;
-using SmartMike.App.ViewModels;
-using SmartMike.App.Views;
+using Plural.App.Services;
+using Plural.App.ViewModels;
+using Plural.App.Views;
 
-namespace SmartMike.App;
+namespace Plural.App;
 
 public partial class App : Application
 {

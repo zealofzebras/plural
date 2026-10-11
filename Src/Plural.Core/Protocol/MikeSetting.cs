@@ -1,4 +1,4 @@
-namespace SmartMike.Core.Protocol;
+namespace Plural.Core.Protocol;
 
 /// <summary>
 /// Device settings written with the generic TLV (<c>m.b.b</c>). Writes are not acknowledged

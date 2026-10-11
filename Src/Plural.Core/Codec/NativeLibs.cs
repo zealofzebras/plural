@@ -1,7 +1,7 @@
 using System.Reflection;
 using System.Runtime.InteropServices;
 
-namespace SmartMike.Core.Codec;
+namespace Plural.Core.Codec;
 
 /// <summary>
 /// Single DllImport resolver for Core's native libraries (only one resolver can be registered per assembly).

@@ -4,11 +4,11 @@ using System.Linq;
 using System.Threading.Tasks;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
-using SmartMike.Core.Platform;
-using SmartMike.Core.Protocol;
-using SmartMike.Core.Session;
+using Plural.Core.Platform;
+using Plural.Core.Protocol;
+using Plural.Core.Session;
 
-namespace SmartMike.App.ViewModels;
+namespace Plural.App.ViewModels;
 
 /// <summary>"None" or a real output device, for the per-mic output picker.</summary>
 public sealed record OutputOption(AudioOutputDevice? Device)
@@ -24,10 +24,16 @@ public partial class MikeViewModel : ViewModelBase
     private int _peakHoldTicks;
 
     public MikeChannel Channel { get; }
-    private MikeSession Session => Channel.Session;
+    private IMicSource Source => Channel.Source;
+    /// <summary>Null for a local (OS) microphone.</summary>
+    private MikeSession? Session => Channel.Session;
 
-    public string Name => Session.DisplayName;
-    public string Address => Session.Device.Address.ToString();
+    public string Name => Source.DisplayName;
+
+    /// <summary>SmartMikes have device settings, battery and headphone status; local mics only have the output picker.</summary>
+    public bool IsSmartMike => Session is not null;
+    public bool IsLocal => Session is null;
+    public string MissingText => IsSmartMike ? "Not paired" : "Not connected";
 
     [ObservableProperty] public partial string StateText { get; set; } = "Off";
     [ObservableProperty] public partial bool IsConnecting { get; set; }
@@ -45,6 +51,8 @@ public partial class MikeViewModel : ViewModelBase
     [ObservableProperty] public partial bool IsBatteryLow { get; set; }
     [ObservableProperty] public partial bool HasHeadphones { get; set; }
     [ObservableProperty] public partial bool IsExpanded { get; set; }
+    [ObservableProperty] public partial bool NotPaired { get; set; }
+    [ObservableProperty] public partial bool CanRemove { get; set; } = true;
     [ObservableProperty] public partial string? Error { get; set; }
     [ObservableProperty] public partial OutputOption? SelectedOutput { get; set; }
 
@@ -69,12 +77,15 @@ public partial class MikeViewModel : ViewModelBase
     partial void OnIsBusyChanged(bool value) => OnPropertyChanged(nameof(ConnectButtonText));
 
     [RelayCommand]
+    private Task RemoveAsync() => _owner.RemoveMikeAsync(this);
+
+    [RelayCommand]
     private void ToggleExpanded() => IsExpanded = !IsExpanded;
 
     [RelayCommand]
     private async Task ToggleConnectionAsync()
     {
-        if (IsStreaming || Session.State is MikeState.Ready or MikeState.Streaming)
+        if (IsStreaming || Source.State is MikeState.Ready or MikeState.Streaming)
         {
             await DisconnectAsync();
         }
@@ -86,7 +97,7 @@ public partial class MikeViewModel : ViewModelBase
 
     public async Task ConnectAsync()
     {
-        if (IsBusy || Session.State is MikeState.Ready or MikeState.Streaming)
+        if (IsBusy || Source.State is MikeState.Connecting or MikeState.Ready or MikeState.Streaming)
         {
             return;
         }
@@ -94,14 +105,26 @@ public partial class MikeViewModel : ViewModelBase
         Error = null;
         try
         {
-            await Session.ConnectAsync();
-            ApplyReportedSettings();
-            Session.Set(MikeSetting.Agc, Agc ? 1 : 0);
-            if (!Agc)
+            if (Session is { } session)
             {
-                Session.Set(MikeSetting.MicGain, MicGain);
+                await session.ConnectAsync();
+                ApplyReportedSettings();
+                session.Set(MikeSetting.Agc, Agc ? 1 : 0);
+                if (!Agc)
+                {
+                    session.Set(MikeSetting.MicGain, MicGain);
+                }
+                session.StartAudio(AudioQuality.High);
             }
-            Session.StartAudio(AudioQuality.High);
+            else if (Channel.LocalMic is { } mic)
+            {
+                if (!await _owner.EnsureMicrophonePermissionAsync())
+                {
+                    Error = "Microphone permission is needed to use this mic.";
+                    return;
+                }
+                await mic.ConnectAsync();
+            }
             Channel.SetOutput(SelectedOutput?.Device);
         }
         catch (Exception ex)
@@ -121,7 +144,7 @@ public partial class MikeViewModel : ViewModelBase
         try
         {
             Channel.SetOutput(null);
-            await Session.DisconnectAsync();
+            await Source.DisconnectAsync();
         }
         finally
         {
@@ -132,6 +155,10 @@ public partial class MikeViewModel : ViewModelBase
 
     private void ApplyReportedSettings()
     {
+        if (Session is null)
+        {
+            return;
+        }
         _applyingDeviceValues = true;
         try
         {
@@ -153,7 +180,7 @@ public partial class MikeViewModel : ViewModelBase
 
     partial void OnSelectedOutputChanged(OutputOption? value)
     {
-        if (Session.State == MikeState.Streaming)
+        if (Source.State == MikeState.Streaming)
         {
             Channel.SetOutput(value?.Device);
         }
@@ -166,7 +193,7 @@ public partial class MikeViewModel : ViewModelBase
 
     private void Send(MikeSetting setting, int value)
     {
-        if (_applyingDeviceValues || Session.State is not (MikeState.Ready or MikeState.Streaming))
+        if (_applyingDeviceValues || Session is null || Session.State is not (MikeState.Ready or MikeState.Streaming))
         {
             return;
         }
@@ -183,7 +210,7 @@ public partial class MikeViewModel : ViewModelBase
     /// <summary>Polled by the main view model's UI timer.</summary>
     public void Refresh()
     {
-        var s = Session;
+        var s = Source;
         IsStreaming = s.State == MikeState.Streaming;
         IsLost = s.State == MikeState.Failed;
         IsConnecting = !IsStreaming && (IsBusy || s.State is MikeState.Connecting or MikeState.Ready);
@@ -194,9 +221,10 @@ public partial class MikeViewModel : ViewModelBase
         }
         OnPropertyChanged(nameof(ConnectButtonText));
         IsRecording = Channel.RecordingPath is not null;
+        CanRemove = !_owner.IsRecordingUi && !IsRecording;
         RecordText = IsRecording ? $"REC {Channel.RecordedDuration:mm\\:ss}" : "";
 
-        if (s.BatteryPercent is { } b)
+        if (Session?.BatteryPercent is { } b)
         {
             HasBattery = true;
             BatteryText = $"{b}%";
@@ -207,7 +235,7 @@ public partial class MikeViewModel : ViewModelBase
         {
             HasBattery = false;
         }
-        HasHeadphones = s.HeadphonesPlugged == true;
+        HasHeadphones = Session?.HeadphonesPlugged == true;
 
         // Peak meter with a dB-ish scale (-60 dBFS … 0 dBFS → 0 … 100).
         var peak = IsStreaming ? s.PeakLevel : 0f;

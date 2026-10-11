@@ -1,11 +1,11 @@
-using SmartMike.Core.Audio;
-using SmartMike.Core.Platform;
-using SmartMike.Core.Recording;
+using Plural.Core.Audio;
+using Plural.Core.Platform;
+using Plural.Core.Recording;
 
-namespace SmartMike.Core.Session;
+namespace Plural.Core.Session;
 
 /// <summary>
-/// One mic as the app sees it: session + optional live output (virtual cable) + optional recorder.
+/// One mic as the app sees it: source (SmartMike or local input) + optional live output (virtual cable) + optional recorder.
 /// </summary>
 public sealed class MikeChannel : IAsyncDisposable
 {
@@ -14,7 +14,13 @@ public sealed class MikeChannel : IAsyncDisposable
     private IAudioSink? _sink;
     private JitterBuffer? _buffer;
 
-    public MikeSession Session { get; }
+    public IMicSource Source { get; }
+
+    /// <summary>The SmartMike session; null for a local (OS) microphone.</summary>
+    public MikeSession? Session => Source as MikeSession;
+
+    /// <summary>The local microphone; null for a SmartMike.</summary>
+    public LocalMic? LocalMic => Source as LocalMic;
     public AudioOutputDevice? Output => _sink?.Device;
     public JitterBuffer? OutputBuffer => _buffer;
     private Func<TimeSpan>? _recordedDuration;
@@ -34,14 +40,14 @@ public sealed class MikeChannel : IAsyncDisposable
     /// <summary>Live-output latency target.</summary>
     public TimeSpan OutputLatency { get; set; } = TimeSpan.FromMilliseconds(60);
 
-    public MikeChannel(MikeSession session, IAudioPlatform audio)
+    public MikeChannel(IMicSource source, IAudioPlatform audio)
     {
-        Session = session;
+        Source = source;
         _audio = audio;
-        Session.PcmReceived += OnPcm;
+        Source.PcmReceived += OnPcm;
     }
 
-    private void OnPcm(MikeSession s, ReadOnlySpan<short> mono, int rate)
+    private void OnPcm(IMicSource s, ReadOnlySpan<short> mono, int rate)
     {
         lock (_lock)
         {
@@ -64,9 +70,9 @@ public sealed class MikeChannel : IAsyncDisposable
             _sink = null;
             _buffer = null;
             _pendingOutput = device;
-            if (device is not null && Session.StreamFormat is { } fmt)
+            if (device is not null && Source.SampleRate is { } rate)
             {
-                OpenSink(device, fmt.SampleRate);
+                OpenSink(device, rate);
             }
         }
     }
@@ -80,9 +86,9 @@ public sealed class MikeChannel : IAsyncDisposable
 
     public async ValueTask DisposeAsync()
     {
-        Session.PcmReceived -= OnPcm;
+        Source.PcmReceived -= OnPcm;
         SetOutput(null);
-        await Session.DisposeAsync().ConfigureAwait(false);
+        await Source.DisposeAsync().ConfigureAwait(false);
     }
 }
 
@@ -97,29 +103,51 @@ public sealed class MikeHub : IAsyncDisposable
     public IAacEncoderFactory? Aac { get; }
     /// <summary>Cameras for MKV/MP4; null if the platform has no video support yet.</summary>
     public IVideoPlatform? Video { get; }
+    /// <summary>OS microphones (built-in, USB, Bluetooth headset, …); null if the platform has none.</summary>
+    public IAudioInputPlatform? Inputs { get; }
     public IReadOnlyList<MikeChannel> Channels => _channels;
     public bool IsRecording { get; private set; }
     public string? RecordingFolder { get; private set; }
 
-    public MikeHub(IBluetoothPlatform bluetooth, IAudioPlatform audio, IAacEncoderFactory? aac = null, IVideoPlatform? video = null)
+    public MikeHub(IBluetoothPlatform bluetooth, IAudioPlatform audio, IAacEncoderFactory? aac = null, IVideoPlatform? video = null,
+        IAudioInputPlatform? inputs = null)
     {
         Bluetooth = bluetooth;
         Audio = audio;
         Aac = aac;
         Video = video;
+        Inputs = inputs;
     }
 
     public IReadOnlyList<PairedDevice> FindSmartMikes() =>
         Bluetooth.GetPairedDevices().Where(d => d.LooksLikeSmartMike).ToList();
 
+    /// <summary>Microphones the OS offers (empty without <see cref="Inputs"/>).</summary>
+    public IReadOnlyList<AudioInputDevice> FindInputs() => Inputs?.GetInputDevices() ?? [];
+
     public MikeChannel Add(PairedDevice device)
     {
-        var existing = _channels.FirstOrDefault(c => c.Session.Device.Address == device.Address);
+        var existing = _channels.FirstOrDefault(c => c.Session?.Device.Address == device.Address);
         if (existing is not null)
         {
             return existing;
         }
         var ch = new MikeChannel(new MikeSession(device, Bluetooth), Audio);
+        _channels.Add(ch);
+        return ch;
+    }
+
+    /// <summary>Adds an OS microphone as its own channel (once per device).</summary>
+    public MikeChannel Add(AudioInputDevice device)
+    {
+        var inputs = Inputs ?? throw new NotSupportedException("This platform has no microphone input support.");
+        var id = LocalMic.IdFor(device);
+        var existing = _channels.FirstOrDefault(c => c.Source.Id == id);
+        if (existing is not null)
+        {
+            return existing;
+        }
+        var ch = new MikeChannel(new LocalMic(device, inputs), Audio);
         _channels.Add(ch);
         return ch;
     }
@@ -161,6 +189,32 @@ public sealed class MikeHub : IAsyncDisposable
     /// <exception cref="InvalidOperationException">Already recording, format unavailable, no camera for a video format, or no streaming mic.</exception>
     public string StartRecordingAll(string root)
     {
+        var (folder, stamp) = NewTakeFolder(root);
+        StartRecordingAll(folder, stamp);
+        return folder;
+    }
+
+    /// <summary>A free <c>root/yyyyMMdd_HHmmss[_n]</c> path (not created) and its stamp, used to name files.</summary>
+    public static (string Folder, string Stamp) NewTakeFolder(string root)
+    {
+        var stamp = DateTime.Now.ToString("yyyyMMdd_HHmmss");
+        var folder = Path.Combine(root, stamp);
+        for (var i = 2; Directory.Exists(folder); i++)
+        {
+            folder = Path.Combine(root, $"{stamp}_{i}");
+        }
+        return (folder, stamp);
+    }
+
+    /// <summary>True when <see cref="StartRecordingAll(string)"/> has a mic to record.</summary>
+    public bool HasStreamingMic => _channels.Any(c => c.Source.State == MikeState.Streaming);
+
+    /// <summary>Host-clock start (MediaClock ticks) of the take in progress, or of the last one.</summary>
+    public long RecordingStartTime { get; private set; }
+
+    /// <summary>Starts a take into <paramref name="folder"/> (created here), naming files with <paramref name="stamp"/>.</summary>
+    public void StartRecordingAll(string folder, string stamp)
+    {
         lock (_recLock)
         {
             if (_recorder is not null)
@@ -177,19 +231,14 @@ public sealed class MikeHub : IAsyncDisposable
             {
                 throw new InvalidOperationException("Video recording needs an open camera. Switch to Video mode and select a camera first.");
             }
-            var mics = _channels.Where(c => c.Session.State == MikeState.Streaming).ToList();
+            var mics = _channels.Where(c => c.Source.State == MikeState.Streaming).ToList();
             if (mics.Count == 0)
             {
                 throw new InvalidOperationException("No microphone is streaming. Connect a microphone first.");
             }
-            var stamp = DateTime.Now.ToString("yyyyMMdd_HHmmss");
-            var folder = Path.Combine(root, stamp);
-            for (var i = 2; Directory.Exists(folder); i++)
-            {
-                folder = Path.Combine(root, $"{stamp}_{i}");
-            }
             Directory.CreateDirectory(folder);
             var rec = TakeRecorder.Start(folder, stamp, settings, mics, Aac, settings.Format.IsVideo() ? camera : null);
+            RecordingStartTime = rec.StartTime;
             foreach (var (ch, path, track) in rec.Mics)
             {
                 ch.SetRecording(path, () => track.Duration);
@@ -197,7 +246,6 @@ public sealed class MikeHub : IAsyncDisposable
             _recorder = rec;
             IsRecording = true;
             RecordingFolder = folder;
-            return folder;
         }
     }
 

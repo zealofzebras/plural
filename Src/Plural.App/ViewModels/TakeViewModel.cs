@@ -5,9 +5,9 @@ using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
 using CommunityToolkit.Mvvm.Input;
-using SmartMike.Core.Recording;
+using Plural.Core.Recording;
 
-namespace SmartMike.App.ViewModels;
+namespace Plural.App.ViewModels;
 
 /// <summary>Facts about a take folder, gathered off the UI thread.</summary>
 public sealed record TakeData(string Folder, DateTime Time, RecordingFormat Format, int Files, long Size, TimeSpan? Duration, int? Mics)
@@ -23,7 +23,11 @@ public sealed record TakeData(string Folder, DateTime Time, RecordingFormat Form
         {
             try
             {
-                var files = Directory.GetFiles(dir).Where(f => !f.EndsWith(".zip", StringComparison.OrdinalIgnoreCase) && !f.EndsWith(".tmp", StringComparison.OrdinalIgnoreCase)).ToList();
+                // Takes with remote devices keep their files in one sub-folder per device, plus take.json.
+                var files = Directory.GetFiles(dir, "*", SearchOption.AllDirectories)
+                    .Where(f => FormatFromExtension(Path.GetExtension(f)) is not null)
+                    .OrderBy(f => Path.GetDirectoryName(f)!.Length).ThenBy(f => f, StringComparer.OrdinalIgnoreCase)
+                    .ToList();
                 if (files.Count == 0)
                 {
                     continue;

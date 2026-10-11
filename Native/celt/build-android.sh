@@ -3,7 +3,7 @@
 # Prerequisites:
 #   - Tools/ext/src/celt-0.7.1   https://downloads.xiph.org/releases/celt/celt-0.7.1.tar.gz
 #   - Android NDK r29 (sdkmanager "ndk;29.0.14206865"); override with ANDROID_NDK=<path>
-# API level 26 matches SupportedOSPlatformVersion of SmartMike.App.Android.
+# API level 26 matches SupportedOSPlatformVersion of Plural.App.Android.
 # 16 KB page alignment is required for Android 15+ devices.
 set -euo pipefail
 here="$(cd "$(dirname "$0")" && pwd)"

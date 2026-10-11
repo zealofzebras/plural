@@ -1,7 +1,7 @@
 using System.Buffers.Binary;
 using System.Text;
 
-namespace SmartMike.Core.Protocol;
+namespace Plural.Core.Protocol;
 
 /// <summary>Device identity from CUR_VERSION (<c>o.e</c>).</summary>
 public sealed record DeviceVersion(

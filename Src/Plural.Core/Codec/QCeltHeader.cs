@@ -1,4 +1,4 @@
-namespace SmartMike.Core.Codec;
+namespace Plural.Core.Codec;
 
 /// <summary>
 /// 4-byte QCELT frame header (from <c>CQCelt_Decoder::unpack_frame_header</c>):

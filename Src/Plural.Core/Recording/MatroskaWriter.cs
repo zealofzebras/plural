@@ -1,7 +1,7 @@
 using System.Buffers.Binary;
 using System.Text;
 
-namespace SmartMike.Core.Recording;
+namespace Plural.Core.Recording;
 
 /// <summary>Small EBML element builders.</summary>
 internal static class Ebml
@@ -216,7 +216,7 @@ public sealed class MatroskaWriter : IDisposable
         Put(UnknownSize8);
         _segmentDataStart = _pos;
 
-        const string app = "SmartMike Hub";
+        const string app = "Plural";
         var info = Ebml.Master(0x1549A966,
             Ebml.UInt(0x2AD7B1, 1_000_000), Ebml.Str(0x4D80, app), Ebml.Str(0x5741, app), Ebml.Str(0x7BA9, _title),
             Ebml.Float64(0x4489, 0));
@@ -255,7 +255,10 @@ public sealed class MatroskaWriter : IDisposable
             var video = new List<byte[]> { Ebml.UInt(0xB0, (ulong)t.Width), Ebml.UInt(0xBA, (ulong)t.Height) };
             if (t.RotationDegrees != 0)
             {
-                video.Add(Ebml.Master(0x7670, Ebml.UInt(0x7671, 0), Ebml.Float32(0x7675, t.RotationDegrees)));
+                // ProjectionPoseRoll is counter-clockwise (Matroska spec; FFmpeg maps it to a display matrix),
+                // while RotationDegrees is the clockwise rotation needed to show the frames upright.
+                var roll = (360 - t.RotationDegrees % 360) % 360;
+                video.Add(Ebml.Master(0x7670, Ebml.UInt(0x7671, 0), Ebml.Float32(0x7675, roll)));
             }
             parts.Add(Ebml.Master(0xE0, video.ToArray()));
         }

@@ -1,5 +1,5 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
-  <!-- Shared UI (views, view models). Platform heads: SmartMike.App.Desktop, SmartMike.App.Android. -->
+  <!-- Shared UI (views, view models). Platform heads: Plural.App.Desktop, Plural.App.Android. -->
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
     <Nullable>enable</Nullable>
@@ -21,6 +21,6 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\SmartMike.Core\SmartMike.Core.csproj" />
+    <ProjectReference Include="..\Plural.Core\Plural.Core.csproj" />
   </ItemGroup>
 </Project>

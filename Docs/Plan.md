@@ -37,12 +37,12 @@
 - [ ] Install a virtual audio cable (needs ARM64 driver support) so apps can record the bridge as a microphone
 - [ ] Optional: tray app / auto-reconnect / run at startup
 
-## Phase 3b — SmartMike Hub app (C# / Avalonia) → [MikeHub/Design.md](MikeHub/Design.md)
+## Phase 3b — Plural app (C# / Avalonia) → [Plural/Design.md](Plural/Design.md)
 - [x] Core engine + tests (ARM64 + x64)
 - [x] Windows platform layer (RFCOMM, WASAPI)
 - [x] CLI runner, verified on hardware
 - [x] UI v1: mic cards, settings, Record All
-- [x] Recording formats (WAV, M4A, MP3, MKA, MKV, MP4), camera video, UI redesign with persisted settings: built, 46 Core tests pass (see [MikeHub/Recording.md](MikeHub/Recording.md))
+- [x] Recording formats (WAV, M4A, MP3, MKA, MKV, MP4), camera video, UI redesign with persisted settings: built, 46 Core tests pass (see [Plural/Recording.md](Plural/Recording.md))
 - [x] Windows video: 1080p30 H.264 verified on Surface arm64 + x64
 - [ ] Hardware test of the new formats and camera with real mics (Windows and Pixel 8); Android camera and AAC not yet run
 - [ ] Measure audio-video latency (clap test) and compensate; verify MKV rotation sign in players

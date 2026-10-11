@@ -3,10 +3,10 @@ using Android.Content.PM;
 using Android.OS;
 using Avalonia.Android;
 
-namespace SmartMike.App.Android;
+namespace Plural.App.Android;
 
 [Activity(
-    Label = "SmartMike Hub",
+    Label = "Plural",
     Theme = "@style/MyTheme.NoActionBar",
     Icon = "@drawable/icon",
     MainLauncher = true,
@@ -21,6 +21,12 @@ public class MainActivity : AvaloniaMainActivity
     {
         Current = this;
         base.OnCreate(savedInstanceState);
+#if DEBUG
+        if (Intent?.GetBooleanExtra("selftest_video", false) == true)
+        {
+            VideoSelfTest.Run(this);
+        }
+#endif
     }
 
     protected override void OnResume()

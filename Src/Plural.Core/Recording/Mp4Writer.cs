@@ -1,7 +1,7 @@
 using System.Buffers.Binary;
 using System.Text;
 
-namespace SmartMike.Core.Recording;
+namespace Plural.Core.Recording;
 
 /// <summary>
 /// MP4 / M4A muxer: ftyp, mdat (64-bit size) written first, moov at the end. Video: avc1 + avcC (length-prefixed samples),

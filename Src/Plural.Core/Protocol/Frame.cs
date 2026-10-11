@@ -1,6 +1,6 @@
 using System.Buffers.Binary;
 
-namespace SmartMike.Core.Protocol;
+namespace Plural.Core.Protocol;
 
 /// <summary>
 /// Swiss SPP framing. All integers big-endian. See Docs/Protocol/SPP-Framing.md.

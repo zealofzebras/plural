@@ -2,7 +2,7 @@ using Android.Runtime;
 using Avalonia;
 using Avalonia.Android;
 
-namespace SmartMike.App.Android;
+namespace Plural.App.Android;
 
 [global::Android.App.Application]
 public class Application : AvaloniaAndroidApplication<App>

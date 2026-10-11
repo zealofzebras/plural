@@ -1,8 +1,8 @@
 using System.Runtime.InteropServices;
 using Android.Media;
-using SmartMike.Core.Platform;
+using Plural.Core.Platform;
 
-namespace SmartMike.Platform.Android;
+namespace Plural.Platform.Android;
 
 public sealed class AndroidAacEncoderFactory : IAacEncoderFactory
 {

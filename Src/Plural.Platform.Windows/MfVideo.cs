@@ -1,11 +1,11 @@
 using System.Diagnostics;
 using System.Runtime.Versioning;
 using SharpGen.Runtime;
-using SmartMike.Core.Platform;
-using SmartMike.Core.Recording;
+using Plural.Core.Platform;
+using Plural.Core.Recording;
 using Vortice.MediaFoundation;
 
-namespace SmartMike.Platform.Windows;
+namespace Plural.Platform.Windows;
 
 /// <summary>Media Foundation camera enumeration and capture (source reader + H.264 encoder MFT).</summary>
 [SupportedOSPlatform("windows")]
@@ -50,7 +50,7 @@ public sealed class MfVideoPlatform : IVideoPlatform
 public sealed unsafe class MfVideoCapture : IVideoCapture
 {
     private const string PrivacyMessage =
-        "Camera access is blocked. Enable Settings -> Privacy & security -> Camera -> \"Let desktop apps access your camera\" and try again.";
+        "Camera access is blocked or the camera is in use by another app. Close other apps using it, and enable Settings -> Privacy & security -> Camera -> \"Let desktop apps access your camera\".";
     private const int MF_E_HW_MFT_FAILED_START_STREAMING = unchecked((int)0xC00D3704);
     private const int MF_E_NO_MORE_TYPES = unchecked((int)0xC00D36B9);
     private static readonly Guid ReadWriteEnableHardwareTransforms = new("a634a91c-822b-41b9-a494-4de4643612b0");
@@ -448,7 +448,7 @@ public sealed unsafe class MfVideoCapture : IVideoCapture
         {
             if (_spare is not null || _disposed) return;
             int w = Width, h = Height, fps = FrameRate, br = _settings.BitRate;
-            _spare = Task.Run(() => MfH264Encoder.Create(w, h, fps, br, allowHardware: Environment.GetEnvironmentVariable("SMARTMIKE_SOFTWARE_H264") != "1", _encoderLog));
+            _spare = Task.Run(() => MfH264Encoder.Create(w, h, fps, br, allowHardware: Environment.GetEnvironmentVariable("PLURAL_SOFTWARE_H264") != "1", _encoderLog));
         }
     }
 

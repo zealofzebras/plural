@@ -1,10 +1,10 @@
 using System.Globalization;
 using Android.Content;
 using Android.Media;
-using SmartMike.Core.Audio;
-using SmartMike.Core.Platform;
+using Plural.Core.Audio;
+using Plural.Core.Platform;
 
-namespace SmartMike.Platform.Android;
+namespace Plural.Platform.Android;
 
 /// <summary>Live monitoring through AudioTrack to the phone speaker, headphones or a Bluetooth/USB output.</summary>
 public sealed class AndroidAudio(Context context) : IAudioPlatform

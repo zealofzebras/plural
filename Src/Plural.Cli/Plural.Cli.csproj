@@ -1,8 +1,8 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <ItemGroup>
-    <ProjectReference Include="..\SmartMike.Core\SmartMike.Core.csproj" />
-    <ProjectReference Include="..\SmartMike.Platform.Windows\SmartMike.Platform.Windows.csproj" />
+    <ProjectReference Include="..\Plural.Core\Plural.Core.csproj" />
+    <ProjectReference Include="..\Plural.Platform.Windows\Plural.Platform.Windows.csproj" />
   </ItemGroup>
 
   <PropertyGroup>

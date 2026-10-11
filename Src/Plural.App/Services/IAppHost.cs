@@ -1,7 +1,9 @@
+using System.Collections.Generic;
 using System.Threading.Tasks;
-using SmartMike.Core.Session;
+using Plural.Core.Remote;
+using Plural.Core.Session;
 
-namespace SmartMike.App.Services;
+namespace Plural.App.Services;
 
 /// <summary>What the shared UI needs from the platform head (Desktop, Android, …).</summary>
 public interface IAppHost
@@ -24,6 +26,9 @@ public interface IAppHost
     /// <summary>True when <see cref="ShareFile"/> works (Android share sheet).</summary>
     bool CanShare { get; }
 
+    /// <summary>Opens a web page in the system browser.</summary>
+    void OpenUrl(string url);
+
     /// <summary>Opens <paramref name="folder"/> in the system file manager.</summary>
     void OpenFolder(string folder);
 
@@ -36,9 +41,21 @@ public interface IAppHost
     /// <summary>Asks for camera access before opening a camera. Returns false if denied.</summary>
     Task<bool> EnsureCameraPermissionAsync();
 
+    /// <summary>Asks for microphone access before opening a local mic. Returns false if denied.</summary>
+    Task<bool> EnsureMicrophonePermissionAsync();
+
     /// <summary>JSON file where the app persists its settings.</summary>
     string SettingsPath { get; }
 
-    /// <summary>Called when recording starts/stops, e.g. to keep the device awake.</summary>
+    /// <summary>Called when recording starts/stops (or remote control begins/ends), e.g. to keep the device awake.</summary>
     void OnRecordingChanged(bool recording);
+
+    /// <summary>Name other devices see in remote mode (computer name, phone model).</summary>
+    string DeviceName { get; }
+
+    /// <summary>"Windows", "Android", …</summary>
+    string PlatformName { get; }
+
+    /// <summary>Ways to find and reach other apps (Wi-Fi, Bluetooth); the UI never names them.</summary>
+    IReadOnlyList<IRemoteTransport> CreateRemoteTransports(MikeHub hub);
 }

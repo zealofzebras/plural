@@ -1,6 +1,6 @@
 using System.Buffers.Binary;
 
-namespace SmartMike.Core.Audio;
+namespace Plural.Core.Audio;
 
 /// <summary>Minimal streaming 16-bit PCM WAV writer; header sizes are patched on dispose.</summary>
 public sealed class WavWriter : IDisposable

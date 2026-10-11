@@ -1,4 +1,4 @@
-namespace SmartMike.Core.Recording;
+namespace Plural.Core.Recording;
 
 /// <summary>H.264 Annex-B helpers for the MP4 / Matroska muxers.</summary>
 public static class H264

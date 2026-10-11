@@ -5,8 +5,8 @@
     <TargetFramework>net10.0</TargetFramework>
     <Nullable>enable</Nullable>
     <ApplicationManifest>app.manifest</ApplicationManifest>
-    <AssemblyName>SmartMikeHub</AssemblyName>
-    <RootNamespace>SmartMike.App.Desktop</RootNamespace>
+    <AssemblyName>Plural</AssemblyName>
+    <RootNamespace>Plural.App.Desktop</RootNamespace>
   </PropertyGroup>
 
   <ItemGroup>
@@ -14,7 +14,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\SmartMike.App\SmartMike.App.csproj" />
-    <ProjectReference Include="..\SmartMike.Platform.Windows\SmartMike.Platform.Windows.csproj" />
+    <ProjectReference Include="..\Plural.App\Plural.App.csproj" />
+    <ProjectReference Include="..\Plural.Platform.Windows\Plural.Platform.Windows.csproj" />
   </ItemGroup>
 </Project>

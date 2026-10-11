@@ -1,8 +1,8 @@
-using SmartMike.Core.Audio;
-using SmartMike.Core.Platform;
-using SmartMike.Core.Session;
+using Plural.Core.Audio;
+using Plural.Core.Platform;
+using Plural.Core.Session;
 
-namespace SmartMike.Core.Recording;
+namespace Plural.Core.Recording;
 
 /// <summary>Result of a finished recording.</summary>
 public sealed record RecordedTake(string Folder, RecordingFormat Format, IReadOnlyList<string> Files, TimeSpan Duration)
@@ -24,7 +24,11 @@ public static class TakeExport
     public static string GetShareFile(string takeFolder)
     {
         var folder = takeFolder.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-        var files = Directory.GetFiles(folder).Where(f => !f.EndsWith(".zip", StringComparison.OrdinalIgnoreCase)).OrderBy(f => f, StringComparer.OrdinalIgnoreCase).ToList();
+        // Takes with remote devices hold one sub-folder per device and take.json: the zip keeps that layout.
+        var files = Directory.GetFiles(folder, "*", SearchOption.AllDirectories)
+            .Where(f => !f.EndsWith(".zip", StringComparison.OrdinalIgnoreCase) && !f.EndsWith(".tmp", StringComparison.OrdinalIgnoreCase)
+                && !f.EndsWith(".part", StringComparison.OrdinalIgnoreCase))
+            .OrderBy(f => f, StringComparer.OrdinalIgnoreCase).ToList();
         if (files.Count == 0)
         {
             throw new FileNotFoundException("The take folder contains no recordings.", folder);
@@ -44,7 +48,7 @@ public static class TakeExport
         {
             foreach (var f in files)
             {
-                var e = za.CreateEntry(Path.GetFileName(f), System.IO.Compression.CompressionLevel.Fastest);
+                var e = za.CreateEntry(Path.GetRelativePath(folder, f).Replace('\\', '/'), System.IO.Compression.CompressionLevel.Fastest);
                 using var es = e.Open();
                 using var src = new FileStream(f, FileMode.Open, FileAccess.Read, FileShare.Read);
                 src.CopyTo(es);
@@ -351,7 +355,7 @@ internal sealed class TakeRecorder
     private readonly bool[] _failed;
     private readonly List<string> _errors = [];
     private readonly ClockLockedTrack[] _tracks;
-    private readonly List<(MikeSession Session, PcmHandler Handler)> _subs = [];
+    private readonly List<(IMicSource Source, PcmHandler Handler)> _subs = [];
     private readonly IVideoCapture? _camera;
     private readonly Action<EncodedSample>? _videoHandler;
     private readonly TaskCompletionSource _done = new(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -360,6 +364,9 @@ internal sealed class TakeRecorder
 
     public string Folder { get; }
     public RecordingFormat Format { get; }
+
+    /// <summary>Host-clock time (MediaClock ticks) that sample 0 of every track belongs to.</summary>
+    public long StartTime => _t0;
     public IReadOnlyList<string> Files => _output.Files;
     public IReadOnlyList<(MikeChannel Channel, string? Path, ClockLockedTrack Track)> Mics { get; }
 
@@ -392,7 +399,7 @@ internal sealed class TakeRecorder
         IAacEncoderFactory? aac, IVideoCapture? camera)
     {
         var format = settings.Format;
-        var names = channels.Select(c => c.Session.DisplayName).ToList();
+        var names = channels.Select(c => c.Source.DisplayName).ToList();
         var output = CreateOutput(folder, stamp, settings, channels, names, aac, camera);
         TakeRecorder r;
         try
@@ -418,10 +425,10 @@ internal sealed class TakeRecorder
             case RecordingFormat.Mka:
                 return new MatroskaOutput(Single(), stamp, names, s.MatroskaAudio, null, 0);
             case RecordingFormat.Mkv:
-                return new MatroskaOutput(Single(), stamp, names, s.MatroskaAudio, camera, camera?.RotationDegrees ?? 0);
+                return new MatroskaOutput(Single(), stamp, names, s.MatroskaAudio, camera, camera?.EncodedRotationDegrees ?? 0);
             case RecordingFormat.Mp4:
                 return new Mp4Output(Single(), names, aac ?? throw new InvalidOperationException("No AAC encoder available."),
-                    s.AacBitRate, camera ?? throw new InvalidOperationException("No camera."), camera.RotationDegrees);
+                    s.AacBitRate, camera ?? throw new InvalidOperationException("No camera."), camera.EncodedRotationDegrees);
         }
 
         // one file per mic
@@ -465,15 +472,15 @@ internal sealed class TakeRecorder
 
     private void Begin()
     {
-        var thread = new Thread(WriterLoop) { Name = "SmartMike take writer", IsBackground = true };
+        var thread = new Thread(WriterLoop) { Name = "Plural take writer", IsBackground = true };
         thread.Start();
         for (var i = 0; i < _tracks.Length; i++)
         {
             var track = _tracks[i];
-            var session = Mics[i].Channel.Session;
+            var source = Mics[i].Channel.Source;
             PcmHandler h = (_, mono, rate) => track.Write(mono, rate);
-            session.PcmReceived += h;
-            _subs.Add((session, h));
+            source.PcmReceived += h;
+            _subs.Add((source, h));
         }
         if (_camera is not null)
         {

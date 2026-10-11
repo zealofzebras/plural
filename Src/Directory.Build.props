@@ -1,0 +1,8 @@
+<Project>
+  <!-- Shared by every project: product name and version shown in the app's About page. -->
+  <PropertyGroup>
+    <Product>Plural</Product>
+    <Version>0.1.0</Version>
+    <Copyright>© 2026 Plural · getplural.net</Copyright>
+  </PropertyGroup>
+</Project>

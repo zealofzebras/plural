@@ -1,6 +1,6 @@
 using System.IO;
 
-namespace SmartMike.App.Services;
+namespace Plural.App.Services;
 
 public static class MimeTypes
 {

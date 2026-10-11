@@ -4,9 +4,10 @@ using Avalonia.Controls;
 using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Input;
 using Avalonia.Interactivity;
-using SmartMike.App.ViewModels;
+using Avalonia.Styling;
+using Plural.App.ViewModels;
 
-namespace SmartMike.App.Views;
+namespace Plural.App.Views;
 
 public partial class MainView : UserControl
 {
@@ -14,7 +15,6 @@ public partial class MainView : UserControl
     private const double SidePaneWidth = 400;
     private const double CardMargin = 6;
     private const double BodyMargin = 12;
-    private bool? _compact;
     private IActivatableLifetime? _activatable;
 
     public MainView()
@@ -24,7 +24,7 @@ public partial class MainView : UserControl
         PreviewPanel.SizeChanged += (_, e) =>
         {
             var h = Math.Round(e.NewSize.Width * 9 / 16);
-            if (Math.Abs(PreviewPanel.Height - h) > 0.5 && e.NewSize.Width > 0)
+            if (e.NewSize.Width > 0 && (double.IsNaN(PreviewPanel.Height) || Math.Abs(PreviewPanel.Height - h) > 0.5))
             {
                 PreviewPanel.Height = h;
             }
@@ -82,8 +82,87 @@ public partial class MainView : UserControl
         }
     }
 
+    private void OnAboutScrimTapped(object? sender, TappedEventArgs e)
+    {
+        if (DataContext is MainViewModel vm)
+        {
+            vm.CloseAboutCommand.Execute(null);
+        }
+    }
+
+    private void OnDevicesScrimTapped(object? sender, TappedEventArgs e)
+    {
+        if (DataContext is MainViewModel vm)
+        {
+            vm.CloseDevicesCommand.Execute(null);
+        }
+    }
+
+    private void OnAddMicScrimTapped(object? sender, TappedEventArgs e)
+    {
+        if (DataContext is MainViewModel vm)
+        {
+            vm.CloseAddMicCommand.Execute(null);
+        }
+    }
+
+    private void OnTakesScrimTapped(object? sender, TappedEventArgs e)
+    {
+        if (DataContext is MainViewModel vm)
+        {
+            vm.CloseTakesCommand.Execute(null);
+        }
+    }
+
+    private MainViewModel? _vm;
+
+    protected override void OnDataContextChanged(EventArgs e)
+    {
+        base.OnDataContextChanged(e);
+        if (_vm is not null)
+        {
+            _vm.PropertyChanged -= OnVmPropertyChanged;
+        }
+        _vm = DataContext as MainViewModel;
+        if (_vm is not null)
+        {
+            _vm.PropertyChanged += OnVmPropertyChanged;
+            ApplyChrome();
+            Relayout();
+        }
+    }
+
+    private void OnVmPropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
+    {
+        switch (e.PropertyName)
+        {
+            case nameof(MainViewModel.ImmersiveActive):
+                ApplyChrome();
+                break;
+            case nameof(MainViewModel.ShowPreviewPanel):
+                Relayout();
+                break;
+        }
+    }
+
+    /// <summary>Immersive video floats the UI over the camera, so the subtree is forced dark for readable light content.</summary>
+    private void ApplyChrome()
+    {
+        var immersive = _vm?.ImmersiveActive == true;
+        Root.Classes.Set("immersive", immersive);
+        Scope.RequestedThemeVariant = immersive ? ThemeVariant.Dark : ThemeVariant.Default;
+    }
+
+    private void Relayout()
+    {
+        _layoutKey = null;
+        ApplyLayout(Bounds.Width);
+    }
+
+    private string? _layoutKey;
+
     /// <summary>
-    /// Phone: one column (preview, mics, takes). Wide: preview and takes in a 400 dp side column, mic cards fill the rest.
+    /// Phone (or no side preview): one column. Wide with the preview panel: preview in a 400 dp side column, mic cards fill the rest.
     /// Cards get a width so that they fill the row evenly.
     /// </summary>
     private void ApplyLayout(double width)
@@ -94,44 +173,41 @@ public partial class MainView : UserControl
         }
         var compact = width < CompactBelow;
         Root.Classes.Set("compact", compact);
+        Root.Classes.Set("short", Bounds.Height > 0 && Bounds.Height < 520);
 
-        double cardsArea;
-        if (compact)
+        var side = !compact && _vm?.ShowPreviewPanel == true;
+        var key = $"{compact}|{side}";
+        if (key != _layoutKey)
         {
-            if (_compact != true)
+            _layoutKey = key;
+            Grid.SetRow(PreviewPanel, 1);
+            Grid.SetColumn(PreviewPanel, 0);
+            if (side)
+            {
+                Body.ColumnDefinitions = new ColumnDefinitions($"{SidePaneWidth},*");
+                Grid.SetColumn(CardsPanel, 1);
+                Grid.SetRow(CardsPanel, 1);
+                Grid.SetRowSpan(CardsPanel, 2);
+            }
+            else
             {
                 Body.ColumnDefinitions = new ColumnDefinitions("*");
-                Grid.SetColumn(PreviewPanel, 0);
-                Grid.SetRow(PreviewPanel, 1);
                 Grid.SetColumn(CardsPanel, 0);
                 Grid.SetRow(CardsPanel, 2);
                 Grid.SetRowSpan(CardsPanel, 1);
-                Grid.SetColumn(TakesPanel, 0);
-                Grid.SetRow(TakesPanel, 3);
             }
-            cardsArea = width - 2 * BodyMargin;
         }
-        else
-        {
-            if (_compact != false)
-            {
-                Body.ColumnDefinitions = new ColumnDefinitions($"{SidePaneWidth},*");
-                Grid.SetColumn(PreviewPanel, 0);
-                Grid.SetRow(PreviewPanel, 1);
-                Grid.SetColumn(TakesPanel, 0);
-                Grid.SetRow(TakesPanel, 2);
-                Grid.SetColumn(CardsPanel, 1);
-                Grid.SetRow(CardsPanel, 1);
-                Grid.SetRowSpan(CardsPanel, 3);
-            }
-            cardsArea = width - 2 * BodyMargin - SidePaneWidth;
-        }
-        _compact = compact;
+
+        var cardsArea = width - 2 * BodyMargin - (side ? SidePaneWidth : 0);
 
         // Each card takes (cardsArea / n) minus its margins, where n is the number of cards that fit at >= 300 dp.
         var perCard = 2 * CardMargin;
         var n = Math.Max(1, (int)Math.Floor(cardsArea / (300 + perCard)));
         var cardWidth = Math.Min(480, cardsArea / n - perCard - 0.5);
         Resources["CardWidth"] = Math.Max(220, cardWidth);
+
+        // Compact recording strip: stacked rows on phones, a row of small meters on wide screens.
+        Resources["StripWidth"] = compact ? Math.Max(180, width - 24 - 16 - 12) : 240.0;
     }
+
 }

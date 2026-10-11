@@ -1,7 +1,7 @@
 using System.Runtime.InteropServices;
-using SmartMike.Core.Codec;
+using Plural.Core.Codec;
 
-namespace SmartMike.Core.Recording;
+namespace Plural.Core.Recording;
 
 /// <summary>MP3 encoder (LAME 3.100, native <c>mp3lame</c>): mono, CBR. Not thread-safe; use from one thread.</summary>
 public sealed partial class LameMp3Encoder : IDisposable

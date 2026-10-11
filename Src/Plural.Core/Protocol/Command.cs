@@ -1,4 +1,4 @@
-namespace SmartMike.Core.Protocol;
+namespace Plural.Core.Protocol;
 
 /// <summary>Command IDs of the Swiss SPP protocol (MetAudio <c>d4.o</c>). See Docs/Protocol/Commands.md.</summary>
 public enum Command : ushort

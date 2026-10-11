@@ -1,4 +1,4 @@
-namespace SmartMike.Core.Recording;
+namespace Plural.Core.Recording;
 
 /// <summary>Output container. Every mic is always its own stream (track or file) so takes can be edited later.</summary>
 public enum RecordingFormat

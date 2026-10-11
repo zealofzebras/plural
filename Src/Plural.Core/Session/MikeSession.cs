@@ -1,9 +1,9 @@
 using System.Diagnostics;
-using SmartMike.Core.Codec;
-using SmartMike.Core.Platform;
-using SmartMike.Core.Protocol;
+using Plural.Core.Codec;
+using Plural.Core.Platform;
+using Plural.Core.Protocol;
 
-namespace SmartMike.Core.Session;
+namespace Plural.Core.Session;
 
 public enum MikeState
 {
@@ -14,15 +14,12 @@ public enum MikeState
     Failed,
 }
 
-/// <summary>Receives decoded mono PCM (the SmartMike+ capsule is mono; the stream's L = R).</summary>
-public delegate void PcmHandler(MikeSession session, ReadOnlySpan<short> mono, int sampleRate);
-
 /// <summary>
 /// One SmartMike connection: handshake, clock sync, settings, audio start/stop and decoding.
 /// Protocol: Docs/Protocol/*.md. Thread-safe for calls from the UI thread; events fire on
 /// the receive thread.
 /// </summary>
-public sealed class MikeSession : IAsyncDisposable
+public sealed class MikeSession : IMicSource
 {
     private readonly IBluetoothPlatform _bluetooth;
     private FrameReader _reader = new();
@@ -73,6 +70,11 @@ public sealed class MikeSession : IAsyncDisposable
 
     /// <summary>Device name plus the last 4 hex digits of the address (unique per mic; serials end in "0000").</summary>
     public string DisplayName => $"{Device.Name} {Device.Address.ToString().Replace(":", "")[^4..]}";
+
+    public string Id => Device.Address.ToString();
+
+    /// <summary>Decoded PCM is mono; the stream's L = R.</summary>
+    public int? SampleRate => StreamFormat?.SampleRate;
 
     // ------------------------------------------------------------------ lifecycle
 

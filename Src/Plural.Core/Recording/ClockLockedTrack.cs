@@ -1,6 +1,6 @@
-using SmartMike.Core.Platform;
+using Plural.Core.Platform;
 
-namespace SmartMike.Core.Recording;
+namespace Plural.Core.Recording;
 
 /// <summary>
 /// Locks one mic's sample stream to the host clock (<see cref="MediaClock"/>): output sample n belongs to time t0 + n / 44100,

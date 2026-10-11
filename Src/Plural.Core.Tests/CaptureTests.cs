@@ -1,8 +1,8 @@
-using SmartMike.Core.Audio;
-using SmartMike.Core.Codec;
-using SmartMike.Core.Protocol;
+using Plural.Core.Audio;
+using Plural.Core.Codec;
+using Plural.Core.Protocol;
 
-namespace SmartMike.Core.Tests;
+namespace Plural.Core.Tests;
 
 /// <summary>Tests against a real 6 s capture from a SmartMike+ (FW 0.4.37), recorded by Tools/smartmike_client.py.</summary>
 [Collection("celt")]
@@ -82,7 +82,7 @@ public class CaptureTests
     [Fact]
     public void WavWriter_WritesValidHeader()
     {
-        var path = Path.Combine(Path.GetTempPath(), $"smartmike_test_{Guid.NewGuid():N}.wav");
+        var path = Path.Combine(Path.GetTempPath(), $"plural_test_{Guid.NewGuid():N}.wav");
         using (var w = new WavWriter(path, 44100, 1))
         {
             w.Write(new short[44100]);

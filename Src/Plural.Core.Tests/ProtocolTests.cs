@@ -1,6 +1,6 @@
-using SmartMike.Core.Protocol;
+using Plural.Core.Protocol;
 
-namespace SmartMike.Core.Tests;
+namespace Plural.Core.Tests;
 
 public class ProtocolTests
 {

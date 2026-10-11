@@ -1,4 +1,4 @@
-namespace SmartMike.Core.Audio;
+namespace Plural.Core.Audio;
 
 /// <summary>
 /// Thread-safe mono/multichannel sample FIFO between the Bluetooth receive thread and an

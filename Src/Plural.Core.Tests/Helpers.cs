@@ -1,7 +1,7 @@
 using System.Buffers.Binary;
 using System.Text;
 
-namespace SmartMike.Core.Tests;
+namespace Plural.Core.Tests;
 
 /// <summary>Independent minimal FLAC decoder (16-bit mono; constant / verbatim / fixed subframes) used to verify the encoder.</summary>
 public static class TestFlacDecoder
