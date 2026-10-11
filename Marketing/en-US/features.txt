@@ -1,0 +1,9 @@
+Record several microphones at once, one track per mic
+Every track stays in sync over long recordings
+Works with Sabinetek SmartMike+ wireless mics over Bluetooth
+Records built-in, USB, wired and Bluetooth headset mics
+WAV, M4A, MP3, MKA, MKV and MP4 recordings
+Optional camera video with every mic as its own audio track
+Link devices over Wi-Fi or Bluetooth and record together
+Live level meters, battery status and mic settings
+Send each mic to a virtual input for other apps

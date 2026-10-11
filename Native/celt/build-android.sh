@@ -8,9 +8,13 @@
 set -euo pipefail
 here="$(cd "$(dirname "$0")" && pwd)"
 root="$here/../.."
-src="$root/Tools/ext/src/celt-0.7.1/libcelt"
+src="${CELT_SRC:-$root/Tools/ext/src/celt-0.7.1}/libcelt"
 ndk="${ANDROID_NDK:-$LOCALAPPDATA/Android/Sdk/ndk/29.0.14206865}"
-clang="$ndk/toolchains/llvm/prebuilt/windows-x86_64/bin/clang.exe"
+case "$(uname -s)" in
+  Linux*)  clang="$ndk/toolchains/llvm/prebuilt/linux-x86_64/bin/clang" ;;
+  Darwin*) clang="$ndk/toolchains/llvm/prebuilt/darwin-x86_64/bin/clang" ;;
+  *)       clang="$ndk/toolchains/llvm/prebuilt/windows-x86_64/bin/clang.exe" ;;
+esac
 api=26
 files="bands.c celt.c cwrs.c entcode.c entdec.c entenc.c header.c kiss_fft.c laplace.c mdct.c modes.c pitch.c rangedec.c rangeenc.c rate.c quant_bands.c vq.c"
 

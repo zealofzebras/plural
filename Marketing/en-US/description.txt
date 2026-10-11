@@ -1,0 +1,26 @@
+Plural records several microphones at the same time, each on its own track, all kept in sync. Press Record once and every mic starts together; press Stop and the take is ready.
+
+Plural brings Sabinetek SmartMike+ wireless microphones back to life. The original app is gone, so Plural talks to the mics directly over Bluetooth. Connect two, three or more at once and see each mic's level, battery and connection state at a glance.
+
+No SmartMike? Plural also records the microphones you already have: the built-in mic, a USB or wired mic, or a Bluetooth headset. Mix and match them with wireless mics in the same take.
+
+RECORD EVERY VOICE
+• Several mics at once, one track per mic
+• Tracks stay aligned over long recordings
+• WAV, M4A, MP3, MKA, MKV or MP4
+• Optional video from the camera, with every mic as its own audio track
+
+RECORD TOGETHER
+• Link phones and computers over Wi-Fi or Bluetooth
+• One device starts and stops everyone
+• All files are collected into one take
+
+CONTROL EACH MIC
+• Live level meters and battery status
+• Mic gain, automatic gain control and monitor volume
+• Listen live on headphones or speakers
+• On Windows, send each mic to a virtual input so other apps can use it
+
+Plural is made for interviews, podcasts, lectures, vlogs and field recording.
+
+Plural is an independent app. It is not made by, endorsed by or affiliated with Sabinetek. SmartMike is a trademark of its owner.

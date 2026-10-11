@@ -1,0 +1,50 @@
+# Shared store settings. Per-language text lives in Marketing/<locale>/*.txt (see README.md).
+# Read by Tools/store/store_assets.py, which the release workflow runs.
+
+[app]
+name = "Plural"
+bundle_id = "net.getplural.app"          # Android applicationId, iOS/macOS bundle id
+website = "https://getplural.net"
+support_url = "https://getplural.net/support"
+privacy_url = "https://getplural.net/privacy"
+copyright = "2026 Plural"                # App Store shows "© <this>"
+default_locale = "en-US"
+
+[categories]
+app_store = "MUSIC"                      # primary category, App Store and Mac App Store
+app_store_secondary = "PRODUCTIVITY"
+play = "MUSIC_AND_AUDIO"
+microsoft = "Music"
+
+[brand]
+accent = "#0D6EFD"                       # logo blue
+background_top = "#0B1F4D"               # screenshot / feature graphic gradient
+background_bottom = "#0D6EFD"
+caption_color = "#FFFFFF"
+icon_background = "#FFFFFF"              # tile behind the logo on store icons
+logo = "brand/icon.png"                  # square transparent PNG, 1024 px or larger
+
+# Raw screenshots (real app captures) are framed with the captions in <locale>/captions.txt, in file-name order.
+# Each source folder feeds the store sizes below. Missing folders are reported, not fatal.
+[screenshots.sources]
+phone = "screenshots/phone"              # portrait phone captures (Android)
+tablet = "screenshots/tablet"            # portrait tablet captures; phone captures are used when empty
+desktop = "screenshots/desktop"          # landscape desktop captures (Windows/macOS window)
+
+[screenshots.targets]
+# name = [source, width, height]
+ios_iphone_69 = ["phone", 1320, 2868]    # App Store 6.9" iPhone (required)
+ios_iphone_65 = ["phone", 1284, 2778]    # App Store 6.5" iPhone
+ios_ipad_13 = ["tablet", 2064, 2752]     # App Store 13" iPad (required when the app runs on iPad)
+mac = ["desktop", 2880, 1800]            # Mac App Store 16:10
+play_phone = ["phone", 1080, 1920]       # Google Play phone, 9:16
+play_tablet_7 = ["tablet", 1200, 1920]   # Google Play 7" tablet
+play_tablet_10 = ["tablet", 1600, 2560]  # Google Play 10" tablet
+windows = ["desktop", 3840, 2160]        # Microsoft Store, 16:9 4K
+
+[microsoft]
+# Must match Partner Center > Product identity. CI can override them with repository variables
+# MSSTORE_IDENTITY_NAME, MSSTORE_PUBLISHER and MSSTORE_PUBLISHER_DISPLAY_NAME.
+identity_name = "Plural"
+publisher = "CN=Plural"
+publisher_display_name = "Plural"

@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- App bundle for the desktop head. Tokens {{...}} are filled by build-app.sh. -->
+<plist version="1.0">
+<dict>
+  <key>CFBundleDevelopmentRegion</key><string>en</string>
+  <key>CFBundleDisplayName</key><string>Plural</string>
+  <key>CFBundleExecutable</key><string>Plural</string>
+  <key>CFBundleIconFile</key><string>Plural</string>
+  <key>CFBundleIdentifier</key><string>{{BUNDLE_ID}}</string>
+  <key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
+  <key>CFBundleName</key><string>Plural</string>
+  <key>CFBundlePackageType</key><string>APPL</string>
+  <key>CFBundleShortVersionString</key><string>{{VERSION}}</string>
+  <key>CFBundleVersion</key><string>{{BUILD}}</string>
+  <key>LSApplicationCategoryType</key><string>public.app-category.music</string>
+  <key>LSMinimumSystemVersion</key><string>12.0</string>
+  <key>NSHighResolutionCapable</key><true/>
+  <key>NSHumanReadableCopyright</key><string>{{COPYRIGHT}}</string>
+  <key>ITSAppUsesNonExemptEncryption</key><false/>
+  <key>NSBluetoothAlwaysUsageDescription</key><string>Plural connects to your wireless microphones over Bluetooth.</string>
+  <key>NSMicrophoneUsageDescription</key><string>Plural records from the microphones you add.</string>
+  <key>NSCameraUsageDescription</key><string>Plural records video when you turn on the camera.</string>
+  <key>NSLocalNetworkUsageDescription</key><string>Plural finds and controls other Plural devices on your network to record together.</string>
+</dict>
+</plist>

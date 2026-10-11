@@ -22,7 +22,10 @@ Src/Plural.slnx
   Plural.App.Android/        Android head → net.getplural.app (AndroidHost, MainActivity)
   Plural.Cli/                headless runner: list | outputs | inputs | search | serve | control | run [--input X] [--output X] [--record N] [--format wav|m4a|mp3|mka|mkv|mp4]
 Native/celt/                    CELT 0.7.1 per RID; build-windows.sh (llvm-mingw), build-android.sh (NDK r29)
-Native/lame/                    LAME 3.100 (MP3) per RID; build-windows.sh, build-android.sh (same toolchains)
+Native/lame/                    LAME 3.100 (MP3) per RID; build-windows.sh, build-android.sh (same toolchains); build-macos.sh (both libs) for CI
+Marketing/                      store text per locale (*.txt), store.toml, brand/icon.png, screenshots/ — see Marketing/README.md
+Packaging/                      MSIX manifest + build-msix.ps1 (Windows), Info.plist/entitlements/build-app.sh (macOS)
+.github/workflows/release.yml   on release: builds Windows/Android/macOS(/iOS), store packages via Tools/store/store_assets.py, attaches to release
 Tools/                          Python reference tools (swiss_protocol.py, smartmike_client.py, qcelt_decode.py)
 App/Decompiled/                 decompiled MetAudio APK (reference only; large — search, don't read whole trees)
 Docs/                           App/, Firmware/, Protocol/, Plural/Design.md, Plan.md

@@ -7,9 +7,13 @@
 set -euo pipefail
 here="$(cd "$(dirname "$0")" && pwd)"
 root="$here/../.."
-lame="$root/Tools/ext/src/lame-3.100"
+lame="${LAME_SRC:-$root/Tools/ext/src/lame-3.100}"
 ndk="${ANDROID_NDK:-$LOCALAPPDATA/Android/Sdk/ndk/29.0.14206865}"
-clang="$ndk/toolchains/llvm/prebuilt/windows-x86_64/bin/clang.exe"
+case "$(uname -s)" in
+  Linux*)  clang="$ndk/toolchains/llvm/prebuilt/linux-x86_64/bin/clang" ;;
+  Darwin*) clang="$ndk/toolchains/llvm/prebuilt/darwin-x86_64/bin/clang" ;;
+  *)       clang="$ndk/toolchains/llvm/prebuilt/windows-x86_64/bin/clang.exe" ;;
+esac
 api=26
 files="VbrTag.c bitstream.c encoder.c fft.c gain_analysis.c id3tag.c lame.c newmdct.c presets.c psymodel.c quantize.c quantize_pvt.c reservoir.c set_get.c tables.c takehiro.c util.c vbrquantize.c version.c"
 

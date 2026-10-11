@@ -7,8 +7,9 @@
 set -euo pipefail
 here="$(cd "$(dirname "$0")" && pwd)"
 root="$here/../.."
-src="$root/Tools/ext/src/celt-0.7.1/libcelt"
-tc="$root/Tools/ext/llvm-mingw-20240619-ucrt-aarch64/bin"
+# CELT_SRC / LLVM_MINGW override the defaults (used by CI on Linux).
+src="${CELT_SRC:-$root/Tools/ext/src/celt-0.7.1}/libcelt"
+tc="${LLVM_MINGW:-$root/Tools/ext/llvm-mingw-20240619-ucrt-aarch64}/bin"
 files="bands.c celt.c cwrs.c entcode.c entdec.c entenc.c header.c kiss_fft.c laplace.c mdct.c modes.c pitch.c rangedec.c rangeenc.c rate.c quant_bands.c vq.c"
 
 for pair in x86_64:win-x64 aarch64:win-arm64; do

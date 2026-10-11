@@ -7,8 +7,9 @@
 set -euo pipefail
 here="$(cd "$(dirname "$0")" && pwd)"
 root="$here/../.."
-lame="$root/Tools/ext/src/lame-3.100"
-tc="$root/Tools/ext/llvm-mingw-20240619-ucrt-aarch64/bin"
+# LAME_SRC / LLVM_MINGW override the defaults (used by CI on Linux).
+lame="${LAME_SRC:-$root/Tools/ext/src/lame-3.100}"
+tc="${LLVM_MINGW:-$root/Tools/ext/llvm-mingw-20240619-ucrt-aarch64}/bin"
 files="VbrTag.c bitstream.c encoder.c fft.c gain_analysis.c id3tag.c lame.c newmdct.c presets.c psymodel.c quantize.c quantize_pvt.c reservoir.c set_get.c tables.c takehiro.c util.c vbrquantize.c version.c"
 
 for pair in x86_64:win-x64 aarch64:win-arm64; do
