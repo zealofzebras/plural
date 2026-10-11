@@ -1,0 +1,39 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Android head. Phones: android-arm64; emulator: android-x64. -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0-android</TargetFramework>
+    <SupportedOSPlatformVersion>26</SupportedOSPlatformVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>SmartMike.App.Android</RootNamespace>
+    <ApplicationId>com.zealofzebras.smartmikehub</ApplicationId>
+    <ApplicationVersion>1</ApplicationVersion>
+    <ApplicationDisplayVersion>0.1</ApplicationDisplayVersion>
+    <AndroidPackageFormat>apk</AndroidPackageFormat>
+    <AndroidEnableProfiledAot>false</AndroidEnableProfiledAot>
+    <RuntimeIdentifiers>android-arm64;android-x64</RuntimeIdentifiers>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <AndroidResource Include="Icon.png">
+      <Link>Resources\drawable\Icon.png</Link>
+    </AndroidResource>
+  </ItemGroup>
+
+  <!-- CELT 0.7.1, built by Native/celt/build-android.sh -->
+  <ItemGroup>
+    <AndroidNativeLibrary Include="..\..\Native\celt\runtimes\android-arm64\native\libcelt071.so" Abi="arm64-v8a" />
+    <AndroidNativeLibrary Include="..\..\Native\celt\runtimes\android-x64\native\libcelt071.so" Abi="x86_64" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Avalonia.Android" Version="12.1.4" />
+    <PackageReference Include="Xamarin.AndroidX.Core.SplashScreen" Version="1.0.1.15" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\SmartMike.App\SmartMike.App.csproj" />
+    <ProjectReference Include="..\SmartMike.Platform.Android\SmartMike.Platform.Android.csproj" />
+  </ItemGroup>
+</Project>

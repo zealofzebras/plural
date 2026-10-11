@@ -1,0 +1,12 @@
+Captures/
+App/Decompiled/
+Tools/ext/
+bin/
+obj/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+Firmware/Updater/extracted/
+Firmware/Updater/extracted_mac/
+Native/celt/runtimes/

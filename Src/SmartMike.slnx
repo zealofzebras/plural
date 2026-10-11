@@ -1,0 +1,10 @@
+<Solution>
+  <Project Path="SmartMike.App/SmartMike.App.csproj" />
+  <Project Path="SmartMike.App.Desktop/SmartMike.App.Desktop.csproj" />
+  <Project Path="SmartMike.App.Android/SmartMike.App.Android.csproj" />
+  <Project Path="SmartMike.Cli/SmartMike.Cli.csproj" />
+  <Project Path="SmartMike.Core.Tests/SmartMike.Core.Tests.csproj" />
+  <Project Path="SmartMike.Core/SmartMike.Core.csproj" />
+  <Project Path="SmartMike.Platform.Windows/SmartMike.Platform.Windows.csproj" />
+  <Project Path="SmartMike.Platform.Android/SmartMike.Platform.Android.csproj" />
+</Solution>

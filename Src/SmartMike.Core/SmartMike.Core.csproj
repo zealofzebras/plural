@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <IsAotCompatible>true</IsAotCompatible>
+  </PropertyGroup>
+
+  <!-- Native CELT 0.7.1 per RID (built from stock source, see Docs/Protocol/Audio.md).
+       Copied to runtimes/<rid>/native/ of every desktop app referencing Core; CeltDecoder picks the right one.
+       Android binaries are packaged by SmartMike.App.Android as lib/<abi>/libcelt071.so instead. -->
+  <ItemGroup>
+    <None Include="..\..\Native\celt\runtimes\**\*" Exclude="..\..\Native\celt\runtimes\android-*\**" LinkBase="runtimes" CopyToOutputDirectory="PreserveNewest" Visible="false" />
+  </ItemGroup>
+
+</Project>

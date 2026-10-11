@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Desktop head (Windows today; macOS/Linux hosts plug in via DesktopHost). -->
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <AssemblyName>SmartMikeHub</AssemblyName>
+    <RootNamespace>SmartMike.App.Desktop</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Avalonia.Desktop" Version="12.1.4" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\SmartMike.App\SmartMike.App.csproj" />
+    <ProjectReference Include="..\SmartMike.Platform.Windows\SmartMike.Platform.Windows.csproj" />
+  </ItemGroup>
+</Project>

@@ -1,0 +1,134 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:SmartMike.App.ViewModels"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             mc:Ignorable="d" d:DesignWidth="1000" d:DesignHeight="640"
+             x:Class="SmartMike.App.Views.MainView"
+             x:DataType="vm:MainViewModel">
+
+    <Design.DataContext>
+        <vm:MainViewModel />
+    </Design.DataContext>
+
+    <UserControl.Resources>
+        <!-- Updated from code-behind: 300 on wide screens, full width on phones. -->
+        <x:Double x:Key="CardWidth">300</x:Double>
+    </UserControl.Resources>
+
+    <UserControl.Styles>
+        <Style Selector="Border.card">
+            <Setter Property="Background" Value="{DynamicResource SystemControlBackgroundAltHighBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource SystemControlForegroundBaseLowBrush}" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="CornerRadius" Value="8" />
+            <Setter Property="Padding" Value="16" />
+            <Setter Property="Margin" Value="8" />
+            <Setter Property="Width" Value="{DynamicResource CardWidth}" />
+        </Style>
+        <Style Selector="TextBlock.label">
+            <Setter Property="Opacity" Value="0.7" />
+            <Setter Property="FontSize" Value="12" />
+            <Setter Property="Margin" Value="0,8,0,2" />
+        </Style>
+        <Style Selector="Button.record">
+            <Setter Property="Background" Value="#C62828" />
+            <Setter Property="Foreground" Value="White" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="Padding" Value="18,8" />
+        </Style>
+    </UserControl.Styles>
+
+    <DockPanel>
+        <!-- Toolbar: Record on the right, the rest wraps on narrow screens -->
+        <Border DockPanel.Dock="Top" Padding="16,12"
+                BorderBrush="{DynamicResource SystemControlForegroundBaseLowBrush}" BorderThickness="0,0,0,1">
+            <DockPanel>
+                <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
+                    <TextBlock Text="{Binding RecordingTime}" IsVisible="{Binding IsRecording}"
+                               FontSize="18" FontFamily="Consolas,Menlo,monospace" Foreground="#C62828"
+                               VerticalAlignment="Center" Margin="0,0,12,0" />
+                    <Button Classes="record" Content="{Binding RecordButtonText}"
+                            Command="{Binding ToggleRecordingCommand}" />
+                </StackPanel>
+                <WrapPanel VerticalAlignment="Center">
+                    <TextBlock Text="SmartMike Hub" FontSize="20" FontWeight="SemiBold"
+                               VerticalAlignment="Center" Margin="0,4,24,4" />
+                    <Button Content="Scan" Command="{Binding ScanCommand}" Margin="0,4,8,4" />
+                    <Button Content="Connect all" Command="{Binding ConnectAllCommand}" Margin="0,4,8,4" />
+                </WrapPanel>
+            </DockPanel>
+        </Border>
+
+        <!-- Status bar -->
+        <Border DockPanel.Dock="Bottom" Padding="16,8"
+                BorderBrush="{DynamicResource SystemControlForegroundBaseLowBrush}" BorderThickness="0,1,0,0">
+            <Grid ColumnDefinitions="*,Auto,Auto">
+                <TextBlock Grid.Column="0" Text="{Binding Status}" VerticalAlignment="Center"
+                           TextWrapping="Wrap" MaxLines="3" TextTrimming="CharacterEllipsis" Opacity="0.8" />
+                <TextBox Grid.Column="1" Text="{Binding RecordingRoot}" Width="340" Margin="8,0"
+                         IsVisible="{Binding CanChangeRecordingRoot}" />
+                <Button Grid.Column="2" Content="{Binding RecordingsActionText}" Command="{Binding OpenRecordingsCommand}"
+                        Margin="8,0,0,0" VerticalAlignment="Center" />
+            </Grid>
+        </Border>
+
+        <!-- Mic cards -->
+        <Panel>
+            <TextBlock IsVisible="{Binding !HasMikes}" TextWrapping="Wrap" MaxWidth="460"
+                       HorizontalAlignment="Center" VerticalAlignment="Center" TextAlignment="Center" Opacity="0.7"
+                       Text="No paired SmartMikes found. Pair each mic in your system's Bluetooth settings, then press Scan." Margin="24" />
+            <ScrollViewer Name="Cards">
+                <ItemsControl ItemsSource="{Binding Mikes}" Margin="8">
+                    <ItemsControl.ItemsPanel>
+                        <ItemsPanelTemplate>
+                            <WrapPanel />
+                        </ItemsPanelTemplate>
+                    </ItemsControl.ItemsPanel>
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate x:DataType="vm:MikeViewModel">
+                            <Border Classes="card">
+                                <StackPanel>
+                                    <Grid ColumnDefinitions="*,Auto">
+                                        <StackPanel>
+                                            <TextBlock Text="{Binding Name}" FontSize="16" FontWeight="SemiBold" />
+                                            <TextBlock Text="{Binding Address}" FontSize="11" Opacity="0.6" />
+                                        </StackPanel>
+                                        <TextBlock Grid.Column="1" Text="{Binding StateText}" VerticalAlignment="Top" />
+                                    </Grid>
+                                    <TextBlock Text="{Binding Details}" FontSize="12" Margin="0,6,0,0" />
+
+                                    <ProgressBar Value="{Binding Level}" Minimum="0" Maximum="100" Height="8"
+                                                 Margin="0,10,0,0" />
+
+                                    <Button Content="{Binding ConnectButtonText}" Command="{Binding ToggleConnectionCommand}"
+                                            IsEnabled="{Binding !IsBusy}" HorizontalAlignment="Stretch"
+                                            HorizontalContentAlignment="Center" Margin="0,12,0,0" />
+
+                                    <TextBlock Classes="label" Text="{Binding OutputLabel}" />
+                                    <ComboBox ItemsSource="{Binding Outputs}" SelectedItem="{Binding SelectedOutput}"
+                                              HorizontalAlignment="Stretch" />
+
+                                    <TextBlock Classes="label" Text="Mic gain" />
+                                    <Grid ColumnDefinitions="*,Auto">
+                                        <Slider Minimum="0" Maximum="100" Value="{Binding MicGain}"
+                                                IsEnabled="{Binding !Agc}" />
+                                        <CheckBox Grid.Column="1" Content="Auto" IsChecked="{Binding Agc}" Margin="8,0,0,0" />
+                                    </Grid>
+
+                                    <TextBlock Classes="label" Text="Headphone monitor" />
+                                    <Slider Minimum="0" Maximum="100" Value="{Binding MonitorVolume}" />
+
+                                    <CheckBox Content="Noise suppression" IsChecked="{Binding NoiseSuppression}" Margin="0,6,0,0" />
+
+                                    <TextBlock Text="{Binding Error}" IsVisible="{Binding Error, Converter={x:Static ObjectConverters.IsNotNull}}"
+                                               Foreground="#C62828" TextWrapping="Wrap" FontSize="12" Margin="0,8,0,0" />
+                                </StackPanel>
+                            </Border>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+            </ScrollViewer>
+        </Panel>
+    </DockPanel>
+</UserControl>

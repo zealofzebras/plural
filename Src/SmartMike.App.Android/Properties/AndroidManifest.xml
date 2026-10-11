@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android" android:installLocation="auto">
+	<!-- Android 11 and older: classic Bluetooth permissions (granted at install). -->
+	<uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30" />
+	<uses-permission android:name="android.permission.BLUETOOTH_ADMIN" android:maxSdkVersion="30" />
+	<!-- Android 12+: runtime permission to list paired devices and open RFCOMM sockets. No scanning needed. -->
+	<uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
+	<uses-feature android:name="android.hardware.bluetooth" android:required="true" />
+
+	<application android:label="SmartMike Hub" android:icon="@drawable/Icon">
+		<!-- Shares recordings (app-specific storage) with other apps. -->
+		<provider android:name="androidx.core.content.FileProvider"
+		          android:authorities="com.zealofzebras.smartmikehub.files"
+		          android:exported="false"
+		          android:grantUriPermissions="true">
+			<meta-data android:name="android.support.FILE_PROVIDER_PATHS" android:resource="@xml/file_paths" />
+		</provider>
+	</application>
+</manifest>
