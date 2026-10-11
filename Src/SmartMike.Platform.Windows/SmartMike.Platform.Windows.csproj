@@ -6,6 +6,7 @@
 
   <ItemGroup>
     <PackageReference Include="NAudio.Wasapi" Version="3.1.0" />
+    <PackageReference Include="Vortice.MediaFoundation" Version="3.8.3" />
   </ItemGroup>
 
   <PropertyGroup>

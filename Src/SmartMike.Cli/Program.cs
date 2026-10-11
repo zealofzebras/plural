@@ -104,12 +104,21 @@ async Task<int> Run(string[] a)
     if (recordSeconds > 0)
     {
         await Task.Delay(1000, cts.Token).ContinueWith(_ => { });
+        if (Opt("--format") is { } fmt)
+        {
+            hub.RecordingSettings = hub.RecordingSettings with { Format = Enum.Parse<SmartMike.Core.Recording.RecordingFormat>(fmt, ignoreCase: true) };
+        }
         var folder = hub.StartRecordingAll(Path.Combine(AppContext.BaseDirectory, "Recordings"));
         Console.WriteLine($"recording to {folder}");
         await Task.Delay(TimeSpan.FromSeconds(recordSeconds), cts.Token).ContinueWith(_ => { });
-        foreach (var f in hub.StopRecordingAll())
+        var take = await hub.StopRecordingAllAsync();
+        foreach (var f in take.Files)
         {
             Console.WriteLine($"saved {f}");
+        }
+        foreach (var e in take.Errors)
+        {
+            Console.WriteLine($"recording error: {e}");
         }
     }
     else

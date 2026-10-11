@@ -13,6 +13,7 @@
        Android binaries are packaged by SmartMike.App.Android as lib/<abi>/libcelt071.so instead. -->
   <ItemGroup>
     <None Include="..\..\Native\celt\runtimes\**\*" Exclude="..\..\Native\celt\runtimes\android-*\**" LinkBase="runtimes" CopyToOutputDirectory="PreserveNewest" Visible="false" />
+    <None Include="..\..\Native\lame\runtimes\**\*" Exclude="..\..\Native\lame\runtimes\android-*\**" LinkBase="runtimes" CopyToOutputDirectory="PreserveNewest" Visible="false" />
   </ItemGroup>
 
 </Project>

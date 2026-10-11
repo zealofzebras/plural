@@ -16,7 +16,7 @@ public sealed class AndroidHost(Context context) : IAppHost
     private const string FileProviderAuthority = "com.zealofzebras.smartmikehub.files";
     private static TaskCompletionSource<bool>? _permission;
 
-    public MikeHub CreateHub() => new(new AndroidBluetooth(context), new AndroidAudio(context));
+    public MikeHub CreateHub() => new(new AndroidBluetooth(context), new AndroidAudio(context), new AndroidAacEncoderFactory(), new AndroidVideoPlatform(context));
 
     /// <summary>App-specific storage: no storage permission needed; visible over USB under Android/data/&lt;app&gt;/files/Recordings.</summary>
     public string RecordingRoot =>
@@ -26,36 +26,27 @@ public sealed class AndroidHost(Context context) : IAppHost
 
     public string OutputLabel => "Live monitor";
 
-    public string RecordingsActionText => "Share recordings";
+    public bool CanOpenFolder => false;
 
-    /// <summary>Shares the WAV files of the last session (or the folder given) via the Android share sheet.</summary>
-    public void ShowRecordings(string folder)
+    public bool CanShare => true;
+
+    public void OpenFolder(string folder) =>
+        throw new NotSupportedException("Opening folders is not available on Android; use Share.");
+
+    /// <summary>Shares one recording (or a zip of a take) through the Android share sheet. The file must be under Recordings/ (see file_paths.xml).</summary>
+    public void ShareFile(string path, string mimeType)
     {
         var activity = MainActivity.Current ?? throw new InvalidOperationException("App is not visible.");
-        var files = Directory.Exists(folder)
-            ? Directory.GetFiles(folder, "*.wav", SearchOption.AllDirectories)
-            : [];
-        if (files.Length == 0)
+        if (!File.Exists(path))
         {
-            throw new InvalidOperationException("No recordings yet.");
+            throw new FileNotFoundException("The recording no longer exists.", path);
         }
-        var uris = new List<IParcelable>();
-        foreach (var f in files)
-        {
-            uris.Add(FileProvider.GetUriForFile(activity, FileProviderAuthority, new Java.IO.File(f))!);
-        }
-        var send = new Intent(uris.Count == 1 ? Intent.ActionSend : Intent.ActionSendMultiple);
-        send.SetType("audio/wav");
-        if (uris.Count == 1)
-        {
-            send.PutExtra(Intent.ExtraStream, uris[0]);
-        }
-        else
-        {
-            send.PutParcelableArrayListExtra(Intent.ExtraStream, uris);
-        }
+        var uri = FileProvider.GetUriForFile(activity, FileProviderAuthority, new Java.IO.File(path))!;
+        var send = new Intent(Intent.ActionSend);
+        send.SetType(mimeType);
+        send.PutExtra(Intent.ExtraStream, uri);
         send.AddFlags(ActivityFlags.GrantReadUriPermission);
-        activity.StartActivity(Intent.CreateChooser(send, "Share recordings"));
+        activity.StartActivity(Intent.CreateChooser(send, "Share recording"));
     }
 
     public Task<bool> EnsurePermissionsAsync()
@@ -65,8 +56,16 @@ public sealed class AndroidHost(Context context) : IAppHost
         {
             return Task.FromResult(true);
         }
-        const string connect = global::Android.Manifest.Permission.BluetoothConnect;
-        if (ContextCompat.CheckSelfPermission(context, connect) == Permission.Granted)
+        return RequestAsync(global::Android.Manifest.Permission.BluetoothConnect);
+    }
+
+    public Task<bool> EnsureCameraPermissionAsync() => RequestAsync(global::Android.Manifest.Permission.Camera);
+
+    public string SettingsPath => Path.Combine(context.FilesDir!.AbsolutePath, "settings.json");
+
+    private Task<bool> RequestAsync(string permission)
+    {
+        if (ContextCompat.CheckSelfPermission(context, permission) == Permission.Granted)
         {
             return Task.FromResult(true);
         }
@@ -77,7 +76,7 @@ public sealed class AndroidHost(Context context) : IAppHost
         }
         _permission?.TrySetResult(false);
         _permission = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
-        activity.RequestPermissions([connect], PermissionRequest);
+        activity.RequestPermissions([permission], PermissionRequest);
         return _permission.Task;
     }
 

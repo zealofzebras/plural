@@ -13,7 +13,7 @@ namespace SmartMike.App.ViewModels;
 /// <summary>"None" or a real output device, for the per-mic output picker.</summary>
 public sealed record OutputOption(AudioOutputDevice? Device)
 {
-    public string Name => Device is null ? "None (record only)" : (Device.IsVirtualCable ? "🔌 " : "") + Device.Name;
+    public string Name => Device is null ? "None (record only)" : (Device.IsVirtualCable ? "Cable: " : "") + Device.Name;
     public override string ToString() => Name;
 }
 
@@ -21,6 +21,7 @@ public partial class MikeViewModel : ViewModelBase
 {
     private readonly MainViewModel _owner;
     private bool _applyingDeviceValues;
+    private int _peakHoldTicks;
 
     public MikeChannel Channel { get; }
     private MikeSession Session => Channel.Session;
@@ -28,12 +29,22 @@ public partial class MikeViewModel : ViewModelBase
     public string Name => Session.DisplayName;
     public string Address => Session.Device.Address.ToString();
 
-    [ObservableProperty] public partial string StateText { get; set; } = "Disconnected";
+    [ObservableProperty] public partial string StateText { get; set; } = "Off";
+    [ObservableProperty] public partial bool IsConnecting { get; set; }
+    [ObservableProperty] public partial bool IsLost { get; set; }
     [ObservableProperty] public partial string Details { get; set; } = "";
     [ObservableProperty] public partial double Level { get; set; }
+    [ObservableProperty] public partial double PeakHold { get; set; }
     [ObservableProperty] public partial bool IsBusy { get; set; }
     [ObservableProperty] public partial bool IsStreaming { get; set; }
     [ObservableProperty] public partial bool IsRecording { get; set; }
+    [ObservableProperty] public partial string RecordText { get; set; } = "";
+    [ObservableProperty] public partial bool HasBattery { get; set; }
+    [ObservableProperty] public partial string BatteryText { get; set; } = "";
+    [ObservableProperty] public partial double BatteryFill { get; set; }
+    [ObservableProperty] public partial bool IsBatteryLow { get; set; }
+    [ObservableProperty] public partial bool HasHeadphones { get; set; }
+    [ObservableProperty] public partial bool IsExpanded { get; set; }
     [ObservableProperty] public partial string? Error { get; set; }
     [ObservableProperty] public partial OutputOption? SelectedOutput { get; set; }
 
@@ -46,7 +57,7 @@ public partial class MikeViewModel : ViewModelBase
     public IReadOnlyList<OutputOption> Outputs => _owner.Outputs;
     public string OutputLabel => _owner.OutputLabel;
 
-    public string ConnectButtonText => IsStreaming ? "Disconnect" : "Connect";
+    public string ConnectButtonText => IsBusy ? "Connecting…" : IsStreaming ? "Disconnect" : "Connect";
 
     public MikeViewModel(MikeChannel channel, MainViewModel owner)
     {
@@ -54,6 +65,11 @@ public partial class MikeViewModel : ViewModelBase
         _owner = owner;
         SelectedOutput = owner.Outputs.FirstOrDefault();
     }
+
+    partial void OnIsBusyChanged(bool value) => OnPropertyChanged(nameof(ConnectButtonText));
+
+    [RelayCommand]
+    private void ToggleExpanded() => IsExpanded = !IsExpanded;
 
     [RelayCommand]
     private async Task ToggleConnectionAsync()
@@ -104,7 +120,6 @@ public partial class MikeViewModel : ViewModelBase
         IsBusy = true;
         try
         {
-            Channel.StopRecording();
             Channel.SetOutput(null);
             await Session.DisconnectAsync();
         }
@@ -169,44 +184,47 @@ public partial class MikeViewModel : ViewModelBase
     public void Refresh()
     {
         var s = Session;
-        StateText = s.State switch
-        {
-            MikeState.Streaming => "● Live",
-            MikeState.Ready => "Connected",
-            MikeState.Connecting => "Connecting…",
-            MikeState.Failed => "Connection lost",
-            _ => "Disconnected",
-        };
+        IsStreaming = s.State == MikeState.Streaming;
+        IsLost = s.State == MikeState.Failed;
+        IsConnecting = !IsStreaming && (IsBusy || s.State is MikeState.Connecting or MikeState.Ready);
+        StateText = IsStreaming ? "Live" : IsConnecting ? (s.State == MikeState.Ready ? "Ready" : "Connecting") : IsLost ? "Lost" : "Off";
         if (s.State == MikeState.Failed && s.LastError is { } e)
         {
             Error = e;
         }
-        IsStreaming = s.State == MikeState.Streaming;
         OnPropertyChanged(nameof(ConnectButtonText));
         IsRecording = Channel.RecordingPath is not null;
+        RecordText = IsRecording ? $"REC {Channel.RecordedDuration:mm\\:ss}" : "";
 
-        var parts = new List<string>();
-        if (s.Version is { } v)
-        {
-            parts.Add($"FW {v.Firmware}");
-        }
         if (s.BatteryPercent is { } b)
         {
-            parts.Add($"Battery {b}%");
+            HasBattery = true;
+            BatteryText = $"{b}%";
+            BatteryFill = Math.Clamp(b, 0, 100) / 100.0 * 16;
+            IsBatteryLow = b <= 20;
         }
-        if (s.HeadphonesPlugged == true)
+        else
         {
-            parts.Add("🎧");
+            HasBattery = false;
         }
-        if (IsRecording)
-        {
-            parts.Add($"REC {Channel.RecordedDuration:mm\\:ss}");
-        }
-        Details = string.Join("  ·  ", parts);
+        HasHeadphones = s.HeadphonesPlugged == true;
 
-        // Peak meter with a dB-ish scale (−60 dBFS … 0 dBFS → 0 … 100).
+        // Peak meter with a dB-ish scale (-60 dBFS … 0 dBFS → 0 … 100).
         var peak = IsStreaming ? s.PeakLevel : 0f;
         var db = peak > 0 ? 20 * Math.Log10(peak) : -60;
         Level = Math.Clamp((db + 60) / 60 * 100, 0, 100);
+        if (Level >= PeakHold)
+        {
+            PeakHold = Level;
+            _peakHoldTicks = 12;
+        }
+        else if (_peakHoldTicks > 0)
+        {
+            _peakHoldTicks--;
+        }
+        else
+        {
+            PeakHold = Math.Max(Level, PeakHold - 3);
+        }
     }
 }

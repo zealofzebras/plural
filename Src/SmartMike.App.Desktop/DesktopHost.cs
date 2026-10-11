@@ -15,7 +15,7 @@ public sealed class DesktopHost : IAppHost
     {
         if (OperatingSystem.IsWindows())
         {
-            return new MikeHub(new WindowsBluetooth(), new WasapiAudio());
+            return new MikeHub(new WindowsBluetooth(), new WasapiAudio(), new MfAacEncoderFactory(), new MfVideoPlatform());
         }
         throw new PlatformNotSupportedException("SmartMike Hub desktop currently supports Windows only.");
     }
@@ -27,12 +27,23 @@ public sealed class DesktopHost : IAppHost
 
     public string OutputLabel => OperatingSystem.IsWindows() ? "Windows input (virtual cable)" : "Live output";
 
-    public string RecordingsActionText => "Open folder";
+    public bool CanOpenFolder => true;
 
-    public void ShowRecordings(string folder) =>
+    public bool CanShare => false;
+
+    public void ShareFile(string path, string mimeType) =>
+        throw new NotSupportedException("Sharing is not available on desktop.");
+
+    public void OpenFolder(string folder) =>
         Process.Start(new ProcessStartInfo(folder) { UseShellExecute = true });
 
     public Task<bool> EnsurePermissionsAsync() => Task.FromResult(true);
+
+    /// <summary>Windows has no runtime prompt for desktop apps; denied access surfaces as an error when opening the camera.</summary>
+    public Task<bool> EnsureCameraPermissionAsync() => Task.FromResult(true);
+
+    public string SettingsPath { get; } =
+        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "SmartMike Hub", "settings.json");
 
     public void OnRecordingChanged(bool recording)
     {

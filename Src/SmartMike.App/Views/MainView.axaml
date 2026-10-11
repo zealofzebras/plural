@@ -1,9 +1,11 @@
 <UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:vm="using:SmartMike.App.ViewModels"
+             xmlns:c="using:SmartMike.App.Controls"
+             xmlns:plat="using:SmartMike.Core.Platform"
              xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
              xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
-             mc:Ignorable="d" d:DesignWidth="1000" d:DesignHeight="640"
+             mc:Ignorable="d" d:DesignWidth="1000" d:DesignHeight="680"
              x:Class="SmartMike.App.Views.MainView"
              x:DataType="vm:MainViewModel">
 
@@ -12,123 +14,430 @@
     </Design.DataContext>
 
     <UserControl.Resources>
-        <!-- Updated from code-behind: 300 on wide screens, full width on phones. -->
-        <x:Double x:Key="CardWidth">300</x:Double>
+        <!-- Updated from code-behind so cards fill the available width. -->
+        <x:Double x:Key="CardWidth">320</x:Double>
     </UserControl.Resources>
 
     <UserControl.Styles>
         <Style Selector="Border.card">
-            <Setter Property="Background" Value="{DynamicResource SystemControlBackgroundAltHighBrush}" />
-            <Setter Property="BorderBrush" Value="{DynamicResource SystemControlForegroundBaseLowBrush}" />
-            <Setter Property="BorderThickness" Value="1" />
-            <Setter Property="CornerRadius" Value="8" />
-            <Setter Property="Padding" Value="16" />
-            <Setter Property="Margin" Value="8" />
             <Setter Property="Width" Value="{DynamicResource CardWidth}" />
         </Style>
-        <Style Selector="TextBlock.label">
-            <Setter Property="Opacity" Value="0.7" />
-            <Setter Property="FontSize" Value="12" />
-            <Setter Property="Margin" Value="0,8,0,2" />
+        <Style Selector="Border.panel">
+            <Setter Property="Background" Value="{DynamicResource SurfaceBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource StrokeBrush}" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="CornerRadius" Value="{DynamicResource RadiusCard}" />
+            <Setter Property="Padding" Value="16" />
+            <Setter Property="Margin" Value="6" />
         </Style>
-        <Style Selector="Button.record">
-            <Setter Property="Background" Value="#C62828" />
-            <Setter Property="Foreground" Value="White" />
-            <Setter Property="FontWeight" Value="SemiBold" />
-            <Setter Property="Padding" Value="18,8" />
+        <Style Selector="Border#SettingsSheet">
+            <Setter Property="Width" Value="440" />
+            <Setter Property="HorizontalAlignment" Value="Right" />
+            <Setter Property="CornerRadius" Value="20,0,0,20" />
+        </Style>
+        <Style Selector="Grid#Root.compact Border#SettingsSheet">
+            <Setter Property="Width" Value="NaN" />
+            <Setter Property="HorizontalAlignment" Value="Stretch" />
+            <Setter Property="CornerRadius" Value="0" />
+        </Style>
+        <Style Selector="Grid#Root.compact Border#BottomBar">
+            <Setter Property="CornerRadius" Value="20,20,0,0" />
         </Style>
     </UserControl.Styles>
 
-    <DockPanel>
-        <!-- Toolbar: Record on the right, the rest wraps on narrow screens -->
-        <Border DockPanel.Dock="Top" Padding="16,12"
-                BorderBrush="{DynamicResource SystemControlForegroundBaseLowBrush}" BorderThickness="0,0,0,1">
-            <DockPanel>
-                <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
-                    <TextBlock Text="{Binding RecordingTime}" IsVisible="{Binding IsRecording}"
-                               FontSize="18" FontFamily="Consolas,Menlo,monospace" Foreground="#C62828"
-                               VerticalAlignment="Center" Margin="0,0,12,0" />
-                    <Button Classes="record" Content="{Binding RecordButtonText}"
-                            Command="{Binding ToggleRecordingCommand}" />
-                </StackPanel>
-                <WrapPanel VerticalAlignment="Center">
-                    <TextBlock Text="SmartMike Hub" FontSize="20" FontWeight="SemiBold"
-                               VerticalAlignment="Center" Margin="0,4,24,4" />
-                    <Button Content="Scan" Command="{Binding ScanCommand}" Margin="0,4,8,4" />
-                    <Button Content="Connect all" Command="{Binding ConnectAllCommand}" Margin="0,4,8,4" />
-                </WrapPanel>
-            </DockPanel>
-        </Border>
+    <Grid Name="Root" RowDefinitions="Auto,Auto,*,Auto" Background="{DynamicResource BgBrush}">
 
-        <!-- Status bar -->
-        <Border DockPanel.Dock="Bottom" Padding="16,8"
-                BorderBrush="{DynamicResource SystemControlForegroundBaseLowBrush}" BorderThickness="0,1,0,0">
-            <Grid ColumnDefinitions="*,Auto,Auto">
-                <TextBlock Grid.Column="0" Text="{Binding Status}" VerticalAlignment="Center"
-                           TextWrapping="Wrap" MaxLines="3" TextTrimming="CharacterEllipsis" Opacity="0.8" />
-                <TextBox Grid.Column="1" Text="{Binding RecordingRoot}" Width="340" Margin="8,0"
-                         IsVisible="{Binding CanChangeRecordingRoot}" />
-                <Button Grid.Column="2" Content="{Binding RecordingsActionText}" Command="{Binding OpenRecordingsCommand}"
-                        Margin="8,0,0,0" VerticalAlignment="Center" />
+        <!-- Header -->
+        <Grid Grid.Row="0" ColumnDefinitions="*,Auto" Margin="18,14,12,6">
+            <StackPanel VerticalAlignment="Center">
+                <TextBlock Text="SmartMike Hub" FontSize="22" FontWeight="Bold" />
+                <StackPanel Orientation="Horizontal" Spacing="8" Margin="0,2,0,0">
+                    <Ellipse Width="8" Height="8" VerticalAlignment="Center"
+                             Fill="{DynamicResource LiveBrush}" IsVisible="{Binding HasLiveMic}" />
+                    <Ellipse Width="8" Height="8" VerticalAlignment="Center"
+                             Fill="{DynamicResource MutedBrush}" IsVisible="{Binding !HasLiveMic}" />
+                    <TextBlock Classes="muted" Text="{Binding Summary}" VerticalAlignment="Center" />
+                </StackPanel>
+            </StackPanel>
+            <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                <Button Classes="tool" Command="{Binding ScanCommand}" ToolTip.Tip="Scan for paired mics">
+                    <StackPanel Orientation="Horizontal" Spacing="8">
+                        <Path Classes="ico" Data="{StaticResource IconRefresh}" />
+                        <TextBlock Classes="btntext" Text="Scan" VerticalAlignment="Center" />
+                    </StackPanel>
+                </Button>
+                <Button Classes="tool" Command="{Binding ConnectAllCommand}" ToolTip.Tip="Connect all mics">
+                    <StackPanel Orientation="Horizontal" Spacing="8">
+                        <Path Classes="ico" Data="{StaticResource IconLink}" />
+                        <TextBlock Classes="btntext" Text="Connect all" VerticalAlignment="Center" />
+                    </StackPanel>
+                </Button>
+                <Button Classes="tool" Command="{Binding OpenSettingsCommand}" ToolTip.Tip="Recording settings">
+                    <Path Classes="ico" Data="{StaticResource IconTune}" />
+                </Button>
+            </StackPanel>
+        </Grid>
+
+        <!-- Mode: Audio | Video -->
+        <Border Grid.Row="1" Name="ModeBar" IsVisible="{Binding HasVideo}" Margin="18,8,18,4"
+                HorizontalAlignment="Left" MinWidth="260"
+                Background="{DynamicResource SurfaceBrush}" BorderBrush="{DynamicResource StrokeBrush}" BorderThickness="1"
+                CornerRadius="16" Padding="4">
+            <Grid ColumnDefinitions="*,*">
+                <Button Classes="seg" Classes.on="{Binding IsAudioMode}" Command="{Binding SetAudioModeCommand}"
+                        IsEnabled="{Binding IsNotRecording}">
+                    <StackPanel Orientation="Horizontal" Spacing="8">
+                        <Path Classes="ico" Data="{StaticResource IconWave}" />
+                        <TextBlock Text="Audio" VerticalAlignment="Center" />
+                    </StackPanel>
+                </Button>
+                <Button Grid.Column="1" Classes="seg" Classes.on="{Binding IsVideoMode}" Command="{Binding SetVideoModeCommand}"
+                        IsEnabled="{Binding IsNotRecording}">
+                    <StackPanel Orientation="Horizontal" Spacing="8">
+                        <Path Classes="ico" Data="{StaticResource IconVideo}" />
+                        <TextBlock Text="Video" VerticalAlignment="Center" />
+                    </StackPanel>
+                </Button>
             </Grid>
         </Border>
 
-        <!-- Mic cards -->
-        <Panel>
-            <TextBlock IsVisible="{Binding !HasMikes}" TextWrapping="Wrap" MaxWidth="460"
-                       HorizontalAlignment="Center" VerticalAlignment="Center" TextAlignment="Center" Opacity="0.7"
-                       Text="No paired SmartMikes found. Pair each mic in your system's Bluetooth settings, then press Scan." Margin="24" />
-            <ScrollViewer Name="Cards">
-                <ItemsControl ItemsSource="{Binding Mikes}" Margin="8">
-                    <ItemsControl.ItemsPanel>
-                        <ItemsPanelTemplate>
-                            <WrapPanel />
-                        </ItemsPanelTemplate>
-                    </ItemsControl.ItemsPanel>
-                    <ItemsControl.ItemTemplate>
-                        <DataTemplate x:DataType="vm:MikeViewModel">
-                            <Border Classes="card">
-                                <StackPanel>
-                                    <Grid ColumnDefinitions="*,Auto">
-                                        <StackPanel>
-                                            <TextBlock Text="{Binding Name}" FontSize="16" FontWeight="SemiBold" />
-                                            <TextBlock Text="{Binding Address}" FontSize="11" Opacity="0.6" />
-                                        </StackPanel>
-                                        <TextBlock Grid.Column="1" Text="{Binding StateText}" VerticalAlignment="Top" />
-                                    </Grid>
-                                    <TextBlock Text="{Binding Details}" FontSize="12" Margin="0,6,0,0" />
+        <!-- Content -->
+        <Panel Grid.Row="2">
+            <ScrollViewer Name="BodyScroll">
+                <Grid Name="Body" Margin="12,6,12,24" RowDefinitions="Auto,Auto,Auto,*" ColumnDefinitions="*">
 
-                                    <ProgressBar Value="{Binding Level}" Minimum="0" Maximum="100" Height="8"
-                                                 Margin="0,10,0,0" />
+                    <TextBlock Grid.Row="0" Classes="muted" Text="{Binding Status}" TextWrapping="Wrap"
+                               Margin="6,4,6,4" IsVisible="{Binding Status, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
 
-                                    <Button Content="{Binding ConnectButtonText}" Command="{Binding ToggleConnectionCommand}"
-                                            IsEnabled="{Binding !IsBusy}" HorizontalAlignment="Stretch"
-                                            HorizontalContentAlignment="Center" Margin="0,12,0,0" />
+                    <!-- Camera preview -->
+                    <Border Name="PreviewPanel" Grid.Row="1" IsVisible="{Binding IsVideoMode}" Margin="6"
+                            CornerRadius="{DynamicResource RadiusCard}" ClipToBounds="True" Background="#000000"
+                            VerticalAlignment="Top">
+                        <Grid>
+                            <c:CameraPreview Surface="{Binding Preview}" IsVisible="{Binding HasPreview}" />
 
-                                    <TextBlock Classes="label" Text="{Binding OutputLabel}" />
-                                    <ComboBox ItemsSource="{Binding Outputs}" SelectedItem="{Binding SelectedOutput}"
-                                              HorizontalAlignment="Stretch" />
+                            <StackPanel IsVisible="{Binding !HasPreview}" HorizontalAlignment="Center" VerticalAlignment="Center"
+                                        Spacing="10" Margin="24">
+                                <Path Data="{StaticResource IconVideoOff}" Width="36" Height="36" Stretch="Uniform"
+                                      Fill="#8E97AB" HorizontalAlignment="Center" />
+                                <TextBlock Text="{Binding CameraMessage}" Foreground="#C5CBD8" TextWrapping="Wrap"
+                                           TextAlignment="Center" MaxWidth="320" />
+                            </StackPanel>
 
-                                    <TextBlock Classes="label" Text="Mic gain" />
-                                    <Grid ColumnDefinitions="*,Auto">
-                                        <Slider Minimum="0" Maximum="100" Value="{Binding MicGain}"
-                                                IsEnabled="{Binding !Agc}" />
-                                        <CheckBox Grid.Column="1" Content="Auto" IsChecked="{Binding Agc}" Margin="8,0,0,0" />
-                                    </Grid>
+                            <!-- camera picker -->
+                            <Border HorizontalAlignment="Left" VerticalAlignment="Top" Margin="10"
+                                    Background="#99000000" CornerRadius="12" IsVisible="{Binding HasMultipleCameras}">
+                                <ComboBox ItemsSource="{Binding Cameras}" SelectedItem="{Binding SelectedCamera}"
+                                          MinHeight="40" MinWidth="150" Background="Transparent" BorderThickness="0"
+                                          Foreground="White" IsEnabled="{Binding IsNotRecording}">
+                                    <ComboBox.ItemTemplate>
+                                        <DataTemplate x:DataType="plat:CameraInfo">
+                                            <TextBlock Text="{Binding Name}" />
+                                        </DataTemplate>
+                                    </ComboBox.ItemTemplate>
+                                </ComboBox>
+                            </Border>
 
-                                    <TextBlock Classes="label" Text="Headphone monitor" />
-                                    <Slider Minimum="0" Maximum="100" Value="{Binding MonitorVolume}" />
-
-                                    <CheckBox Content="Noise suppression" IsChecked="{Binding NoiseSuppression}" Margin="0,6,0,0" />
-
-                                    <TextBlock Text="{Binding Error}" IsVisible="{Binding Error, Converter={x:Static ObjectConverters.IsNotNull}}"
-                                               Foreground="#C62828" TextWrapping="Wrap" FontSize="12" Margin="0,8,0,0" />
+                            <!-- REC indicator and time -->
+                            <Border HorizontalAlignment="Right" VerticalAlignment="Top" Margin="10" Padding="12,6"
+                                    Background="#99000000" CornerRadius="16" IsVisible="{Binding IsRecording}">
+                                <StackPanel Orientation="Horizontal" Spacing="8">
+                                    <Ellipse Classes="blink" Width="10" Height="10" Fill="{DynamicResource RecordBrush}" VerticalAlignment="Center" />
+                                    <TextBlock Text="REC" Foreground="White" FontWeight="Bold" VerticalAlignment="Center" />
+                                    <TextBlock Classes="mono" Text="{Binding RecordingTime}" Foreground="White" VerticalAlignment="Center" />
                                 </StackPanel>
                             </Border>
-                        </DataTemplate>
-                    </ItemsControl.ItemTemplate>
-                </ItemsControl>
+                        </Grid>
+                    </Border>
+
+                    <!-- Mic cards -->
+                    <StackPanel Name="CardsPanel" Grid.Row="2" VerticalAlignment="Top">
+                        <Border Classes="panel" IsVisible="{Binding !HasMikes}" Padding="24">
+                            <StackPanel Spacing="8" HorizontalAlignment="Center">
+                                <Path Data="{StaticResource IconMic}" Width="36" Height="36" Stretch="Uniform"
+                                      Fill="{DynamicResource MutedBrush}" HorizontalAlignment="Center" />
+                                <TextBlock Text="No paired SmartMikes found" Classes="title" HorizontalAlignment="Center" />
+                                <TextBlock Classes="muted" TextWrapping="Wrap" TextAlignment="Center" MaxWidth="360"
+                                           Text="Pair each mic in your system's Bluetooth settings, then tap Scan." />
+                            </StackPanel>
+                        </Border>
+                        <ItemsControl Name="Cards" ItemsSource="{Binding Mikes}">
+                            <ItemsControl.ItemsPanel>
+                                <ItemsPanelTemplate>
+                                    <WrapPanel />
+                                </ItemsPanelTemplate>
+                            </ItemsControl.ItemsPanel>
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate x:DataType="vm:MikeViewModel">
+                                    <Border Classes="card">
+                                        <StackPanel Spacing="12">
+                                            <Grid ColumnDefinitions="Auto,*,Auto">
+                                                <Border Classes="avatar" Classes.live="{Binding IsStreaming}">
+                                                    <Path Data="{StaticResource IconMic}" Width="20" Height="20" Stretch="Uniform" />
+                                                </Border>
+                                                <StackPanel Grid.Column="1" Margin="12,0" VerticalAlignment="Center" Spacing="3">
+                                                    <TextBlock Classes="title" Text="{Binding Name}" TextTrimming="CharacterEllipsis" />
+                                                    <StackPanel Orientation="Horizontal" Spacing="10">
+                                                        <StackPanel Orientation="Horizontal" Spacing="4" IsVisible="{Binding HasBattery}">
+                                                            <Panel Width="22" Height="12" VerticalAlignment="Center">
+                                                                <Border BorderBrush="{DynamicResource MutedBrush}" BorderThickness="1.5"
+                                                                        CornerRadius="3" Width="20" HorizontalAlignment="Left" />
+                                                                <Border Width="{Binding BatteryFill}" Height="6" Margin="2,0,0,0"
+                                                                        HorizontalAlignment="Left" CornerRadius="1.5"
+                                                                        Background="{DynamicResource LiveBrush}" Classes.low="{Binding IsBatteryLow}">
+                                                                    <Border.Styles>
+                                                                        <Style Selector="Border.low">
+                                                                            <Setter Property="Background" Value="{DynamicResource RecordBrush}" />
+                                                                        </Style>
+                                                                    </Border.Styles>
+                                                                </Border>
+                                                                <Border Width="2" Height="5" HorizontalAlignment="Right" CornerRadius="1"
+                                                                        Background="{DynamicResource MutedBrush}" />
+                                                            </Panel>
+                                                            <TextBlock Classes="muted" Text="{Binding BatteryText}" VerticalAlignment="Center" />
+                                                        </StackPanel>
+                                                        <Path Data="{StaticResource IconHeadphones}" Width="14" Height="14" Stretch="Uniform"
+                                                              Fill="{DynamicResource MutedBrush}" IsVisible="{Binding HasHeadphones}" />
+                                                        <TextBlock Classes="muted" Text="{Binding RecordText}" Foreground="{DynamicResource RecordBrush}"
+                                                                   IsVisible="{Binding IsRecording}" FontWeight="SemiBold" />
+                                                    </StackPanel>
+                                                </StackPanel>
+                                                <Border Grid.Column="2" Classes="pill" Classes.live="{Binding IsStreaming}"
+                                                        Classes.busy="{Binding IsConnecting}" Classes.lost="{Binding IsLost}">
+                                                    <TextBlock Text="{Binding StateText}" />
+                                                </Border>
+                                            </Grid>
+
+                                            <c:LevelMeter Level="{Binding Level}" Peak="{Binding PeakHold}" />
+
+                                            <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+                                                <Button Classes="primary" Classes.tool="{Binding IsStreaming}"
+                                                        Content="{Binding ConnectButtonText}" Command="{Binding ToggleConnectionCommand}"
+                                                        IsEnabled="{Binding !IsBusy}" HorizontalAlignment="Stretch" />
+                                                <Button Grid.Column="1" Classes="tool" Command="{Binding ToggleExpandedCommand}"
+                                                        ToolTip.Tip="Mic settings">
+                                                    <StackPanel Orientation="Horizontal" Spacing="6">
+                                                        <Path Classes="ico" Data="{StaticResource IconTune}" />
+                                                        <Path Classes="chev" Classes.open="{Binding IsExpanded}" Data="{StaticResource IconChevronDown}" />
+                                                    </StackPanel>
+                                                </Button>
+                                            </Grid>
+
+                                            <StackPanel IsVisible="{Binding IsExpanded}" Spacing="14">
+                                                <Border Height="1" Background="{DynamicResource StrokeBrush}" />
+                                                <StackPanel Spacing="6">
+                                                    <Grid ColumnDefinitions="*,Auto">
+                                                        <TextBlock Text="Mic gain" VerticalAlignment="Center" />
+                                                        <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8">
+                                                            <TextBlock Classes="muted" Text="Auto (AGC)" VerticalAlignment="Center" />
+                                                            <ToggleSwitch IsChecked="{Binding Agc}" OnContent="" OffContent="" MinWidth="0" />
+                                                        </StackPanel>
+                                                    </Grid>
+                                                    <Slider Minimum="0" Maximum="100" Value="{Binding MicGain}" IsEnabled="{Binding !Agc}" />
+                                                </StackPanel>
+                                                <StackPanel Spacing="6">
+                                                    <TextBlock Text="Headphone monitor" />
+                                                    <Slider Minimum="0" Maximum="100" Value="{Binding MonitorVolume}" />
+                                                </StackPanel>
+                                                <Grid ColumnDefinitions="*,Auto">
+                                                    <TextBlock Text="Noise suppression" VerticalAlignment="Center" />
+                                                    <ToggleSwitch Grid.Column="1" IsChecked="{Binding NoiseSuppression}" OnContent="" OffContent="" MinWidth="0" />
+                                                </Grid>
+                                                <StackPanel Spacing="6">
+                                                    <TextBlock Classes="muted" Text="{Binding OutputLabel}" />
+                                                    <ComboBox ItemsSource="{Binding Outputs}" SelectedItem="{Binding SelectedOutput}"
+                                                              HorizontalAlignment="Stretch" MinHeight="44" />
+                                                </StackPanel>
+                                            </StackPanel>
+
+                                            <TextBlock Text="{Binding Error}" IsVisible="{Binding Error, Converter={x:Static ObjectConverters.IsNotNull}}"
+                                                       Foreground="{DynamicResource RecordBrush}" TextWrapping="Wrap" FontSize="12" />
+                                        </StackPanel>
+                                    </Border>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </StackPanel>
+
+                    <!-- Recent takes -->
+                    <Border Name="TakesPanel" Grid.Row="3" Classes="panel" VerticalAlignment="Top">
+                        <StackPanel Spacing="10">
+                            <Grid ColumnDefinitions="*,Auto">
+                                <TextBlock Classes="section" Text="RECENT TAKES" Margin="0" VerticalAlignment="Center" />
+                                <Button Grid.Column="1" Classes="icon" Command="{Binding OpenRecordingsFolderCommand}"
+                                        IsVisible="{Binding CanOpenFolder}" ToolTip.Tip="Open recordings folder">
+                                    <Path Classes="ico" Data="{StaticResource IconFolder}" />
+                                </Button>
+                            </Grid>
+                            <TextBlock Classes="muted" Text="No takes yet. Connect a mic and press the red button." TextWrapping="Wrap"
+                                       IsVisible="{Binding !HasTakes}" />
+                            <ItemsControl ItemsSource="{Binding Takes}">
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate x:DataType="vm:TakeViewModel">
+                                        <Grid ColumnDefinitions="Auto,*,Auto" MinHeight="52" Margin="0,2">
+                                            <Border Classes="avatar" Width="40" Height="40" CornerRadius="12">
+                                                <Panel>
+                                                    <Path Data="{StaticResource IconWave}" Width="18" Height="18" Stretch="Uniform"
+                                                          IsVisible="{Binding IsAudio}" />
+                                                    <Path Data="{StaticResource IconVideo}" Width="18" Height="18" Stretch="Uniform"
+                                                          IsVisible="{Binding IsVideo}" />
+                                                </Panel>
+                                            </Border>
+                                            <StackPanel Grid.Column="1" Margin="12,0" VerticalAlignment="Center">
+                                                <TextBlock Text="{Binding Title}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
+                                                <TextBlock Classes="muted" Text="{Binding Subtitle}" TextTrimming="CharacterEllipsis" />
+                                            </StackPanel>
+                                            <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
+                                                <Button Classes="icon" Command="{Binding ShareCommand}" IsVisible="{Binding CanShare}"
+                                                        ToolTip.Tip="Share">
+                                                    <Path Classes="ico" Data="{StaticResource IconShare}" />
+                                                </Button>
+                                                <Button Classes="icon" Command="{Binding OpenFolderCommand}" IsVisible="{Binding CanOpenFolder}"
+                                                        ToolTip.Tip="Open folder">
+                                                    <Path Classes="ico" Data="{StaticResource IconFolder}" />
+                                                </Button>
+                                            </StackPanel>
+                                        </Grid>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                        </StackPanel>
+                    </Border>
+                </Grid>
             </ScrollViewer>
+
+            <!-- Toast -->
+            <Border VerticalAlignment="Bottom" HorizontalAlignment="Center" Margin="12" MaxWidth="560"
+                    Padding="16,12" CornerRadius="16" IsVisible="{Binding IsToastVisible}"
+                    Background="{DynamicResource Surface2Brush}" BorderBrush="{DynamicResource StrokeBrush}" BorderThickness="1"
+                    BoxShadow="0 6 24 0 #66000000">
+                <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+                    <StackPanel VerticalAlignment="Center" Spacing="4">
+                        <TextBlock Text="{Binding ToastText}" FontWeight="SemiBold" TextWrapping="Wrap" />
+                        <TextBlock Classes="muted" Text="{Binding ToastDetail}" TextWrapping="Wrap" IsVisible="{Binding HasToastDetail}"
+                                   Foreground="{DynamicResource RecordBrush}" />
+                    </StackPanel>
+                    <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+                        <Button Classes="icon" Command="{Binding ToastTake.ShareCommand}" ToolTip.Tip="Share"
+                                IsVisible="{Binding CanShare}">
+                            <Path Classes="ico" Data="{StaticResource IconShare}" />
+                        </Button>
+                        <Button Classes="icon" Command="{Binding ToastTake.OpenFolderCommand}" ToolTip.Tip="Open folder"
+                                IsVisible="{Binding CanOpenFolder}">
+                            <Path Classes="ico" Data="{StaticResource IconFolder}" />
+                        </Button>
+                        <Button Classes="icon" Command="{Binding DismissToastCommand}" ToolTip.Tip="Dismiss">
+                            <Path Classes="ico" Data="{StaticResource IconClose}" />
+                        </Button>
+                    </StackPanel>
+                </Grid>
+            </Border>
         </Panel>
-    </DockPanel>
+
+        <!-- Bottom bar: format chip, Record, time -->
+        <Border Grid.Row="3" Name="BottomBar" Background="{DynamicResource SurfaceBrush}"
+                BorderBrush="{DynamicResource StrokeBrush}" BorderThickness="0,1,0,0" Padding="16,6,16,10">
+            <StackPanel>
+                <TextBlock Classes="muted" Text="{Binding RecordHint}" IsVisible="{Binding HasRecordHint}"
+                           HorizontalAlignment="Center" Margin="0,4,0,0" />
+                <Grid ColumnDefinitions="*,Auto,*">
+                    <Button Classes="chip" Command="{Binding OpenSettingsCommand}" HorizontalAlignment="Left"
+                            VerticalAlignment="Center" ToolTip.Tip="Recording settings">
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                            <Path Classes="ico" Data="{StaticResource IconTune}" />
+                            <TextBlock Text="{Binding FormatChip}" VerticalAlignment="Center" />
+                        </StackPanel>
+                    </Button>
+                    <Button Grid.Column="1" Classes="rec" Classes.recording="{Binding IsRecording}"
+                            Command="{Binding ToggleRecordingCommand}" IsEnabled="{Binding CanRecord}"
+                            ToolTip.Tip="Record / stop" />
+                    <StackPanel Grid.Column="2" HorizontalAlignment="Right" VerticalAlignment="Center"
+                                IsVisible="{Binding IsRecording}">
+                        <TextBlock Classes="mono" Text="{Binding RecordingTime}" FontSize="24" FontWeight="SemiBold"
+                                   HorizontalAlignment="Right" />
+                        <StackPanel Orientation="Horizontal" Spacing="6" HorizontalAlignment="Right">
+                            <Ellipse Classes="blink" Width="8" Height="8" Fill="{DynamicResource RecordBrush}" VerticalAlignment="Center" />
+                            <TextBlock Classes="muted" Text="REC" FontWeight="Bold" />
+                        </StackPanel>
+                    </StackPanel>
+                </Grid>
+            </StackPanel>
+        </Border>
+
+        <!-- Settings sheet -->
+        <Grid Grid.RowSpan="4" IsVisible="{Binding IsSettingsOpen}">
+            <Border Background="{DynamicResource ScrimBrush}" Tapped="OnScrimTapped" />
+            <Border Name="SettingsSheet" Background="{DynamicResource SurfaceBrush}"
+                    BorderBrush="{DynamicResource StrokeBrush}" BorderThickness="1,0,0,0">
+                <Grid RowDefinitions="Auto,*">
+                    <Grid ColumnDefinitions="*,Auto" Margin="20,12,12,4">
+                        <TextBlock Text="Recording settings" FontSize="20" FontWeight="Bold" VerticalAlignment="Center" />
+                        <Button Grid.Column="1" Classes="icon" Command="{Binding CloseSettingsCommand}" ToolTip.Tip="Close">
+                            <Path Classes="ico" Data="{StaticResource IconClose}" />
+                        </Button>
+                    </Grid>
+                    <ScrollViewer Grid.Row="1">
+                        <StackPanel Margin="20,8,20,28" Spacing="22" IsEnabled="{Binding IsNotRecording}">
+
+                            <StackPanel>
+                                <TextBlock Classes="section" Text="FORMAT" />
+                                <ListBox Classes="chips" ItemsSource="{Binding FormatOptions}" SelectedItem="{Binding SelectedFormat}" />
+                                <TextBlock Classes="muted" Text="{Binding FormatDescription}" TextWrapping="Wrap" />
+                            </StackPanel>
+
+                            <StackPanel IsVisible="{Binding ShowMatroska}">
+                                <TextBlock Classes="section" Text="MATROSKA AUDIO CODEC" />
+                                <ListBox Classes="chips" ItemsSource="{Binding MatroskaOptions}" SelectedItem="{Binding SelectedMatroska}" />
+                                <TextBlock Classes="muted" Text="{Binding SelectedMatroska.Detail}" TextWrapping="Wrap" />
+                            </StackPanel>
+
+                            <StackPanel IsVisible="{Binding ShowAac}">
+                                <TextBlock Classes="section" Text="AAC BITRATE PER MIC" />
+                                <ListBox Classes="chips" ItemsSource="{Binding AacOptions}" SelectedItem="{Binding SelectedAac}" />
+                            </StackPanel>
+
+                            <StackPanel IsVisible="{Binding ShowMp3}">
+                                <TextBlock Classes="section" Text="MP3 BITRATE PER MIC" />
+                                <ListBox Classes="chips" ItemsSource="{Binding Mp3Options}" SelectedItem="{Binding SelectedMp3}" />
+                            </StackPanel>
+
+                            <StackPanel IsVisible="{Binding IsVideoMode}" Spacing="22">
+                                <StackPanel>
+                                    <TextBlock Classes="section" Text="VIDEO RESOLUTION" />
+                                    <ListBox Classes="chips" ItemsSource="{Binding ResolutionOptions}" SelectedItem="{Binding SelectedResolution}" />
+                                </StackPanel>
+                                <StackPanel>
+                                    <TextBlock Classes="section" Text="FRAME RATE (FPS)" />
+                                    <ListBox Classes="chips" ItemsSource="{Binding FpsOptions}" SelectedItem="{Binding SelectedFps}" />
+                                </StackPanel>
+                                <StackPanel Spacing="6">
+                                    <TextBlock Classes="section" Text="VIDEO BITRATE" Margin="0" />
+                                    <Grid ColumnDefinitions="*,Auto">
+                                        <TextBlock Text="{Binding BitRateText}" VerticalAlignment="Center" />
+                                        <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8">
+                                            <TextBlock Classes="muted" Text="Auto" VerticalAlignment="Center" />
+                                            <ToggleSwitch IsChecked="{Binding AutoBitRate}" OnContent="" OffContent="" MinWidth="0" />
+                                        </StackPanel>
+                                    </Grid>
+                                    <Slider Minimum="2" Maximum="60" Value="{Binding BitRateMbps}" IsVisible="{Binding !AutoBitRate}" />
+                                </StackPanel>
+                            </StackPanel>
+
+                            <StackPanel IsVisible="{Binding CanChangeRecordingRoot}" Spacing="8">
+                                <TextBlock Classes="section" Text="RECORDING FOLDER" Margin="0" />
+                                <TextBox Text="{Binding RecordingRoot}" MinHeight="44" VerticalContentAlignment="Center" />
+                                <Button Classes="tool" Command="{Binding OpenRecordingsFolderCommand}" HorizontalAlignment="Left"
+                                        IsVisible="{Binding CanOpenFolder}">
+                                    <StackPanel Orientation="Horizontal" Spacing="8">
+                                        <Path Classes="ico" Data="{StaticResource IconFolder}" />
+                                        <TextBlock Text="Open folder" VerticalAlignment="Center" />
+                                    </StackPanel>
+                                </Button>
+                            </StackPanel>
+                        </StackPanel>
+                    </ScrollViewer>
+                </Grid>
+            </Border>
+        </Grid>
+    </Grid>
 </UserControl>

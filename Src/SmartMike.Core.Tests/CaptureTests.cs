@@ -5,6 +5,7 @@ using SmartMike.Core.Protocol;
 namespace SmartMike.Core.Tests;
 
 /// <summary>Tests against a real 6 s capture from a SmartMike+ (FW 0.4.37), recorded by Tools/smartmike_client.py.</summary>
+[Collection("celt")]
 public class CaptureTests
 {
     private static readonly string Dir = Path.Combine(AppContext.BaseDirectory, "TestData");

@@ -13,15 +13,16 @@ Docs/ is the source of truth — read `Docs/MikeHub/Design.md` (app) or `Docs/Pr
 ## Layout
 ```
 Src/SmartMike.slnx
-  SmartMike.Core/               protocol (Swiss SPP frames), MikeSession, MikeHub, QCELT/CELT decode, JitterBuffer, WavWriter
+  SmartMike.Core/               protocol (Swiss SPP frames), MikeSession, MikeHub, QCELT/CELT decode, JitterBuffer, WavWriter, Recording/ (FLAC, Matroska, MP4, LAME, TakeRecorder)
   SmartMike.Core.Tests/         xUnit, incl. decoding a real capture (TestData/)
   SmartMike.Platform.Windows/   AF_BTH RFCOMM socket, paired devices from registry, WASAPI sink (NAudio 3.1)
   SmartMike.Platform.Android/   BluetoothSocket RFCOMM, bonded devices, AudioTrack sink
   SmartMike.App/                shared UI: Views/MainView.axaml, ViewModels/, Services/IAppHost.cs
   SmartMike.App.Desktop/        desktop head → SmartMikeHub.exe (DesktopHost)
   SmartMike.App.Android/        Android head → com.zealofzebras.smartmikehub (AndroidHost, MainActivity)
-  SmartMike.Cli/                headless runner: list | outputs | run [--output X] [--record N]
+  SmartMike.Cli/                headless runner: list | outputs | run [--output X] [--record N] [--format wav|m4a|mp3|mka|mkv|mp4]
 Native/celt/                    CELT 0.7.1 per RID; build-windows.sh (llvm-mingw), build-android.sh (NDK r29)
+Native/lame/                    LAME 3.100 (MP3) per RID; build-windows.sh, build-android.sh (same toolchains)
 Tools/                          Python reference tools (swiss_protocol.py, smartmike_client.py, qcelt_decode.py)
 App/Decompiled/                 decompiled MetAudio APK (reference only; large — search, don't read whole trees)
 Docs/                           App/, Firmware/, Protocol/, MikeHub/Design.md, Plan.md
@@ -29,7 +30,7 @@ Docs/                           App/, Firmware/, Protocol/, MikeHub/Design.md, P
 
 ## Stack
 .NET 10 SDK 10.0.301 · Avalonia 12.1.4 (compiled bindings, `x:DataType`) · CommunityToolkit.Mvvm 8.4.2
-(`[ObservableProperty] public partial …`, `[RelayCommand]`) · NAudio.Wasapi 3.1.0 · Android min API 26.
+(`[ObservableProperty] public partial …`, `[RelayCommand]`) · NAudio.Wasapi 3.1.0 · Vortice.MediaFoundation 3.8.3 (Windows AAC/H.264/camera) · Android min API 26.
 
 ## Commands (run from `Src/`)
 - Tests: `dotnet test SmartMike.Core.Tests` and `dotnet test SmartMike.Core.Tests --arch x64`

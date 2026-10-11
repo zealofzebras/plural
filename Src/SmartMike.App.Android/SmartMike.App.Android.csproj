@@ -27,6 +27,14 @@
     <AndroidNativeLibrary Include="..\..\Native\celt\runtimes\android-x64\native\libcelt071.so" Abi="x86_64" />
   </ItemGroup>
 
+  <!-- LAME (MP3), built into Native/lame; optional until present. -->
+  <ItemGroup>
+    <AndroidNativeLibrary Include="..\..\Native\lame\runtimes\android-arm64\native\libmp3lame.so" Abi="arm64-v8a"
+                          Condition="Exists('..\..\Native\lame\runtimes\android-arm64\native\libmp3lame.so')" />
+    <AndroidNativeLibrary Include="..\..\Native\lame\runtimes\android-x64\native\libmp3lame.so" Abi="x86_64"
+                          Condition="Exists('..\..\Native\lame\runtimes\android-x64\native\libmp3lame.so')" />
+  </ItemGroup>
+
   <ItemGroup>
     <PackageReference Include="Avalonia.Android" Version="12.1.4" />
     <PackageReference Include="Xamarin.AndroidX.Core.SplashScreen" Version="1.0.1.15" />

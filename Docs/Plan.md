@@ -42,10 +42,14 @@
 - [x] Windows platform layer (RFCOMM, WASAPI)
 - [x] CLI runner, verified on hardware
 - [x] UI v1: mic cards, settings, Record All
+- [x] Recording formats (WAV, M4A, MP3, MKA, MKV, MP4), camera video, UI redesign with persisted settings: built, 46 Core tests pass (see [MikeHub/Recording.md](MikeHub/Recording.md))
+- [x] Windows video: 1080p30 H.264 verified on Surface arm64 + x64
+- [ ] Hardware test of the new formats and camera with real mics (Windows and Pixel 8); Android camera and AAC not yet run
+- [ ] Measure audio-video latency (clap test) and compensate; verify MKV rotation sign in players
 - [ ] Hardware test of the UI with the user
 - [ ] Install a virtual cable (VB-CABLE has ARM64 since Oct 2024) and verify a mic appears in another app
 - [ ] Test with 2+ SmartMikes simultaneously (Bluetooth bandwidth)
-- [ ] Packaging (self-contained win-arm64 / win-x64 builds), app icon, settings persistence, auto-reconnect
+- [ ] Packaging (self-contained win-arm64 / win-x64 builds), app icon, auto-reconnect
 - [ ] Own virtual-mic driver (later), Linux/macOS platform layers (later)
 
 ## Phase 4 — Firmware (stretch, risk of bricking)

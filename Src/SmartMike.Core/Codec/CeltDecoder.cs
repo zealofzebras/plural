@@ -14,7 +14,7 @@ public sealed partial class CeltDecoder : IDisposable
     public int Channels { get; }
     public int FrameSize { get; }
 
-    static CeltDecoder() => NativeLibrary.SetDllImportResolver(typeof(CeltDecoder).Assembly, Resolve);
+    static CeltDecoder() => NativeLibs.EnsureRegistered();
 
     public CeltDecoder(int sampleRate, int frameSize, int channels)
     {
@@ -61,37 +61,6 @@ public sealed partial class CeltDecoder : IDisposable
             celt_mode_destroy(_mode);
             _mode = IntPtr.Zero;
         }
-    }
-
-    /// <summary>
-    /// Loads <c>runtimes/&lt;rid&gt;/native/celt071.*</c> next to the app, falling back to the default search.
-    /// On Android the library is packaged in the APK's native folder and loaded by its soname.
-    /// </summary>
-    private static IntPtr Resolve(string name, Assembly assembly, DllImportSearchPath? path)
-    {
-        if (name != Lib)
-        {
-            return IntPtr.Zero;
-        }
-        if (OperatingSystem.IsAndroid())
-        {
-            return NativeLibrary.TryLoad("libcelt071.so", out var lib) ? lib : IntPtr.Zero;
-        }
-        var os = OperatingSystem.IsWindows() ? "win" : OperatingSystem.IsMacOS() ? "osx" : "linux";
-        var arch = RuntimeInformation.ProcessArchitecture switch
-        {
-            Architecture.Arm64 => "arm64",
-            Architecture.X64 => "x64",
-            Architecture.X86 => "x86",
-            var a => a.ToString().ToLowerInvariant(),
-        };
-        var file = OperatingSystem.IsWindows() ? "celt071.dll" : OperatingSystem.IsMacOS() ? "libcelt071.dylib" : "libcelt071.so";
-        var candidate = Path.Combine(AppContext.BaseDirectory, "runtimes", $"{os}-{arch}", "native", file);
-        if (NativeLibrary.TryLoad(candidate, out var handle))
-        {
-            return handle;
-        }
-        return NativeLibrary.TryLoad(name, assembly, path, out handle) ? handle : IntPtr.Zero;
     }
 
     [LibraryImport(Lib)]

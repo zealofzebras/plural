@@ -6,6 +6,9 @@
 	<!-- Android 12+: runtime permission to list paired devices and open RFCOMM sockets. No scanning needed. -->
 	<uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
 	<uses-feature android:name="android.hardware.bluetooth" android:required="true" />
+	<!-- Video recording (optional: audio-only works without a camera). -->
+	<uses-permission android:name="android.permission.CAMERA" />
+	<uses-feature android:name="android.hardware.camera.any" android:required="false" />
 
 	<application android:label="SmartMike Hub" android:icon="@drawable/Icon">
 		<!-- Shares recordings (app-specific storage) with other apps. -->
