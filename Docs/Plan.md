@@ -1,10 +1,10 @@
 # Plan and status
 
 ## Phase 0 — Tooling and collection
-- [x] Collect APK (MetAudio 1.5.2) and decompile with jadx → `App/Decompiled/jadx`
-- [x] Collect Sabinetek Swiss SDK sample → `App/Reference/SwissSample-android`
-- [x] Collect official PC firmware updater, extract SmartMike+ image 0.4.32_0702 → `Firmware/Images`
-- [x] Ghidra 12.1.4 (headless) → `App/Decompiled/native/libjni-smartdecoder.so.c`
+- [x] Collect APK (MetAudio 1.5.2) and decompile with jadx → `SmartMike/App/Decompiled/jadx`
+- [x] Collect Sabinetek Swiss SDK sample → `SmartMike/App/Reference/SwissSample-android`
+- [x] Collect official PC firmware updater, extract SmartMike+ image 0.4.32_0702 → `SmartMike/Firmware/Images`
+- [x] Ghidra 12.1.4 (headless) → `SmartMike/App/Decompiled/native/libjni-smartdecoder.so.c`
 - [x] Zig 0.13 as C compiler; CELT 0.7.1 → `Tools/bin/celt071_x64.dll`
 
 ## Phase 1 — Static analysis of the protocol (APK)

@@ -69,7 +69,7 @@ SPP delivers full-band audio to ~20 kHz; HFP is limited to ~7.5 kHz. 10 s captur
 | otherwise | Opus (or SBC with repaired sync if `[1]=BD [2]=37`) | |
 
 ## App-side decoder stack (`libjni-smartdecoder.so`)
-`CQelt_SmartDecoder` sits on top of `CQCelt_Decoder`. It adds a jitter buffer, packet-loss detection by timestamp (`find_packet_loss_pos`, `on_process_packet_loss`), WSOLA time stretching (`CWsola`, `CWSolaEngine`) and sample-rate arbitration between two mics (`CSraPreDelay`, `sra_calculate`). None of this is required to get audio; it's needed for perfect timing and for dual-mic sync. Ghidra output: `App/Decompiled/native/libjni-smartdecoder.so.c`.
+`CQelt_SmartDecoder` sits on top of `CQCelt_Decoder`. It adds a jitter buffer, packet-loss detection by timestamp (`find_packet_loss_pos`, `on_process_packet_loss`), WSOLA time stretching (`CWsola`, `CWSolaEngine`) and sample-rate arbitration between two mics (`CSraPreDelay`, `sra_calculate`). None of this is required to get audio; it's needed for perfect timing and for dual-mic sync. Ghidra output: `SmartMike/App/Decompiled/native/libjni-smartdecoder.so.c`.
 
 ## Phone-side post-processing
 Noise suppression (`libjni-noisesuppression`), optional extra gain, stereo→mono beamformer, resampling. Not needed for raw capture.

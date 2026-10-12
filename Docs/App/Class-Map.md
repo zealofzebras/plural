@@ -1,6 +1,6 @@
 # Obfuscated class map
 
-Paths are relative to `App/Decompiled/jadx/sources/`. jadx adds `/* compiled from: X.java */` comments that sometimes reveal the original file name. The Swiss SDK core was flattened into single-letter top-level packages (`a`–`r`) plus `d4`, `e4`, `l5`, `t3`, `v3`.
+Paths are relative to `SmartMike/App/Decompiled/jadx/sources/`. jadx adds `/* compiled from: X.java */` comments that sometimes reveal the original file name. The Swiss SDK core was flattened into single-letter top-level packages (`a`–`r`) plus `d4`, `e4`, `l5`, `t3`, `v3`.
 
 ## Transport and session
 

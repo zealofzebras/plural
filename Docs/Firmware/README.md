@@ -10,7 +10,7 @@
 | SPP service name | `M_MIKE` (clone reports `M_MIKE_SLV`) | Verified in image @ 0xcb7ad; clone value from Don Bowman's SDP dump |
 | Second DSP | App lists `CS_DSP_OTA` alongside `BLUETOOTH_OTA` — possibly a separate DSP on newer models | Open |
 
-## Image inventory (`Firmware/Images/`)
+## Image inventory (`SmartMike/Firmware/Images/`)
 
 | File | Version | Size | USB PID | SHA-256 | Origin |
 |---|---|---|---|---|---|
@@ -46,7 +46,7 @@ Hardware version reported by the device: **0.1.1**.
   - `test2.sabinetek.com.cn`: HTTP 302 to Tencent DNSPod "web block" page.
   - `sdk.sabinetek.com`: HTTP redirects to HTTPS, which times out.
 - Wayback Machine: no archived API responses or firmware URLs; only the two 2020 updaters.
-- Mac updater (`Firmware/Updater/SmartMike_mac.dmg.zip`, extracted to `extracted_mac/`): Swift app "SmartMike+" by the same developer as SwissSample (`ztimc`). It has **no embedded image**; it downloads via a `BeeApi.checkFirmware` call to the (now dead) backend.
+- Mac updater (`SmartMike/Firmware/Updater/SmartMike_mac.dmg.zip`, extracted to `extracted_mac/`): Swift app "SmartMike+" by the same developer as SwissSample (`ztimc`). It has **no embedded image**; it downloads via a `BeeApi.checkFirmware` call to the (now dead) backend.
 - Conclusion: the 0.4.37 on the device is newer than any image we can obtain. **Do not flash 0.4.32 over it** unless downgrading is intended; it would lose whatever 0.4.33–0.4.37 changed.
 
 ## Open questions

@@ -2,7 +2,7 @@
 
 | Item | Value | Status |
 |---|---|---|
-| Package | `com.sabinetek.app` | Verified (`App/Decompiled/jadx/resources/AndroidManifest.xml`) |
+| Package | `com.sabinetek.app` | Verified (`SmartMike/App/Decompiled/jadx/resources/AndroidManifest.xml`) |
 | Version | 1.5.2 | Verified |
 | APK SHA-256 | `69eb239a8545ea71772077c71677418a9460462e6093b19b2204ca046b91dcab` | |
 | Build channel | `google` (Play build → uses `https://sapi.sabinetek.com`) | Inferred (APKPure mirrors Play) |
@@ -19,7 +19,7 @@
 | `com.sabine.update` | App and firmware update check + download (`FirmwareUtil`, `FirmwareBean`) |
 | `com.sabine.common.net`, `m3.a` | Retrofit client and backend API interface — see [Server-API.md](Server-API.md) |
 
-## Native libraries (`App/Decompiled/unzipped/lib/<abi>/`)
+## Native libraries (`SmartMike/App/Decompiled/unzipped/lib/<abi>/`)
 
 | Library | Likely role |
 |---|---|

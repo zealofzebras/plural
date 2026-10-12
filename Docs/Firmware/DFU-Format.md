@@ -1,6 +1,6 @@
 # CSR DFU file format (`CSR-dfu2`)
 
-Observed on all three images in `Firmware/Images/`. Integers little-endian.
+Observed on all three images in `SmartMike/Firmware/Images/`. Integers little-endian.
 
 ## Header
 

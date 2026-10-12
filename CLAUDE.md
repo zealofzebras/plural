@@ -35,7 +35,8 @@ Marketing/                      store text per locale (*.txt), store.toml, brand
 Packaging/                      MSIX manifest + build-msix.ps1 (Windows), Info.plist/entitlements/build-app.sh (macOS)
 .github/workflows/release.yml   on release: builds Windows/Android/macOS(/iOS), store packages via Tools/store/store_assets.py, attaches to release
 Tools/                          Python reference tools (swiss_protocol.py, smartmike_client.py, qcelt_decode.py)
-App/Decompiled/                 decompiled MetAudio APK (reference only; large — search, don't read whole trees)
+SmartMike/                      reverse-engineering material (README.md): App/Apk, App/Reference, Firmware/Images, Firmware/Updater
+SmartMike/App/Decompiled/       decompiled MetAudio APK (reference only; large — search, don't read whole trees)
 Docs/                           App/, Firmware/, Protocol/, Plural/Design.md, Plan.md
 ```
 

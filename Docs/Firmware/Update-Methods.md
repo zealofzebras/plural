@@ -1,8 +1,8 @@
 # Firmware update methods
 
-## 1. PC updater (USB DFU) — `Firmware/Updater/`
+## 1. PC updater (USB DFU) — `SmartMike/Firmware/Updater/`
 
-`SmartMikeDFU20200702_1_1.exe` (SHA-256 `aad88b8dd62d168a9473fc3958a016194f0da7604b9735df95445186cb278959`) is an NSIS installer. Extracted to `Firmware/Updater/extracted/`:
+`SmartMikeDFU20200702_1_1.exe` (SHA-256 `aad88b8dd62d168a9473fc3958a016194f0da7604b9735df95445186cb278959`) is an NSIS installer. Extracted to `SmartMike/Firmware/Updater/extracted/`:
 
 | File | Purpose |
 |---|---|
