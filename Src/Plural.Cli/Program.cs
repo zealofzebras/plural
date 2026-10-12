@@ -15,6 +15,7 @@ using Plural.Platform.Windows;
 //   plural formats                         recording formats available on this device
 //   plural run [MAC...] [options]          connect mics, direct outputs, mixer (faders, mutes, mix output), record; while it
 //                                          runs, typed commands change it (see RunCommand.Usage / "plural run --help")
+//   plural mcp [MAC...] [options]          the same as an MCP server on stdio, for AI clients (RunCommand.Mcp.cs)
 //   plural serve [--input NAME]... [--name NAME]   be a remote: findable, accepts any controller, records local mics
 //   smartmike control [--record SECONDS] [--peer NAME] [--video] search, control the first (or named) remote, record, collect files
 //   smartmike search                                   list Plural apps reachable over Wi-Fi and Bluetooth
@@ -76,6 +77,11 @@ switch (cmd)
         return 0;
     case "run":
         return await new RunCommand(hub, args.Skip(1).ToArray()).RunAsync();
+    case "mcp":
+        // stdout carries JSON-RPC only; everything else printed goes to stderr.
+        var mcpOut = Console.OpenStandardOutput();
+        Console.SetOut(Console.Error);
+        return await new RunCommand(hub, args.Skip(1).ToArray(), mcpOut).RunAsync();
     case "serve":
         return await Serve(args.Skip(1).ToArray());
     case "control":
@@ -93,6 +99,7 @@ switch (cmd)
         Console.WriteLine("       plural serve [--input NAME]... [--name NAME]");
         Console.WriteLine("       plural control [--record SECONDS] [--peer NAME] [--video]");
         Console.WriteLine("       plural " + RunCommand.Usage.TrimStart());
+        Console.WriteLine("       plural mcp [MAC...] [run options]   MCP server on stdin/stdout (logs on stderr) for AI clients");
         Console.WriteLine(RunCommand.ConsoleHelp);
         return cmd == "help" ? 0 : 1;
 }

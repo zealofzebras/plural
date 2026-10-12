@@ -27,6 +27,7 @@ Src/Plural.slnx
   Plural.Screenshots/        headless UI + simulated mics/peers → Marketing/screenshots (Tools/store/screenshots.ps1)
   Plural.Cli/                headless app: list | outputs | inputs | cameras | formats | search | serve | control | run (mics, direct outs,
                              faders/mutes, --mix output, record any format incl. video; live commands on stdin — `run --help`)
+                             | mcp (the same as an MCP server on stdio for AI clients — RunCommand.Mcp.cs)
 Native/celt/                    CELT 0.7.1 per RID; build-windows.sh (llvm-mingw), build-android.sh (NDK r29)
 Native/lame/                    LAME 3.100 (MP3) per RID; build-windows.sh, build-android.sh (same toolchains)
                                 both libs: build-macos.sh (dylibs) and build-ios.sh (xcframeworks via Native/ios-framework.sh), run in CI

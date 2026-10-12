@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Text.RegularExpressions;
 using Plural.Core.Platform;
 using Plural.Core.Protocol;
 using Plural.Core.Recording;
@@ -7,8 +8,9 @@ using Plural.Core.Session;
 /// <summary>
 /// <c>run</c>: connect mics, route live outputs, mix, and record — headless, with the same capabilities as the app's mixer.
 /// Options set the starting state; while it runs, commands typed on stdin change it (also during a take).
+/// With <paramref name="mcpOut"/> it is an MCP server instead: tools over stdin/<paramref name="mcpOut"/> (RunCommand.Mcp.cs).
 /// </summary>
-sealed class RunCommand(MikeHub hub, string[] a)
+sealed partial class RunCommand(MikeHub hub, string[] a, Stream? mcpOut = null)
 {
     public const string Usage = """
         run [MAC...] [options]          connect mics, stream, mix, record (Ctrl+C or "quit" to end)
@@ -34,6 +36,8 @@ sealed class RunCommand(MikeHub hub, string[] a)
     public const string ConsoleHelp = """
         commands (MIC = number from "status", part of its name, or "all"):
           status                       mics, levels, outputs, mix and recording
+          devices                      paired SmartMikes, local mics, outputs, cameras, formats
+          add MAC|NAME                 add and connect a paired SmartMike or local mic
           record [SECONDS]             start a take (stops by itself after SECONDS)
           stop                         finish the take
           fader MIC DB                 channel level (-60/off … +12)
@@ -69,6 +73,7 @@ sealed class RunCommand(MikeHub hub, string[] a)
         lock (_consoleLock)
         {
             Console.WriteLine(line);
+            Captured(line);
         }
     }
 
@@ -104,17 +109,16 @@ sealed class RunCommand(MikeHub hub, string[] a)
         if (devices.Count == 0 && inputs.Count == 0)
         {
             Console.Error.WriteLine(inputFilters.Count == 0 && micFilters.Count == 0 ? "no SmartMikes paired" : "no matching mics");
-            return 1;
+            if (mcpOut is null)
+            {
+                return 1; // an MCP client can still add mics later
+            }
         }
         _channels.AddRange(devices.Select(hub.Add));
         _channels.AddRange(inputs.Select(hub.Add));
-        foreach (var s in _channels.Select(c => c.Session).OfType<MikeSession>())
+        foreach (var ch in _channels)
         {
-            s.StateChanged += x => Say($"[{x.Device.Name}] {x.State}{(x.LastError is { } e ? $" ({e})" : "")}");
-            if (a.Contains("--verbose"))
-            {
-                s.Log += (x, m) => Say($"[{x.Device.Name}] {m}");
-            }
+            Watch(ch);
         }
 
         Console.CancelKeyPress += (_, e) =>
@@ -147,7 +151,13 @@ sealed class RunCommand(MikeHub hub, string[] a)
         // Connect everything, then route outputs.
         var outputFilter = Opt("--output");
         var outputs = outputFilter is null ? [] : FindOutputs(outputFilter);
-        await Task.WhenAll(_channels.Select(ConnectAsync));
+        var connecting = Task.WhenAll(_channels.Select(ConnectAsync));
+        if (mcpOut is not null)
+        {
+            // Answer the client right away; mics keep connecting meanwhile.
+            _ = Task.Run(McpLoopAsync);
+        }
+        await connecting;
         for (var i = 0; i < _channels.Count && i < outputs.Count; i++)
         {
             SetOutput(_channels[i], outputs[i]);
@@ -161,15 +171,22 @@ sealed class RunCommand(MikeHub hub, string[] a)
             await OpenCameraAsync();
         }
 
-        _meters = a.Contains("--meters") || Console.IsInputRedirected;
-        // Commands come from the keyboard or a pipe, e.g. printf 'record\nwait 5\nfader 1 -6\nwait 5\nquit\n' | plural run …
-        if (!Console.IsInputRedirected)
+        if (mcpOut is not null)
         {
-            Say("type \"help\" for commands");
+            Console.WriteLine("MCP server ready"); // log only, not an event for the client
         }
-        _ = Task.Run(CommandLoopAsync);
+        else
+        {
+            _meters = a.Contains("--meters") || Console.IsInputRedirected;
+            // Commands come from the keyboard or a pipe, e.g. printf 'record\nwait 5\nfader 1 -6\nwait 5\nquit\n' | plural run …
+            if (!Console.IsInputRedirected)
+            {
+                Say("type \"help\" for commands");
+            }
+            _ = Task.Run(CommandLoopAsync);
+        }
 
-        if (Opt("--record") is { } secondsText)
+        if (mcpOut is null && Opt("--record") is { } secondsText)
         {
             var seconds = double.Parse(secondsText, CultureInfo.InvariantCulture);
             await Task.Delay(1000, _cts.Token).ContinueWith(_ => { });
@@ -188,7 +205,7 @@ sealed class RunCommand(MikeHub hub, string[] a)
                 _cts.Cancel();
             }
         }
-        else
+        else if (mcpOut is null)
         {
             Say("streaming — Ctrl+C or \"quit\" to stop");
         }
@@ -299,6 +316,56 @@ sealed class RunCommand(MikeHub hub, string[] a)
         {
             Say($"camera {camera.Name} failed: {ex.Message}");
         }
+    }
+
+    private void Watch(MikeChannel ch)
+    {
+        if (ch.Session is not { } s)
+        {
+            return;
+        }
+        s.StateChanged += x => Say($"[{x.Device.Name}] {x.State}{(x.LastError is { } e ? $" ({e})" : "")}");
+        if (a.Contains("--verbose"))
+        {
+            s.Log += (x, m) => Say($"[{x.Device.Name}] {m}");
+        }
+    }
+
+    [GeneratedRegex("^([0-9A-Fa-f]{2}[:-]?){5}[0-9A-Fa-f]{2}$")]
+    private static partial Regex MacPattern();
+
+    /// <summary>Adds a paired SmartMike (MAC or name part) or a local mic (name part) as a new channel and connects it.</summary>
+    private async Task AddAsync(string which)
+    {
+        var paired = hub.Bluetooth.GetPairedDevices();
+        MikeChannel ch;
+        if (MacPattern().IsMatch(which))
+        {
+            var address = BluetoothAddress.Parse(which);
+            ch = hub.Add(paired.FirstOrDefault(p => p.Address == address) ?? new PairedDevice(address, which));
+        }
+        else if (paired.FirstOrDefault(p => p.LooksLikeSmartMike && p.Name.Contains(which, StringComparison.OrdinalIgnoreCase)) is { } device)
+        {
+            ch = hub.Add(device);
+        }
+        else if (hub.FindInputs().FirstOrDefault(i => i.Name.Contains(which, StringComparison.OrdinalIgnoreCase)) is { } input)
+        {
+            ch = hub.Add(input);
+        }
+        else
+        {
+            Say($"no paired SmartMike or local mic matching \"{which}\" (see \"devices\")");
+            return;
+        }
+        if (_channels.IndexOf(ch) is var existing and >= 0)
+        {
+            Say($"[{ch.Source.DisplayName}] is already mic {existing + 1} ({ch.Source.State})");
+            return;
+        }
+        _channels.Add(ch);
+        Watch(ch);
+        Say($"[{ch.Source.DisplayName}] added as mic {_channels.Count}");
+        await ConnectAsync(ch);
     }
 
     private async Task ConnectAsync(MikeChannel ch)
@@ -449,6 +516,73 @@ sealed class RunCommand(MikeHub hub, string[] a)
         }
     }
 
+    private void SetDirectOutput(string which, string output)
+    {
+        var off = output.Equals("off", StringComparison.OrdinalIgnoreCase);
+        var device = off ? null : FindOutputs(output).FirstOrDefault();
+        if (device is null && !off)
+        {
+            return;
+        }
+        foreach (var ch in Find(which))
+        {
+            SetOutput(ch, device);
+        }
+    }
+
+    private void Master(double? db, bool? muted)
+    {
+        if (muted is { } m)
+        {
+            hub.Mix.Muted = m;
+            Say($"mix {(m ? "muted" : "unmuted")}");
+        }
+        if (db is { } d)
+        {
+            hub.Mix.FaderDb = d;
+            Say($"master {Db(hub.Mix.FaderDb)}");
+        }
+    }
+
+    private async Task DisconnectAsync(string which)
+    {
+        foreach (var ch in Find(which))
+        {
+            ch.SetOutput(null);
+            await ch.Source.DisconnectAsync();
+            Say($"[{ch.Source.DisplayName}] disconnected");
+        }
+    }
+
+    private async Task SetFormatAsync(string format)
+    {
+        if (hub.IsRecording)
+        {
+            Say("finish the take first");
+            return;
+        }
+        hub.RecordingSettings = hub.RecordingSettings with { Format = ParseFormat(format) };
+        Say($"format {hub.RecordingSettings.Format.DisplayName()}");
+        if (hub.RecordingSettings.Format.IsVideo())
+        {
+            await OpenCameraAsync();
+        }
+    }
+
+    private async Task RecordAsync(double seconds)
+    {
+        if (hub.IsRecording)
+        {
+            Say("already recording");
+            return;
+        }
+        if (hub.RecordingSettings.Format.IsVideo())
+        {
+            await OpenCameraAsync();
+        }
+        StartRecording(seconds);
+    }
+
     private bool StartRecording(double seconds)
     {
         try
@@ -538,6 +672,34 @@ sealed class RunCommand(MikeHub hub, string[] a)
         }
     }
 
+    private void PrintDevices()
+    {
+        int MicNumber(Predicate<MikeChannel> match) => _channels.FindIndex(match) + 1;
+        static string Added(int n) => n > 0 ? $"   (mic {n})" : "";
+        Say("paired SmartMikes:");
+        foreach (var d in hub.FindSmartMikes())
+        {
+            Say($"  {d.Address}  {d.Name}{Added(MicNumber(c => c.Session?.Device.Address == d.Address))}");
+        }
+        Say("local mics:");
+        foreach (var i in hub.FindInputs())
+        {
+            Say($"  {i.Name}{Added(MicNumber(c => c.Source.Id == LocalMic.IdFor(i)))}");
+        }
+        Say("outputs:");
+        foreach (var o in hub.Audio.GetOutputDevices())
+        {
+            Say($"  {(o.IsVirtualCable ? "[cable] " : "")}{o.Name}");
+        }
+        Say("cameras:");
+        foreach (var c in hub.Video?.GetCameras() ?? [])
+        {
+            Say($"  {c.Name}{(c.IsFrontFacing ? " (front)" : "")}");
+        }
+        Say($"formats: {string.Join(", ", hub.AvailableFormats).ToLowerInvariant()}");
+        Say($"settings: {string.Join(", ", Enum.GetNames<MikeSetting>())}");
+    }
+
     // ------------------------------------------------------------------ console
 
     private async Task CommandLoopAsync()
@@ -586,17 +748,14 @@ sealed class RunCommand(MikeHub hub, string[] a)
                     Say($"{(o.IsVirtualCable ? "[cable] " : "        ")}{o.Name}");
                 }
                 break;
+            case "devices":
+                PrintDevices();
+                break;
+            case "add" when args.Length >= 1:
+                await AddAsync(Rest(0));
+                break;
             case "record" or "rec" or "r":
-                if (hub.IsRecording)
-                {
-                    Say("already recording");
-                    break;
-                }
-                if (hub.RecordingSettings.Format.IsVideo())
-                {
-                    await OpenCameraAsync();
-                }
-                StartRecording(args.Length > 0 ? double.Parse(args[0], CultureInfo.InvariantCulture) : 0);
+                await RecordAsync(args.Length > 0 ? double.Parse(args[0], CultureInfo.InvariantCulture) : 0);
                 break;
             case "stop":
                 await StopRecordingAsync();
@@ -611,14 +770,7 @@ sealed class RunCommand(MikeHub hub, string[] a)
                 Mute(args[0], false);
                 break;
             case "out" when args.Length >= 2:
-                var device = Rest(1).Equals("off", StringComparison.OrdinalIgnoreCase) ? null : FindOutputs(Rest(1)).FirstOrDefault();
-                if (device is not null || Rest(1).Equals("off", StringComparison.OrdinalIgnoreCase))
-                {
-                    foreach (var ch in Find(args[0]))
-                    {
-                        SetOutput(ch, device);
-                    }
-                }
+                SetDirectOutput(args[0], Rest(1));
                 break;
             case "mix" when args.Length >= 1:
                 SetMix(Rest(0));
@@ -626,13 +778,11 @@ sealed class RunCommand(MikeHub hub, string[] a)
             case "master" when args.Length == 1:
                 if (args[0] is "mute" or "unmute")
                 {
-                    hub.Mix.Muted = args[0] == "mute";
-                    Say($"mix {(hub.Mix.Muted ? "muted" : "unmuted")}");
+                    Master(null, args[0] == "mute");
                 }
                 else if (TryDb(args[0], out var master))
                 {
-                    hub.Mix.FaderDb = master;
-                    Say($"master {Db(hub.Mix.FaderDb)}");
+                    Master(master, null);
                 }
                 break;
             case "set" when args.Length == 2:
@@ -645,25 +795,10 @@ sealed class RunCommand(MikeHub hub, string[] a)
                 await Task.WhenAll(Find(args[0]).Select(ConnectAsync));
                 break;
             case "disconnect" when args.Length == 1:
-                foreach (var ch in Find(args[0]))
-                {
-                    ch.SetOutput(null);
-                    await ch.Source.DisconnectAsync();
-                    Say($"[{ch.Source.DisplayName}] disconnected");
-                }
+                await DisconnectAsync(args[0]);
                 break;
             case "format" when args.Length == 1:
-                if (hub.IsRecording)
-                {
-                    Say("finish the take first");
-                    break;
-                }
-                hub.RecordingSettings = hub.RecordingSettings with { Format = ParseFormat(args[0]) };
-                Say($"format {hub.RecordingSettings.Format.DisplayName()}");
-                if (hub.RecordingSettings.Format.IsVideo())
-                {
-                    await OpenCameraAsync();
-                }
+                await SetFormatAsync(args[0]);
                 break;
             case "wait" when args.Length == 1:
                 await Task.Delay(TimeSpan.FromSeconds(double.Parse(args[0], CultureInfo.InvariantCulture)), _cts.Token);
