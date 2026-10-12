@@ -45,10 +45,10 @@ internal static class MediaFixtures
     }
 
     /// <summary>MKA with one FLAC track whose first block is at <paramref name="startTicks"/>.</summary>
-    public static byte[] MkaFlac(short[] pcm, string name = "Mic", long startTicks = 0, int skipBlock = -1)
+    public static byte[] MkaFlac(short[] pcm, string name = "Mic", long startTicks = 0, int skipBlock = -1, bool crash = false)
     {
         var ms = new MemoryStream();
-        using (var w = new MatroskaWriter(ms, "t", leaveOpen: true))
+        using (var w = new MatroskaWriter(crash ? new NonSeekableStream(ms) : ms, "t", leaveOpen: true))
         {
             var flac = new FlacEncoder();
             var t = w.AddAudio(name, "A_FLAC", 44100, 1, 16, flac.BuildHeader());
@@ -83,12 +83,12 @@ internal static class MediaFixtures
     }
 
     /// <summary>Video (fake H.264, key frame every 30) + two FLAC tracks, <paramref name="seconds"/> long. Returns the file and the video block payloads.</summary>
-    public static (byte[] File, List<byte[]> Video) Mkv(int seconds, int rotation = 90)
+    public static (byte[] File, List<byte[]> Video) Mkv(int seconds, int rotation = 90, bool crash = false)
     {
         var ms = new MemoryStream();
         var key = AnnexBKeyFrame();
         var video = new List<byte[]>();
-        using (var w = new MatroskaWriter(ms, "Take", leaveOpen: true))
+        using (var w = new MatroskaWriter(crash ? new NonSeekableStream(ms) : ms, "Take", leaveOpen: true))
         {
             var v = w.AddVideo("Video", 1280, 720, 30, rotation);
             var flacs = new[] { new FlacEncoder(), new FlacEncoder() };
@@ -126,11 +126,11 @@ internal static class MediaFixtures
     public static readonly byte[] Avcc = [1, 0x42, 0xC0, 0x1F, 0xFF, 0xE1, 0, 2, 0x67, 0x42, 1, 0, 1, 0x68];
 
     /// <summary>Fragmented MP4: video (30 fps, key every 30, starting at <paramref name="videoStart"/>) + <paramref name="audioTracks"/> fake AAC tracks.</summary>
-    public static (byte[] File, List<byte[]> Video) Mp4(int seconds, int rotation = 90, long videoStart = 0, int audioTracks = 1, int priming = 0)
+    public static (byte[] File, List<byte[]> Video) Mp4(int seconds, int rotation = 90, long videoStart = 0, int audioTracks = 1, int priming = 0, bool crash = false)
     {
         var ms = new MemoryStream();
         var video = new List<byte[]>();
-        using (var w = new Mp4Writer(ms, audioOnly: false, leaveOpen: true))
+        using (var w = new Mp4Writer(crash ? new NonSeekableStream(ms) : ms, audioOnly: false, leaveOpen: true))
         {
             var v = w.AddVideo("Video", 1920, 1080, rotation);
             v.AvcC = Avcc;
@@ -152,10 +152,10 @@ internal static class MediaFixtures
         return (ms.ToArray(), video);
     }
 
-    public static byte[] M4a(int packets, int priming = 0, int audioStart = 0)
+    public static byte[] M4a(int packets, int priming = 0, int audioStart = 0, bool crash = false)
     {
         var ms = new MemoryStream();
-        using (var w = new Mp4Writer(ms, audioOnly: true, leaveOpen: true))
+        using (var w = new Mp4Writer(crash ? new NonSeekableStream(ms) : ms, audioOnly: true, leaveOpen: true))
         {
             var t = w.AddAudio("Mic", 44100, 1, [0x12, 0x08]);
             t.PrimingSamples = priming;
@@ -1443,5 +1443,368 @@ public class AudioTrackDecoderTests
             public void Reset() { }
             public void Dispose() { }
         }
+    }
+}
+
+internal static class TinyMp4
+{
+    public static byte[] U32(uint v) { var b = new byte[4]; BinaryPrimitives.WriteUInt32BigEndian(b, v); return b; }
+
+    public static byte[] Box(string type, params byte[][] parts)
+    {
+        var body = parts.SelectMany(p => p).ToArray();
+        return [.. U32((uint)(body.Length + 8)), .. Encoding.ASCII.GetBytes(type), .. body];
+    }
+
+    /// <summary>A trak with mdhd (timescale, duration), hdlr (<paramref name="handler"/>) and the given stbl children.</summary>
+    public static byte[] Trak(string handler, uint timescale, uint duration, params byte[][] stbl) =>
+        Box("trak", Box("mdia",
+            Box("mdhd", new byte[4], U32(0), U32(0), U32(timescale), U32(duration), new byte[4]),
+            Box("hdlr", new byte[4], U32(0), Encoding.ASCII.GetBytes(handler), new byte[12], [0]),
+            Box("minf", Box("stbl", stbl))));
+
+    public static byte[] File(params byte[][] moovChildren) =>
+        [.. Box("ftyp", Encoding.ASCII.GetBytes("isom"), U32(0)), .. Box("moov", moovChildren), .. Box("mdat", new byte[64])];
+}
+
+public class Mp4WriterRobustnessTests
+{
+    private sealed class FlushCounter : MemoryStream
+    {
+        public int Flushes;
+        public override void Flush() { Flushes++; base.Flush(); }
+    }
+
+    [Fact]
+    public void MoovAndEveryFragment_AreFlushedImmediately()
+    {
+        var ms = new FlushCounter();
+        using var w = new Mp4Writer(ms, audioOnly: true, leaveOpen: true);
+        var t = w.AddAudio("Mic", 44100, 1, [0x12, 0x08]);
+        for (var k = 0; k < 108; k++) { w.WriteSample(t, 0, BitConverter.GetBytes(k)); } // 2.5 s: moov + fragment 1 at 1 s, fragment 2 at 2 s
+        Assert.True(ms.Length > 0);
+        Assert.True(ms.Flushes >= 3, $"flushes before Dispose: {ms.Flushes}");
+    }
+
+    [Fact]
+    public void VideoWithoutKeyFrame_IsDroppedAfterBoundedWait_AudioReachesTheDisk()
+    {
+        var ms = new MemoryStream();
+        var w = new Mp4Writer(ms, audioOnly: false, leaveOpen: true);
+        var v = w.AddVideo("Video", 640, 480);
+        var a = w.AddAudio("Mic", 44100, 1, [0x12, 0x08]);
+        for (var k = 0; k < 100; k++) { w.WriteSample(a, 0, BitConverter.GetBytes(k)); } // 2.3 s: still waiting
+        Assert.Equal(0, ms.Length);
+        Assert.False(w.VideoDropped);
+        for (var k = 100; k < 140; k++) { w.WriteSample(a, 0, BitConverter.GetBytes(k)); } // 3.2 s: gives up
+        Assert.True(w.VideoDropped);
+        Assert.True(v.Dropped);
+        Assert.True(ms.Length > 0, "moov and the buffered audio are on disk");
+        v.AvcC = MediaFixtures.Avcc;
+        w.WriteSample(v, 0, new byte[] { 1, 2 }, true); // too late: ignored
+        for (var k = 140; k < 200; k++) { w.WriteSample(a, 0, BitConverter.GetBytes(k)); }
+        w.Dispose();
+
+        var file = ms.ToArray();
+        var moov = Mp4Box.ParseFile(file).Path("moov");
+        var trak = Assert.Single(moov.FindAll("trak"));
+        Assert.Equal(2u, trak.Path("tkhd").U32(12)); // the audio track keeps its id
+        Assert.Single(moov.Path("mvex").FindAll("trex"));
+        using var r = new Mp4Reader(new MemoryStream(file));
+        Assert.Equal(MediaKind.Audio, Assert.Single(r.Tracks).Kind);
+        Assert.Equal(200, MediaFixtures.ReadAll(r).Count);
+    }
+
+    [Fact]
+    public void VideoNeverConfigured_DropsItAtDispose()
+    {
+        var ms = new MemoryStream();
+        var w = new Mp4Writer(ms, audioOnly: false, leaveOpen: true);
+        w.AddVideo("Video", 640, 480);
+        var a = w.AddAudio("Mic", 44100, 1, [0x12, 0x08]);
+        for (var k = 0; k < 10; k++) { w.WriteSample(a, 0, BitConverter.GetBytes(k)); }
+        w.Dispose();
+        Assert.True(w.VideoDropped);
+        using var r = new Mp4Reader(new MemoryStream(ms.ToArray()));
+        Assert.Equal(MediaKind.Audio, Assert.Single(r.Tracks).Kind); // no empty avcC that players reject
+        Assert.Equal(10, MediaFixtures.ReadAll(r).Count);
+    }
+
+    [Fact]
+    public void CrashImage_HasNoHalfPatchedEditList_ButOurReaderStillHonoursOffsetAndPriming()
+    {
+        var ms = new MemoryStream();
+        var w = new Mp4Writer(ms, audioOnly: false, leaveOpen: true);
+        var v = w.AddVideo("Video", 640, 480);
+        v.AvcC = MediaFixtures.Avcc;
+        var a = w.AddAudio("Mic", 44100, 1, [0x12, 0x08]);
+        a.PrimingSamples = 1024;
+        var audio = 0;
+        for (var i = 0; i < 75; i++)
+        {
+            w.WriteSample(v, 5_000_000 + i * 10_000_000L / 30, new byte[] { (byte)i, 1, 2 }, i % 30 == 0);
+            while (audio * 1024.0 / 44100 <= (i + 1) / 30.0) { w.WriteSample(a, 0, BitConverter.GetBytes(audio++)); }
+        }
+        var crashed = ms.ToArray();
+        w.Dispose();
+        var finished = ms.ToArray();
+
+        foreach (var trak in Mp4Box.ParseFile(crashed).Path("moov").FindAll("trak")) { Assert.Null(trak.Find("edts")); }
+        Assert.All(Mp4Box.ParseFile(finished).Path("moov").FindAll("trak"), t => Assert.NotNull(t.Find("edts")));
+
+        long First(byte[] f, int track) => MediaFixtures.ReadAll(f).First(p => p.Track == track).Timestamp;
+        Assert.Equal(First(finished, 0), First(crashed, 0));
+        Assert.Equal(5_000_000, First(crashed, 0));
+        Assert.Equal(First(finished, 1), First(crashed, 1));
+        Assert.True(First(crashed, 1) < 0);
+    }
+}
+
+public class ReaderFuzzTests
+{
+    private static byte[] Mutate(byte[] seed, Random rnd)
+    {
+        var d = (byte[])seed.Clone();
+        var kind = rnd.Next(6);
+        if (kind == 5) { return d[..rnd.Next(1, d.Length)]; }
+        var edits = rnd.Next(1, 5);
+        for (var e = 0; e < edits; e++)
+        {
+            // most of the structure (headers, tables) sits at the start
+            var at = rnd.Next(100) < 70 ? rnd.Next(Math.Min(d.Length, 3000)) : rnd.Next(d.Length);
+            switch (kind)
+            {
+                case 0: d[at] ^= (byte)(1 << rnd.Next(8)); break;
+                case 1: d[at] = (byte)rnd.Next(256); break;
+                case 2: for (var i = 0; i < 4 && at + i < d.Length; i++) { d[at + i] = 0xFF; } break;
+                case 3: if (at + 3 < d.Length) { d[at] = 0x7F; d[at + 1] = d[at + 2] = d[at + 3] = 0xFF; } break;
+                default: for (var i = 0; i < 4 && at + i < d.Length; i++) { d[at + i] = 0; } break;
+            }
+        }
+        return d;
+    }
+
+    internal static void Exercise(byte[] data, Func<Stream, IMediaReader> open, string what)
+    {
+        var before = GC.GetAllocatedBytesForCurrentThread();
+        try
+        {
+            using var r = open(new MemoryStream(data));
+            for (var n = 0; n < 5000 && r.TryRead(out _); n++) { }
+            r.Seek(TimeSpan.FromSeconds(1));
+            for (var n = 0; n < 5000 && r.TryRead(out _); n++) { }
+        }
+        catch (Exception ex) when (ex is InvalidDataException or IOException) { }
+        catch (Exception ex) { Assert.Fail($"{what}: {ex.GetType().Name}: {ex.Message}\n{ex.StackTrace}"); }
+        var allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+        Assert.True(allocated < 96L << 20, $"{what}: allocated {allocated >> 20} MB for a {data.Length} byte file");
+    }
+
+    private static void Fuzz(string name, byte[] seed, Func<Stream, IMediaReader> open, int cases)
+    {
+        var rnd = new Random(name.Length * 7919 + 12345);
+        Exercise(seed, open, name + " (original)");
+        // PLURAL_FUZZ_SCALE=10 for a longer local run
+        cases *= int.TryParse(Environment.GetEnvironmentVariable("PLURAL_FUZZ_SCALE"), out var scale) && scale > 0 ? scale : 1;
+        for (var i = 0; i < cases; i++) { Exercise(Mutate(seed, rnd), open, $"{name} case {i}"); }
+    }
+
+    internal static IMediaReader Mp4(Stream s) => new Mp4Reader(s);
+    private static IMediaReader Mkv(Stream s) => new MatroskaReader(s);
+
+    [Fact]
+    public void Mp4Reader_SurvivesMutatedWriterOutput()
+    {
+        Fuzz("mp4", MediaFixtures.Mp4(2, videoStart: 3_000_000, audioTracks: 2, priming: 1024).File, Mp4, 400);
+        Fuzz("mp4-crash", MediaFixtures.Mp4(2, crash: true).File, Mp4, 200);
+        Fuzz("m4a", MediaFixtures.M4a(100, priming: 1024), Mp4, 200);
+    }
+
+    [Fact]
+    public void MatroskaReader_SurvivesMutatedWriterOutput()
+    {
+        Fuzz("mkv", MediaFixtures.Mkv(2).File, Mkv, 400);
+        Fuzz("mkv-crash", MediaFixtures.Mkv(2, crash: true).File, Mkv, 200);
+        Fuzz("mka", MediaFixtures.MkaFlac(MediaFixtures.Tone(44100, 440)), Mkv, 200);
+        Fuzz("mka-pcm", MediaFixtures.MkaPcm(MediaFixtures.Tone(20000, 440)), Mkv, 100);
+    }
+
+    [Fact]
+    public void ProgressiveMp4_WithAbsurdTables_IsBoundedByTheFile()
+    {
+        var stbl = new[]
+        {
+            TinyMp4.Box("stsd", TinyMp4.U32(0), TinyMp4.U32(0)),
+            TinyMp4.Box("stts", TinyMp4.U32(0), TinyMp4.U32(1), TinyMp4.U32(uint.MaxValue), TinyMp4.U32(1024)),
+            TinyMp4.Box("stsc", TinyMp4.U32(0), TinyMp4.U32(1), TinyMp4.U32(1), TinyMp4.U32(uint.MaxValue), TinyMp4.U32(1)),
+            TinyMp4.Box("stsz", TinyMp4.U32(0), TinyMp4.U32(1), TinyMp4.U32(uint.MaxValue)), // 4 billion samples of 1 byte
+            TinyMp4.Box("stco", TinyMp4.U32(0), TinyMp4.U32(1), TinyMp4.U32(8)),
+        };
+        Exercise(TinyMp4.File(TinyMp4.Trak("soun", 44100, 1000, stbl)), Mp4, "huge fixed-size tables");
+
+        // sizes of 4 GB each, a chunk count that exceeds the payload, and a short stsz
+        var stbl2 = new[]
+        {
+            TinyMp4.Box("stsd", TinyMp4.U32(0), TinyMp4.U32(0)),
+            TinyMp4.Box("stsz", TinyMp4.U32(0), TinyMp4.U32(0), TinyMp4.U32(uint.MaxValue), TinyMp4.U32(uint.MaxValue)),
+            TinyMp4.Box("stco", TinyMp4.U32(0), TinyMp4.U32(uint.MaxValue), TinyMp4.U32(8)),
+            TinyMp4.Box("stsc", TinyMp4.U32(0), TinyMp4.U32(2), TinyMp4.U32(1), TinyMp4.U32(1), TinyMp4.U32(1)),
+        };
+        Exercise(TinyMp4.File(TinyMp4.Trak("soun", 44100, 1000, stbl2)), Mp4, "huge sizes");
+        Exercise(TinyMp4.File(TinyMp4.Box("mvex", TinyMp4.Box("mehd", [1]), TinyMp4.Box("trex", [0, 0]))), Mp4, "short mehd/trex");
+        Exercise(TinyMp4.File(TinyMp4.Box("trak", TinyMp4.Box("tkhd"), TinyMp4.Box("mdia", TinyMp4.Box("mdhd", [0]), TinyMp4.Box("hdlr")))), Mp4, "empty boxes");
+    }
+}
+
+public class AudioTrackDecoderRobustnessTests
+{
+    private static short[] ReadAll(AudioTrackDecoder d, int chunk = 4000)
+    {
+        var all = new List<short>();
+        var buf = new short[chunk];
+        int n;
+        while ((n = d.Read(buf)) > 0) { all.AddRange(buf.AsSpan(0, n)); }
+        return all.ToArray();
+    }
+
+    private sealed class FailingFactory(int failAt, bool failDrain = false) : IAudioDecoderFactory
+    {
+        public bool CanDecode(string codec) => true;
+        public IAudioDecoder Create(string codec, int sampleRate, int channels, ReadOnlyMemory<byte> codecPrivate) => new Dec(sampleRate, channels, failAt, failDrain);
+
+        private sealed class Dec(int rate, int ch, int failAt, bool failDrain) : IAudioDecoder
+        {
+            private int _n;
+            public int SampleRate => rate;
+            public int Channels => ch;
+            public void Decode(ReadOnlySpan<byte> packet, Action<ReadOnlySpan<short>> output)
+            {
+                if (_n++ == failAt) { throw new InvalidDataException("corrupt packet"); }
+                output(new short[1024 * ch]);
+            }
+            public void Drain(Action<ReadOnlySpan<short>> output) { if (failDrain) { throw new InvalidOperationException("drain failed"); } }
+            public void Reset() { _n = 0; }
+            public void Dispose() { }
+        }
+    }
+
+    [Fact]
+    public void DecoderException_EndsTheTrackWithAProblem_InsteadOfThrowing()
+    {
+        using var tmp = new TempFiles();
+        var path = tmp.Write("a.m4a", MediaFixtures.M4a(100));
+        using (var d = AudioTrackDecoder.Open(path, factory: new FailingFactory(failAt: 5)))
+        {
+            Assert.Equal(5 * 1024, ReadAll(d).Length); // everything before the corrupt packet
+            Assert.Contains("corrupt packet", d.Problem);
+            Assert.True(d.CanPlay);
+            Assert.Equal(0, d.Read(new short[100]));
+            d.Seek(TimeSpan.Zero); // a seek back to the good part works again
+            Assert.Equal(1024, d.Read(new short[1024]));
+        }
+        using (var d = AudioTrackDecoder.Open(path, factory: new FailingFactory(failAt: -1, failDrain: true)))
+        {
+            Assert.Equal(100 * 1024, ReadAll(d).Length);
+            Assert.Contains("drain failed", d.Problem);
+        }
+    }
+
+    [Fact]
+    public void CorruptFlacBlocks_NeverThrowAtPlayTime()
+    {
+        using var tmp = new TempFiles();
+        var good = MediaFixtures.MkaFlac(MediaFixtures.Tone(44100, 440));
+        var rnd = new Random(5);
+        for (var i = 0; i < 40; i++)
+        {
+            var bad = (byte[])good.Clone();
+            for (var k = 0; k < 6; k++) { bad[rnd.Next(bad.Length / 4, bad.Length)] ^= (byte)rnd.Next(1, 256); }
+            AudioTrackDecoder d;
+            try { d = AudioTrackDecoder.Open(tmp.Write($"c{i}.mka", bad)); }
+            catch (Exception ex) when (ex is InvalidDataException or IOException) { continue; } // header damage is reported when opening
+            using (d) { _ = ReadAll(d); }
+        }
+    }
+
+    private static byte[] PcmMkaWithBlocksAt(params long[] startTicks)
+    {
+        var ms = new MemoryStream();
+        using (var w = new MatroskaWriter(ms, "t", leaveOpen: true))
+        {
+            var t = w.AddAudio("Pcm", "A_PCM/INT/LIT", 44100, 1, 16);
+            foreach (var at in startTicks)
+            {
+                var b = new byte[4096 * 2];
+                for (var k = 0; k < 4096; k++) { BinaryPrimitives.WriteInt16LittleEndian(b.AsSpan(2 * k), (short)(1000 + (int)(at / 10_000_000))); }
+                w.WriteBlock(t, at, b);
+            }
+        }
+        return ms.ToArray();
+    }
+
+    [Fact]
+    public void LongTimestampGap_IsNotMaterialized_ButKeepsTheTimeline()
+    {
+        using var tmp = new TempFiles();
+        var allocBefore = GC.GetAllocatedBytesForCurrentThread();
+        using var d = AudioTrackDecoder.Open(tmp.Write("gap.mka", PcmMkaWithBlocksAt(0, 300_000_000))); // second block at 30 s
+        var all = ReadAll(d, 44100);
+        Assert.InRange(all.Length, 30 * 44100 + 4096 - 50, 30 * 44100 + 4096 + 50);
+        Assert.Equal(1000, all[100]);
+        Assert.Equal(0, all[15 * 44100]);
+        Assert.Equal(1030, all[^100]);
+        Assert.True(GC.GetAllocatedBytesForCurrentThread() - allocBefore < 64L << 20);
+    }
+
+    [Fact]
+    public void ImplausibleTimestampJump_StopsWithAProblem()
+    {
+        using var tmp = new TempFiles();
+        using var d = AudioTrackDecoder.Open(tmp.Write("jump.mka", PcmMkaWithBlocksAt(0, 7200L * 10_000_000))); // 2 hours later
+        var all = ReadAll(d);
+        Assert.Equal(4096, all.Length);
+        Assert.Contains("timestamp", d.Problem, StringComparison.OrdinalIgnoreCase);
+    }
+}
+
+public class Mp3ReaderOpenCostTests
+{
+    private sealed class CountingStream(Stream inner) : Stream
+    {
+        public long Reads;
+        public override bool CanRead => true;
+        public override bool CanSeek => true;
+        public override bool CanWrite => false;
+        public override long Length => inner.Length;
+        public override long Position { get => inner.Position; set => inner.Position = value; }
+        public override void Flush() { }
+        public override int Read(byte[] buffer, int offset, int count) { Reads++; return inner.Read(buffer, offset, count); }
+        public override int Read(Span<byte> buffer) { Reads++; return inner.Read(buffer); }
+        public override long Seek(long offset, SeekOrigin origin) => inner.Seek(offset, origin);
+        public override void SetLength(long value) => throw new NotSupportedException();
+        public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+    }
+
+    [Fact]
+    public void CbrFileWithoutXing_IsEstimatedFromItsSize_NotScannedAtOpen()
+    {
+        // 2000 CBR frames (128 kbit/s, 44.1 kHz, mono) = 52 s, no Xing/Info/VBRI header
+        var bytes = new List<byte>();
+        double acc = 0;
+        for (var i = 0; i < 2000; i++)
+        {
+            acc += 144.0 * 128000 / 44100;
+            var len = (int)acc; acc -= len;
+            bytes.AddRange(new byte[] { 0xFF, 0xFB, (byte)(0x90 | (len == 418 ? 2 : 0)), 0xC0 });
+            bytes.AddRange(new byte[len - 4]);
+        }
+        var counting = new CountingStream(new MemoryStream(bytes.ToArray()));
+        using var r = new Mp3Reader(counting);
+        Assert.True(counting.Reads < 100, $"reads at open: {counting.Reads}");
+        Assert.InRange(r.Duration.TotalSeconds, 52.2 - 0.1, 52.2 + 0.1);
+        // seeking still works (scans on demand)
+        r.Seek(TimeSpan.FromSeconds(10));
+        Assert.True(r.TryRead(out var p));
+        Assert.InRange(p.Timestamp, 10_000_000 * 10 - 270_000, 10_000_000 * 10);
     }
 }

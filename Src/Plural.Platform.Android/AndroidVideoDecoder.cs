@@ -403,8 +403,12 @@ public sealed class AndroidVideoDecoder : IVideoDecoder
             return;
         }
         _disposed = true;
-        try { _codec.Stop(); } catch (Java.Lang.IllegalStateException) { }
-        _codec.Release();
-        _codec.Dispose();
+        try { _codec.Stop(); }
+        catch { /* CodecException / IllegalStateException: still release the hardware codec */ }
+        finally
+        {
+            try { _codec.Release(); } catch { /* already gone */ }
+            _codec.Dispose();
+        }
     }
 }

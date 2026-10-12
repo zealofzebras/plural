@@ -2,6 +2,7 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:vm="using:Plural.App.ViewModels"
              xmlns:c="using:Plural.App.Controls"
+             xmlns:views="using:Plural.App.Views"
              xmlns:p="using:Plural.Core.Platform"
              xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
              xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
@@ -39,6 +40,46 @@
                             <c:Icon Data="{StaticResource IconFlipCamera}" Size="18" />
                         </Button>
                     </Grid>
+        </DataTemplate>
+        <DataTemplate x:Key="ToastContent" x:DataType="vm:MainViewModel">
+            <Border HorizontalAlignment="Center" Margin="12" MaxWidth="560"
+                    Padding="16,12" CornerRadius="16" IsVisible="{Binding IsToastVisible}"
+                    Background="{DynamicResource Surface2Brush}" BorderBrush="{DynamicResource StrokeBrush}" BorderThickness="1"
+                    BoxShadow="0 6 24 0 #66000000">
+                <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+                    <StackPanel VerticalAlignment="Center" Spacing="4">
+                        <TextBlock Text="{Binding ToastText}" FontWeight="SemiBold" TextWrapping="Wrap" />
+                        <TextBlock Classes="muted" Classes.err="{Binding ToastIsError}" Text="{Binding ToastDetail}" TextWrapping="Wrap"
+                                   IsVisible="{Binding HasToastDetail}">
+                            <TextBlock.Styles>
+                                <Style Selector="TextBlock.muted.err">
+                                    <Setter Property="Foreground" Value="{DynamicResource RecordBrush}" />
+                                </Style>
+                            </TextBlock.Styles>
+                        </TextBlock>
+                    </StackPanel>
+                    <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center" Spacing="2">
+                        <Button Classes="tool" Command="{Binding UndoToastCommand}" IsVisible="{Binding HasToastUndo}">
+                                    <StackPanel Orientation="Horizontal" Spacing="6">
+                                        <c:Icon Data="{StaticResource IconUndo}" Size="18" />
+                                        <TextBlock Text="Undo" VerticalAlignment="Center" />
+                                    </StackPanel>
+                                </Button>
+                                <Button Classes="tool" Command="{Binding ViewTakesCommand}" IsVisible="{Binding HasToastTake}" Content="View takes" />
+                        <Button Classes="icon" Command="{Binding ToastTake.ShareCommand}" ToolTip.Tip="Share"
+                                IsVisible="{Binding ShowToastShare}">
+                            <c:Icon Data="{StaticResource IconShare}" />
+                        </Button>
+                        <Button Classes="icon" Command="{Binding ToastTake.OpenFolderCommand}" ToolTip.Tip="Open folder"
+                                IsVisible="{Binding ShowToastFolder}">
+                            <c:Icon Data="{StaticResource IconFolder}" />
+                        </Button>
+                        <Button Classes="icon" Command="{Binding DismissToastCommand}" ToolTip.Tip="Dismiss">
+                            <c:Icon Data="{StaticResource IconClose}" />
+                        </Button>
+                    </StackPanel>
+                </Grid>
+            </Border>
         </DataTemplate>
     </UserControl.Resources>
 
@@ -97,12 +138,12 @@
             <Setter Property="Background" Value="#99000000" />
         </Style>
 
-        <Style Selector="Border#SettingsSheet, Border#TakesSheet, Border#AddMicSheet, Border#DevicesSheet, Border#AboutSheet, Border#MenuSheet">
+        <Style Selector="Border#SettingsSheet, Border#AddMicSheet, Border#DevicesSheet, Border#AboutSheet, Border#MenuSheet">
             <Setter Property="Width" Value="440" />
             <Setter Property="HorizontalAlignment" Value="Right" />
             <Setter Property="CornerRadius" Value="20,0,0,20" />
         </Style>
-        <Style Selector="Grid#Root.compact Border#SettingsSheet, Grid#Root.compact Border#TakesSheet, Grid#Root.compact Border#AddMicSheet, Grid#Root.compact Border#DevicesSheet, Grid#Root.compact Border#AboutSheet, Grid#Root.compact Border#MenuSheet">
+        <Style Selector="Grid#Root.compact Border#SettingsSheet, Grid#Root.compact Border#AddMicSheet, Grid#Root.compact Border#DevicesSheet, Grid#Root.compact Border#AboutSheet, Grid#Root.compact Border#MenuSheet">
             <Setter Property="Width" Value="NaN" />
             <Setter Property="HorizontalAlignment" Value="Stretch" />
             <Setter Property="CornerRadius" Value="0" />
@@ -769,39 +810,8 @@
             </StackPanel>
 
             <StackPanel VerticalAlignment="Bottom">
-                <!-- Toast -->
-                <Border HorizontalAlignment="Center" Margin="12" MaxWidth="560"
-                        Padding="16,12" CornerRadius="16" IsVisible="{Binding IsToastVisible}"
-                        Background="{DynamicResource Surface2Brush}" BorderBrush="{DynamicResource StrokeBrush}" BorderThickness="1"
-                        BoxShadow="0 6 24 0 #66000000">
-                    <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
-                        <StackPanel VerticalAlignment="Center" Spacing="4">
-                            <TextBlock Text="{Binding ToastText}" FontWeight="SemiBold" TextWrapping="Wrap" />
-                            <TextBlock Classes="muted" Classes.err="{Binding ToastIsError}" Text="{Binding ToastDetail}" TextWrapping="Wrap"
-                                       IsVisible="{Binding HasToastDetail}">
-                                <TextBlock.Styles>
-                                    <Style Selector="TextBlock.muted.err">
-                                        <Setter Property="Foreground" Value="{DynamicResource RecordBrush}" />
-                                    </Style>
-                                </TextBlock.Styles>
-                            </TextBlock>
-                        </StackPanel>
-                        <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center" Spacing="2">
-                            <Button Classes="tool" Command="{Binding ViewTakesCommand}" IsVisible="{Binding HasToastTake}" Content="View takes" />
-                            <Button Classes="icon" Command="{Binding ToastTake.ShareCommand}" ToolTip.Tip="Share"
-                                    IsVisible="{Binding CanShare}">
-                                <c:Icon Data="{StaticResource IconShare}" />
-                            </Button>
-                            <Button Classes="icon" Command="{Binding ToastTake.OpenFolderCommand}" ToolTip.Tip="Open folder"
-                                    IsVisible="{Binding CanOpenFolder}">
-                                <c:Icon Data="{StaticResource IconFolder}" />
-                            </Button>
-                            <Button Classes="icon" Command="{Binding DismissToastCommand}" ToolTip.Tip="Dismiss">
-                                <c:Icon Data="{StaticResource IconClose}" />
-                            </Button>
-                        </StackPanel>
-                    </Grid>
-                </Border>
+                <!-- Toast (the same one floats over the Takes and Player pages, see the page layer) -->
+                <ContentControl Content="{Binding}" ContentTemplate="{StaticResource ToastContent}" IsVisible="{Binding IsRecorderPage}" />
 
                 <!-- Compact strip of the recording mics (name + meter) -->
                 <Border Name="Strip" Classes="strip" Classes.on="{Binding StripOn}" IsVisible="{Binding ShowStrip}"
@@ -895,6 +905,22 @@
                 </Panel>
             </StackPanel>
         </Border>
+
+        <!-- Pages above the recorder (Takes, Player). The recorder keeps running underneath; recording continues. -->
+        <Grid Grid.RowSpan="4" IsVisible="{Binding IsNotRecorderPage}" Background="{DynamicResource BgBrush}">
+            <ContentControl Content="{Binding PageViewModel}">
+                <ContentControl.DataTemplates>
+                    <DataTemplate DataType="vm:TakesViewModel">
+                        <views:TakesView />
+                    </DataTemplate>
+                    <DataTemplate DataType="vm:PlayerViewModel">
+                        <views:PlayerView />
+                    </DataTemplate>
+                </ContentControl.DataTemplates>
+            </ContentControl>
+            <ContentControl Content="{Binding}" ContentTemplate="{StaticResource ToastContent}" VerticalAlignment="Bottom"
+                            Margin="0,0,0,56" />
+        </Grid>
 
         <!-- Settings sheet -->
         <Grid Grid.RowSpan="4" IsVisible="{Binding IsSettingsOpen}">
@@ -1245,65 +1271,6 @@
             </Border>
         </Grid>
 
-        <!-- Takes sheet -->
-        <Grid Grid.RowSpan="4" IsVisible="{Binding IsTakesOpen}">
-            <Border Background="{DynamicResource ScrimBrush}" Tapped="OnTakesScrimTapped" />
-            <Border Name="TakesSheet" Background="{DynamicResource SurfaceBrush}"
-                    BorderBrush="{DynamicResource StrokeBrush}" BorderThickness="1,0,0,0">
-                <Grid RowDefinitions="Auto,*">
-                    <Grid ColumnDefinitions="*,Auto" Margin="20,12,12,4">
-                        <TextBlock Text="Takes" FontSize="20" FontWeight="Bold" VerticalAlignment="Center" />
-                        <Button Grid.Column="1" Classes="icon" Command="{Binding CloseTakesCommand}" ToolTip.Tip="Close">
-                            <c:Icon Data="{StaticResource IconClose}" />
-                        </Button>
-                    </Grid>
-                    <ScrollViewer Grid.Row="1">
-<Border Classes="panel" Background="Transparent" BorderThickness="0" Margin="4,0,4,24">
-                    <StackPanel Spacing="10">
-                        <Grid ColumnDefinitions="*,Auto">
-                            <TextBlock Classes="section" Text="RECENT TAKES" Margin="0" VerticalAlignment="Center" />
-                            <Button Grid.Column="1" Classes="icon" Command="{Binding OpenRecordingsFolderCommand}"
-                                    IsVisible="{Binding CanOpenFolder}" ToolTip.Tip="Open recordings folder">
-                                <c:Icon Data="{StaticResource IconFolder}" />
-                            </Button>
-                        </Grid>
-                        <TextBlock Classes="muted" Text="No takes yet. Connect a mic and press the red button." TextWrapping="Wrap"
-                                   IsVisible="{Binding !HasTakes}" />
-                        <ItemsControl ItemsSource="{Binding Takes}">
-                            <ItemsControl.ItemTemplate>
-                                <DataTemplate x:DataType="vm:TakeViewModel">
-                                    <Grid ColumnDefinitions="Auto,*,Auto" MinHeight="52" Margin="0,2">
-                                        <Border Classes="avatar" Width="40" Height="40" CornerRadius="12">
-                                            <Panel>
-                                                <c:Icon Data="{StaticResource IconWave}" IsVisible="{Binding IsAudio}" />
-                                                <c:Icon Data="{StaticResource IconVideo}" IsVisible="{Binding IsVideo}" />
-                                            </Panel>
-                                        </Border>
-                                        <StackPanel Grid.Column="1" Margin="12,0" VerticalAlignment="Center">
-                                            <TextBlock Text="{Binding Title}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
-                                            <TextBlock Classes="muted" Text="{Binding Subtitle}" TextTrimming="CharacterEllipsis" />
-                                        </StackPanel>
-                                        <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
-                                            <Button Classes="icon" Command="{Binding ShareCommand}" IsVisible="{Binding CanShare}"
-                                                    ToolTip.Tip="Share">
-                                                <c:Icon Data="{StaticResource IconShare}" />
-                                            </Button>
-                                            <Button Classes="icon" Command="{Binding OpenFolderCommand}" IsVisible="{Binding CanOpenFolder}"
-                                                    ToolTip.Tip="Open folder">
-                                                <c:Icon Data="{StaticResource IconFolder}" />
-                                            </Button>
-                                        </StackPanel>
-                                    </Grid>
-                                </DataTemplate>
-                            </ItemsControl.ItemTemplate>
-                        </ItemsControl>
-                    </StackPanel>
-                </Border>
-            
-                    </ScrollViewer>
-                </Grid>
-            </Border>
-        </Grid>
     </Grid>
     </ThemeVariantScope>
 </UserControl>

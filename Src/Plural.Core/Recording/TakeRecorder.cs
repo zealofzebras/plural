@@ -104,6 +104,10 @@ internal abstract class TakeOutput
     public List<string> Files { get; } = [];
     public IMicSink[] Mics { get; protected set; } = [];
     public virtual void Video(byte[] annexB, long timestamp, bool keyFrame) { }
+
+    /// <summary>True (valid after <see cref="Complete"/>) when a video track was configured but no video ended up in the file.</summary>
+    public virtual bool VideoDropped => false;
+
     public abstract void Complete();
 }
 
@@ -145,6 +149,7 @@ internal sealed class M4aSink : IMicSink
         _enc = enc;
         _mp4 = new Mp4Writer(new FileStream(path, FileMode.Create, FileAccess.ReadWrite, FileShare.Read, 1 << 16), audioOnly: true);
         _track = _mp4.AddAudio(name, ClockLockedTrack.OutputRate, 1, enc.AudioSpecificConfig.ToArray());
+        _track.PrimingSamples = enc.PrimingSamples;
     }
 
     public void Write(short[] pcm) => _enc.Encode(pcm, s => _mp4.WriteSample(_track, 0, s.Data.Span));
@@ -324,11 +329,14 @@ internal sealed class Mp4Output : TakeOutput
         {
             var enc = aac.Create(ClockLockedTrack.OutputRate, 1, bitRate);
             var t = _mp4.AddAudio(n, ClockLockedTrack.OutputRate, 1, enc.AudioSpecificConfig.ToArray());
+            t.PrimingSamples = enc.PrimingSamples;
             _aac.Add((enc, t));
             sinks.Add(new AacSink(_mp4, t, enc));
         }
         Mics = sinks.ToArray();
     }
+
+    public override bool VideoDropped => _mp4.VideoDropped || !_gotKey;
 
     public override void Video(byte[] annexB, long timestamp, bool keyFrame)
     {
@@ -355,6 +363,7 @@ internal sealed class Mp4Output : TakeOutput
         try { _mp4.Dispose(); }
         catch (Exception ex) { first ??= ex; }
         foreach (var (enc, _) in _aac) { enc.Dispose(); }
+        if (VideoDropped) { first ??= new IOException("No video was recorded: the camera sent no key frame"); }
         if (first is not null) { throw first; }
     }
 }
@@ -399,6 +408,7 @@ internal sealed class TakeRecorder
     private List<TrackInfo> _micTracks = [];
     private bool _sidecarWritten;
     private PosterCapture? _poster;
+    private Thread? _writer;
 
     public string Folder { get; }
     public RecordingFormat Format { get; }
@@ -449,9 +459,39 @@ internal sealed class TakeRecorder
             try { output.Complete(); } catch { /* best effort */ }
             throw;
         }
-        r.InitLibrary(settings, names);
-        r.Begin();
+        // sidecar, peaks and poster are extras: a take must record even when they cannot be set up
+        try { r.InitLibrary(settings, names); }
+        catch (Exception ex) when (ex is not OutOfMemoryException) { r.Error("library: " + ex.Message); }
+        try
+        {
+            r.Begin();
+        }
+        catch
+        {
+            r.Abort();
+            throw;
+        }
         return r;
+    }
+
+    /// <summary>Stops everything after a failed <see cref="Begin"/>: subscriptions, camera, writer thread, files, peaks.</summary>
+    private void Abort()
+    {
+        foreach (var (c, h) in _subs) { try { c.PcmProcessed -= h; } catch { /* best effort */ } }
+        _subs.Clear();
+        if (_camera is not null)
+        {
+            try { _camera.SampleEncoded -= _videoHandler; } catch { /* best effort */ }
+            try { _camera.StopEncoding(); } catch { /* best effort */ }
+        }
+        try { _poster?.Dispose(); } catch { /* best effort */ }
+        lock (_q) { _completed = true; Monitor.PulseAll(_q); }
+        // the writer thread (if it started) completes the output and the peaks; without it do it here
+        if (_writer is null || !_writer.IsAlive)
+        {
+            try { _output.Complete(); } catch { /* best effort */ }
+            foreach (var p in _peaks) { try { p?.Dispose(); } catch { /* best effort */ } }
+        }
     }
 
     /// <summary>Writes the sidecar (status recording) and opens one peaks file per mic. Failures are reported in the take's errors, not thrown.</summary>
@@ -499,10 +539,10 @@ internal sealed class TakeRecorder
                 s.Status = TakeStatus.Recording;
                 s.Created = DateTime.Now;
                 s.Tracks = tracks;
-            });
+            }, createFolder: true, durable: false);
             _sidecarWritten = true;
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             Error("sidecar: " + ex.Message);
         }
@@ -510,9 +550,13 @@ internal sealed class TakeRecorder
         for (var i = 0; i < names.Count; i++)
         {
             try { _peaks[i] = new PeakWriter(TrackInfo.PeakPath(Folder, micTracks[i].Id), ClockLockedTrack.OutputRate); }
-            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { Error("peaks: " + ex.Message); }
+            catch (Exception ex) when (ex is not OutOfMemoryException) { Error("peaks: " + ex.Message); }
         }
-        if (_camera is not null && Format.IsVideo()) { _poster = new PosterCapture(_camera, Folder, _t0); }
+        if (_camera is not null && Format.IsVideo())
+        {
+            try { _poster = new PosterCapture(_camera, Folder, _t0) { OnError = Error }; }
+            catch (Exception ex) when (ex is not OutOfMemoryException) { Error("poster: " + ex.Message); }
+        }
     }
 
     private string RelativeFile(string path) => Path.GetRelativePath(Folder, path).Replace('\\', '/');
@@ -575,6 +619,7 @@ internal sealed class TakeRecorder
     private void Begin()
     {
         var thread = new Thread(WriterLoop) { Name = "Plural take writer", IsBackground = true };
+        _writer = thread;
         thread.Start();
         for (var i = 0; i < _tracks.Length; i++)
         {
@@ -609,7 +654,12 @@ internal sealed class TakeRecorder
                 _camera.SampleEncoded -= _videoHandler;
                 try { _camera.StopEncoding(); } catch (Exception ex) { lock (_errors) { _errors.Add("camera: " + ex.Message); } }
             }
-            if (_poster is not null) { await _poster.StopAsync().ConfigureAwait(false); }
+            if (_poster is not null)
+            {
+                // never lets the poster block or fail the stop (errors go to the take's errors)
+                try { await _poster.StopAsync().ConfigureAwait(false); }
+                catch (Exception ex) { Error("poster: " + ex.Message); }
+            }
             foreach (var t in _tracks) { t.Finish(tStop); }
             lock (_q)
             {
@@ -719,7 +769,7 @@ internal sealed class TakeRecorder
             foreach (var p in _peaks)
             {
                 try { p?.Complete(); }
-                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { Error("peaks: " + ex.Message); }
+                catch (Exception ex) when (ex is not OutOfMemoryException) { Error("peaks: " + ex.Message); }
             }
         }
         finally
@@ -730,12 +780,14 @@ internal sealed class TakeRecorder
 
     private void WritePeaks(int mic, short[] pcm)
     {
+        if (mic >= _peaks.Length) { return; } // library setup failed: still record
         var p = _peaks[mic];
         if (p is null) { return; }
         try { p.Write(pcm); }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             _peaks[mic] = null;
+            try { p.Dispose(); } catch { /* the file is broken anyway; this releases the handle */ }
             Error("peaks: " + ex.Message);
         }
     }
@@ -749,6 +801,12 @@ internal sealed class TakeRecorder
             _micTracks[i].DurationMs = Math.Round(_tracks[i].Duration.TotalMilliseconds, 1);
         }
         foreach (var v in _sidecarTracks.Where(x => x.IsVideo)) { v.DurationMs = Math.Round(duration.TotalMilliseconds, 1); }
+        if (_output.VideoDropped)
+        {
+            // the file holds audio only: drop the video track and shift the audio indexes (ids stay, they name the peaks files)
+            _sidecarTracks.RemoveAll(x => x.IsVideo);
+            foreach (var t in _micTracks.Where(x => x.TrackIndex > 0)) { t.TrackIndex--; }
+        }
         try
         {
             TakeSidecar.Update(Folder, s =>
@@ -757,7 +815,7 @@ internal sealed class TakeRecorder
                 s.Tracks = _sidecarTracks;
             });
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             Error("sidecar: " + ex.Message);
         }

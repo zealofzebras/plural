@@ -1,4 +1,5 @@
 using System.Buffers.Binary;
+using System.Diagnostics;
 using System.Text;
 
 namespace Plural.Core.Recording;
@@ -14,6 +15,15 @@ namespace Plural.Core.Recording;
 /// (video: avcC set <i>and</i> a first sample written; audio: non-empty AudioSpecificConfig), then <c>moov</c> and the buffered fragments are written.
 /// If only audio configs are missing and 4 MB are buffered, <c>moov</c> is written with a synthesized AAC-LC AudioSpecificConfig (from rate and channels);
 /// on a seekable stream <c>Dispose</c> patches it in place when the encoder later reports a different one of the same length.</para>
+/// <para>Video that never gets a configuration (no key frame within <see cref="MaxVideoWaitTicks"/> of audio, or 4 MB buffered, or at <c>Dispose</c>) is
+/// dropped: <c>moov</c> is written without that track (the audio track ids stay as they were), later video samples are ignored and
+/// <see cref="VideoDropped"/> is set, so the recorder can report it.</para>
+/// <para>Each fragment (and <c>moov</c>) is flushed to the OS as soon as it is written, and to the disk every ~10 s for a <see cref="FileStream"/>
+/// (a plain <c>Flush()</c> survives a crash of the app; the periodic <c>Flush(true)</c> bounds what a power loss can take).</para>
+/// <para>Edit lists (video start offset, audio priming) are written as a <c>free</c> box holding the <c>elst</c>, because a crashed file must not
+/// carry an edit list whose segment duration is still 0; on a seekable stream <c>Dispose</c> turns it into <c>edts</c> and patches the durations.
+/// <see cref="Plural.Core.Media.Mp4Reader"/> also honours the <c>elst</c> inside such a <c>free</c> box, other players of a crashed or non-seekable
+/// file start the video at 0 and keep the encoder delay (tens of ms).</para>
 /// <para>On a seekable stream <c>Dispose</c> also patches the durations (mvhd, mehd, tkhd, mdhd, edit list) so players show the length without scanning.
 /// Not thread-safe.</para>
 /// </summary>
@@ -25,6 +35,10 @@ public sealed class Mp4Writer : IDisposable
     private const long AudioOnlyFlushTicks = 50_000_000;      // audio waiting for a video key frame is flushed after 5 s
     private const int MaxBufferedBeforeSynthAsc = 4 << 20;
     private const int MovieTimescale = 1000;
+
+    /// <summary>Audio waiting for the first video key frame longer than this (100 ns ticks, 3 s) gives up on the video.</summary>
+    public const long MaxVideoWaitTicks = 30_000_000;
+    private static readonly TimeSpan HardFlushEvery = TimeSpan.FromSeconds(10);
 
     public sealed class Track
     {
@@ -49,6 +63,9 @@ public sealed class Mp4Writer : IDisposable
         /// so players and <c>Mp4Reader</c> skip it. Must be set before <c>moov</c> is written (before the first fragment is flushed); 0 = none.
         /// </summary>
         public int PrimingSamples { get; set; }
+
+        /// <summary>True when the track was left out of the file (video without a configuration); its samples are ignored.</summary>
+        public bool Dropped { get; internal set; }
 
         public int SampleCount { get; private set; }
         internal int Timescale => IsVideo ? VideoTimescale : SampleRate;
@@ -91,6 +108,7 @@ public sealed class Mp4Writer : IDisposable
     private bool _moovWritten, _disposed;
     private byte[] _moov = [];
     private long _moovPos;
+    private long _lastHardFlush = Stopwatch.GetTimestamp();
 
     public Mp4Writer(Stream stream, bool audioOnly, bool leaveOpen = false)
     {
@@ -103,6 +121,11 @@ public sealed class Mp4Writer : IDisposable
 
     /// <summary>Bytes written to the stream so far (fragments still waiting for a configuration are not counted).</summary>
     public long BytesWritten => _pos;
+
+    /// <summary>True when a video track had no configuration in time and was left out of the file (audio only).</summary>
+    public bool VideoDropped { get; private set; }
+
+    private IEnumerable<Track> Active => _tracks.Where(t => !t.Dropped);
 
     public Track AddVideo(string name, int width, int height, int rotationDegrees = 0)
     {
@@ -132,6 +155,7 @@ public sealed class Mp4Writer : IDisposable
     public void WriteSample(Track t, long timestamp, ReadOnlySpan<byte> data, bool keyFrame = true)
     {
         if (_disposed) { throw new ObjectDisposedException(nameof(Mp4Writer)); }
+        if (t.Dropped) { return; }
         long dts;
         var trigger = false;
         if (t.IsVideo)
@@ -163,7 +187,7 @@ public sealed class Mp4Writer : IDisposable
         if (!t.IsVideo)
         {
             var span = (long)t.Pending.Count * AacFrameSamples * 10_000_000 / t.SampleRate;
-            var hasVideo = _tracks.Any(x => x.IsVideo);
+            var hasVideo = _tracks.Any(x => x.IsVideo && !x.Dropped);
             if (!hasVideo && span >= FragmentTicks) { FlushFragment(_tracks); }
             else if (hasVideo && span >= AudioOnlyFlushTicks) { FlushFragment(_tracks.Where(x => !x.IsVideo)); }
         }
@@ -220,6 +244,21 @@ public sealed class Mp4Writer : IDisposable
             return;
         }
         WriteFragment(f);
+        FlushOut();
+    }
+
+    /// <summary>Pushes what was written to the OS (survives an app crash); to the disk too every <see cref="HardFlushEvery"/> for files.</summary>
+    private void FlushOut()
+    {
+        if (_s is FileStream fs && Stopwatch.GetElapsedTime(_lastHardFlush) >= HardFlushEvery)
+        {
+            fs.Flush(true);
+            _lastHardFlush = Stopwatch.GetTimestamp();
+        }
+        else
+        {
+            _s.Flush();
+        }
     }
 
     private void WriteFragment(Fragment f)
@@ -262,19 +301,40 @@ public sealed class Mp4Writer : IDisposable
 
     // ------------------------------------------------------------------ moov
 
-    private bool ConfigsReady() => _tracks.All(t => t.IsVideo
-        ? t.AvcC is { Length: > 0 } && t.SampleCount > 0
-        : t.AudioSpecificConfig is { Length: > 0 });
+    private bool VideoReady(Track t) => t.AvcC is { Length: > 0 } && t.SampleCount > 0;
+
+    private bool ConfigsReady() => Active.All(t => t.IsVideo ? VideoReady(t) : t.AudioSpecificConfig is { Length: > 0 });
+
+    private long PendingBytes() => _queuedBytes + _tracks.Sum(t => t.Pending.Sum(p => (long)p.Data.Length));
+
+    /// <summary>Leaves out the video tracks that have no configuration; their (not yet written) samples are discarded.</summary>
+    private void DropUnconfiguredVideo()
+    {
+        foreach (var v in _tracks.Where(t => t.IsVideo && !t.Dropped && !VideoReady(t)))
+        {
+            v.Dropped = true;
+            v.Pending.Clear();
+            VideoDropped = true;
+        }
+    }
+
+    private bool VideoWaitExpired()
+    {
+        var audio = _tracks.Where(t => !t.IsVideo).ToList();
+        if (audio.Count == 0) { return false; }
+        var span = audio.Max(a => a.SampleCount * (long)AacFrameSamples * 10_000_000 / a.SampleRate);
+        return span >= MaxVideoWaitTicks || PendingBytes() >= MaxBufferedBeforeSynthAsc;
+    }
 
     private void TryWriteMoov(bool force)
     {
         if (_moovWritten) { return; }
+        if (Active.Any(t => t.IsVideo && !VideoReady(t)) && (force || VideoWaitExpired())) { DropUnconfiguredVideo(); }
         if (!force && !ConfigsReady())
         {
             // only AAC configs missing and a lot buffered: write now with synthesized AAC-LC configs
-            var videoOk = _tracks.Where(t => t.IsVideo).All(t => t.AvcC is { Length: > 0 } && t.SampleCount > 0);
-            var pending = _queuedBytes + _tracks.Sum(t => t.Pending.Sum(p => (long)p.Data.Length));
-            if (!(videoOk && pending > MaxBufferedBeforeSynthAsc)) { return; }
+            var videoOk = Active.Where(t => t.IsVideo).All(VideoReady);
+            if (!(videoOk && PendingBytes() > MaxBufferedBeforeSynthAsc)) { return; }
         }
         if (_tracks.Count == 0 && !force) { return; }
 
@@ -282,7 +342,7 @@ public sealed class Mp4Writer : IDisposable
             ? Box("ftyp", Ascii("M4A "), U32(0), Ascii("M4A "), Ascii("mp42"), Ascii("isom"))
             : Box("ftyp", Ascii("isom"), U32(512), Ascii("isom"), Ascii("iso2"), Ascii("avc1"), Ascii("mp41"), Ascii("mp42"));
         Put(header);
-        foreach (var t in _tracks.Where(t => !t.IsVideo))
+        foreach (var t in Active.Where(t => !t.IsVideo))
         {
             t.MoovAsc = t.AudioSpecificConfig is { Length: > 0 } a ? a.ToArray() : SynthAsc(t.SampleRate, t.Channels);
         }
@@ -291,9 +351,11 @@ public sealed class Mp4Writer : IDisposable
         Put(_moov);
         _moovWritten = true;
         foreach (var t in _tracks) { t.WroteMoov = true; }
+        FlushOut();
         foreach (var f in _queued) { WriteFragment(f); }
         _queued.Clear();
         _queuedBytes = 0;
+        FlushOut();
     }
 
     private static readonly int[] AacRates = [96000, 88200, 64000, 48000, 44100, 32000, 24000, 22050, 16000, 12000, 11025, 8000, 7350];
@@ -322,9 +384,9 @@ public sealed class Mp4Writer : IDisposable
     {
         var secs = (long)(_created - new DateTime(1904, 1, 1, 0, 0, 0, DateTimeKind.Utc)).TotalSeconds;
         var mvhd = FullBox("mvhd", 0, 0, U32(secs), U32(secs), U32(MovieTimescale), U32(0), U32(0x00010000), U16(0x0100),
-            Zeros(10), Matrix(0), Zeros(24), U32(_tracks.Count + 1));
-        var traks = _tracks.Select(t => BuildTrak(t, secs)).ToArray();
-        var trex = _tracks.Select(t => FullBox("trex", 0, 0, U32(t.Id), U32(1), U32(0), U32(0), U32(t.IsVideo ? 0x01010000 : 0x02000000))).ToArray();
+            Zeros(10), Matrix(0), Zeros(24), U32(_tracks.Max(t => t.Id) + 1));
+        var traks = Active.Select(t => BuildTrak(t, secs)).ToArray();
+        var trex = Active.Select(t => FullBox("trex", 0, 0, U32(t.Id), U32(1), U32(0), U32(0), U32(t.IsVideo ? 0x01010000 : 0x02000000))).ToArray();
         var mvex = Box("mvex", [FullBox("mehd", 1, 0, U64(0)), .. trex]);
         return Box("moov", [mvhd, .. traks, mvex]);
     }
@@ -339,14 +401,14 @@ public sealed class Mp4Writer : IDisposable
         var offset = StartOffsetMs(t);
         if (t.IsVideo && offset > 0)
         {
-            // empty edit for the late start, then the media itself (segment duration patched at Dispose; 0 = "to the end")
-            parts.Add(Box("edts", FullBox("elst", 0, 0, U32(2),
+            // empty edit for the late start, then the media itself (a "free" box until Dispose turns it into edts and patches the duration)
+            parts.Add(Box("free", FullBox("elst", 0, 0, U32(2),
                 U32(offset), U32(0xFFFFFFFF), U16(1), U16(0),
                 U32(0), U32(0), U16(1), U16(0))));
         }
         else if (!t.IsVideo && t.PrimingSamples > 0)
         {
-            parts.Add(Box("edts", FullBox("elst", 0, 0, U32(1), U32(0), U32(t.PrimingSamples), U16(1), U16(0))));
+            parts.Add(Box("free", FullBox("elst", 0, 0, U32(1), U32(0), U32(t.PrimingSamples), U16(1), U16(0))));
         }
 
         var mdhd = FullBox("mdhd", 0, 0, U32(secs), U32(secs), U32(t.Timescale), U32(0), U16(0x55C4), U16(0));
@@ -419,8 +481,9 @@ public sealed class Mp4Writer : IDisposable
     {
         if (_moov.Length == 0) { return; }
         var end = _pos;
-        var movieDur = _tracks.Count == 0 ? 0 : _tracks.Max(MovieDuration);
-        PatchU32(Find(_moov, 0, _moov.Length, "mvhd") + 16, movieDur);
+        var active = Active.ToList();
+        var movieDur = active.Count == 0 ? 0 : active.Max(MovieDuration);
+        PatchU32(Plus(Find(_moov, 0, _moov.Length, "mvhd"), 16), movieDur);
         var mehd = FindPath(_moov, "mvex/mehd");
         if (mehd >= 0)
         {
@@ -429,12 +492,12 @@ public sealed class Mp4Writer : IDisposable
             PatchBytes(mehd + 4, b);
         }
         var trakPos = ChildStart(_moov, 0, "moov");
-        foreach (var t in _tracks)
+        foreach (var t in active)
         {
             var (ts, te) = NextChild(_moov, ref trakPos, "trak");
-            PatchU32(Find(_moov, ts, te, "tkhd") + 20, MovieDuration(t));
+            PatchU32(Plus(Find(_moov, ts, te, "tkhd"), 20), MovieDuration(t));
             var mdia = Find(_moov, ts, te, "mdia");
-            PatchU32(Find(_moov, mdia, te, "mdhd") + 16, MediaDuration(t));
+            if (mdia >= 0) { PatchU32(Plus(Find(_moov, mdia, te, "mdhd"), 16), MediaDuration(t)); }
             var elst = Find(_moov, ts, te, "elst");
             if (elst >= 0 && t.IsVideo && StartOffsetMs(t) > 0)
             {
@@ -444,10 +507,12 @@ public sealed class Mp4Writer : IDisposable
             {
                 PatchU32(elst + 8, Math.Max(0, MediaDuration(t) - t.PrimingSamples) * MovieTimescale / t.Timescale);
             }
+            if (elst >= 0) { PatchBytes(elst - 12, "edts"u8.ToArray()); } // free -> edts now that the durations are right
             if (!t.IsVideo && t.MoovAsc is { } written && t.AudioSpecificConfig is { Length: > 0 } now
                 && now.Length == written.Length && !now.AsSpan().SequenceEqual(written))
             {
                 var stsd = Find(_moov, ts, te, "stsd");
+                if (stsd < 0) { continue; }
                 var at = _moov.AsSpan(stsd, te - stsd).LastIndexOf(written);
                 if (at >= 0) { PatchBytes(stsd + at, now); }
             }
@@ -455,6 +520,7 @@ public sealed class Mp4Writer : IDisposable
         _s.Position = end;
 
         // helpers: positions are offsets inside _moov (payload starts), patches are applied at file offset _moovPos + offset
+        static int Plus(int pos, int add) => pos < 0 ? -1 : pos + add; // a missing box stays missing
         void PatchU32(int payloadOffset, long v)
         {
             if (payloadOffset < 0) { return; }
@@ -497,7 +563,7 @@ public sealed class Mp4Writer : IDisposable
             var name = Encoding.ASCII.GetString(d, p + 4, 4);
             if (size < 8 || p + size > end) { return -1; }
             if (name == type) { return p + 8; }
-            if (name is "moov" or "trak" or "mdia" or "minf" or "stbl" or "edts" or "mvex")
+            if (name is "moov" or "trak" or "mdia" or "minf" or "stbl" or "edts" or "free" or "mvex")
             {
                 var r = Find(d, p + 8, p + size, type);
                 if (r >= 0) { return r; }

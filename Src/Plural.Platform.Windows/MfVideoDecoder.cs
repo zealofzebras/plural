@@ -294,6 +294,7 @@ internal sealed unsafe class MfVideoDecoder : IVideoDecoder
         try
         {
             int stride = _stride;
+            if (stride <= 0 || _srcW <= 0 || _srcH <= 0) return; // no valid output type yet (would divide by zero)
             // Total luma rows in the buffer (padded height); the chroma plane follows the luma plane.
             int lumaRows = (int)((long)len * 2 / (3L * stride));
             if (lumaRows < _srcH) return;

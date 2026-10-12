@@ -42,8 +42,9 @@ public static class TakeProbe
                 _ => [],
             };
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidDataException or ArgumentException)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
+            // damaged file: a parser may throw anything on hostile bytes
             return [];
         }
     }
@@ -222,6 +223,7 @@ public static class TakeProbe
                     }
                 }
             }
+            if (handler is not ("vide" or "soun") || timescale == 0) { continue; } // text/timecode/hint tracks: Mp4Reader does not index them either
             t.Kind = handler == "vide" ? TrackKinds.Video : TrackKinds.Audio;
             if (t.Kind == TrackKinds.Video && t.Codec == "") { t.Codec = "h264"; }
             t.Name = hname.Length > 0 ? hname : t.IsVideo ? "Video" : baseName;

@@ -31,6 +31,13 @@ public interface IAacEncoder : IDisposable
     /// <summary>AudioSpecificConfig (2 bytes for AAC-LC), for MP4 esds / Matroska CodecPrivate.</summary>
     ReadOnlyMemory<byte> AudioSpecificConfig { get; }
 
+    /// <summary>
+    /// Encoder delay in samples: how many samples at the start of the decoded stream are priming, not signal. The MP4/M4A edit list
+    /// skips them, so a decoded file starts at the first real sample. Platform encoders report what they measured; the default
+    /// is the AAC-LC frame size.
+    /// </summary>
+    int PrimingSamples => 1024;
+
     /// <summary>Feeds 16-bit PCM; encoded 1024-sample frames are returned through <paramref name="output"/> (synchronously, may be zero or more).</summary>
     void Encode(ReadOnlySpan<short> pcm, Action<EncodedSample> output);
 
@@ -83,6 +90,9 @@ public interface IVideoCapture : IAsyncDisposable
 
     void StartEncoding();
     void StopEncoding();
+
+    /// <summary>Asks the encoder to make the next frame a key frame (with SPS/PPS), e.g. when a paused take resumes. No-op if unsupported.</summary>
+    void RequestKeyFrame() { }
 }
 
 public interface IVideoPlatform

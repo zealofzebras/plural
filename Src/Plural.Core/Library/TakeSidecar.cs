@@ -150,62 +150,108 @@ public sealed class TakeSidecar
     [JsonExtensionData]
     public Dictionary<string, JsonElement>? Extra { get; set; }
 
-    /// <summary>Reads the sidecar; null when it is missing or corrupt.</summary>
+    /// <summary>Reads the sidecar; null when it is missing or corrupt. Throws <see cref="IOException"/> when it exists but cannot be read (after a short retry).</summary>
     public static TakeSidecar? Load(string folder)
     {
         lock (Lock)
         {
-            return LoadCore(folder);
+            return LoadCore(folder, out _);
         }
     }
 
-    private static TakeSidecar? LoadCore(string folder)
+    private enum ReadState { Ok, Missing, Corrupt }
+
+    private static TakeSidecar? LoadCore(string folder, out ReadState state)
     {
         var path = Path.Combine(folder, FileName);
+        string text;
+        for (var attempt = 0; ; attempt++)
+        {
+            try
+            {
+                if (!File.Exists(path)) { state = ReadState.Missing; return null; }
+                text = File.ReadAllText(path);
+                break;
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                // an antivirus scanner or sync client may hold the file for a moment; never treat that as "no sidecar"
+                if (ex is FileNotFoundException or DirectoryNotFoundException) { state = ReadState.Missing; return null; }
+                if (attempt >= 4) { throw ex as IOException ?? new IOException(ex.Message, ex); }
+                Thread.Sleep(40 * (attempt + 1));
+            }
+        }
         try
         {
-            if (!File.Exists(path)) { return null; }
-            var s = JsonSerializer.Deserialize(File.ReadAllText(path), LibraryJson.Default.TakeSidecar);
-            if (s is null) { return null; }
+            var s = JsonSerializer.Deserialize(text, LibraryJson.Default.TakeSidecar);
+            if (s is null) { state = ReadState.Corrupt; return null; }
             s.Tracks ??= [];
             s.Pauses ??= [];
             s.Dropouts ??= [];
             s.Playback ??= [];
             s.Status ??= TakeStatus.Complete;
+            state = ReadState.Ok;
             return s;
         }
-        catch (Exception ex) when (ex is IOException or JsonException or UnauthorizedAccessException)
+        catch (JsonException)
         {
+            state = ReadState.Corrupt;
             return null;
         }
     }
 
-    /// <summary>Writes <paramref name="sidecar"/> atomically (<c>.tmp</c> + rename); safe from several threads.</summary>
+    /// <summary>
+    /// Writes <paramref name="sidecar"/> atomically (<c>.tmp</c> + rename); safe from several threads. The take folder must exist
+    /// (a deleted or moved take is not brought back by a late write). A corrupt file it replaces is kept as <c>plural.json.bak</c>.
+    /// </summary>
     public static void Save(string folder, TakeSidecar sidecar)
     {
         lock (Lock)
         {
+            if (!Directory.Exists(folder)) { throw new DirectoryNotFoundException(folder); }
+            LoadCore(folder, out var state);
+            if (state == ReadState.Corrupt) { Backup(folder); }
             SaveCore(folder, sidecar);
         }
     }
 
-    private static void SaveCore(string folder, TakeSidecar sidecar)
+    private static void Backup(string folder)
     {
-        Directory.CreateDirectory(folder);
+        try { File.Copy(Path.Combine(folder, FileName), Path.Combine(folder, FileName + ".bak"), overwrite: true); }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { /* best effort */ }
+    }
+
+    private static void SaveCore(string folder, TakeSidecar sidecar, bool durable = true)
+    {
         var path = Path.Combine(folder, FileName);
         var tmp = path + ".tmp";
-        File.WriteAllText(tmp, JsonSerializer.Serialize(sidecar, LibraryJson.Default.TakeSidecar));
+        var bytes = System.Text.Encoding.UTF8.GetBytes(JsonSerializer.Serialize(sidecar, LibraryJson.Default.TakeSidecar));
+        using (var fs = new FileStream(tmp, FileMode.Create, FileAccess.Write, FileShare.None))
+        {
+            fs.Write(bytes);
+            if (durable) { fs.Flush(true); } // data on disk before the rename, so a power loss cannot leave an empty plural.json
+        }
         File.Move(tmp, path, overwrite: true);
     }
 
-    /// <summary>Reads (or creates; a corrupt file is replaced), changes and writes the sidecar atomically.</summary>
-    public static TakeSidecar Update(string folder, Action<TakeSidecar> change)
+    /// <summary>
+    /// Reads (or creates when it is missing; a corrupt file is replaced after keeping a <c>.bak</c>), changes and writes the sidecar
+    /// atomically. A sidecar that exists but cannot be read throws <see cref="IOException"/> instead of being replaced.
+    /// The take folder must exist unless <paramref name="createFolder"/> (only the recorder, when it starts a take).
+    /// <paramref name="durable"/> false skips the fsync before the rename (the recorder's first write must not delay the start of the capture;
+    /// a torn file after a power loss is then rebuilt like a corrupt one).
+    /// </summary>
+    public static TakeSidecar Update(string folder, Action<TakeSidecar> change, bool createFolder = false, bool durable = true)
     {
         lock (Lock)
         {
-            var s = LoadCore(folder) ?? new TakeSidecar { Created = DateTime.Now };
+            if (createFolder) { Directory.CreateDirectory(folder); }
+            else if (!Directory.Exists(folder)) { throw new DirectoryNotFoundException(folder); }
+            var s = LoadCore(folder, out var state);
+            if (state == ReadState.Corrupt) { Backup(folder); }
+            s ??= new TakeSidecar { Created = DateTime.Now };
             change(s);
-            SaveCore(folder, s);
+            SaveCore(folder, s, durable);
             return s;
         }
     }

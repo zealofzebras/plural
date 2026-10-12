@@ -32,6 +32,9 @@ public sealed class IosAudio : IAudioPlatform, IAudioInputPlatform
         return [new AudioOutputDevice(RouteId, name)];
     }
 
+    /// <summary>The single output: whatever the audio session currently routes to.</summary>
+    public AudioOutputDevice? DefaultOutput => GetOutputDevices()[0];
+
     public IAudioSink Open(AudioOutputDevice device, IAudioSource source, int sampleRate) =>
         new AudioQueueSink(device, source, sampleRate, null);
 

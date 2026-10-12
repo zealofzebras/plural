@@ -202,19 +202,26 @@ public sealed class AndroidAudioDecoder : IAudioDecoder
             }
             var flags = _info.Flags;
             var size = _info.Size;
-            if (size > 0)
+            try
             {
-                var buf = _codec.GetOutputBuffer(index)!;
-                buf.Position(_info.Offset);
-                buf.Limit(_info.Offset + size);
-                if (_bytes.Length < size)
+                if (size > 0)
                 {
-                    _bytes = new byte[size * 2];
+                    var buf = _codec.GetOutputBuffer(index)!;
+                    buf.Position(_info.Offset);
+                    buf.Limit(_info.Offset + size);
+                    if (_bytes.Length < size)
+                    {
+                        _bytes = new byte[size * 2];
+                    }
+                    buf.Get(_bytes, 0, size);
+                    Emit(size, output);
                 }
-                buf.Get(_bytes, 0, size);
-                Emit(size, output);
             }
-            _codec.ReleaseOutputBuffer(index, false);
+            finally
+            {
+                // also when the consumer throws: a buffer that is never released stalls the codec
+                _codec.ReleaseOutputBuffer(index, false);
+            }
             if (flags.HasFlag(MediaCodecBufferFlags.EndOfStream))
             {
                 return true;
@@ -269,8 +276,12 @@ public sealed class AndroidAudioDecoder : IAudioDecoder
             return;
         }
         _disposed = true;
-        try { _codec.Stop(); } catch (Java.Lang.IllegalStateException) { }
-        _codec.Release();
-        _codec.Dispose();
+        try { _codec.Stop(); }
+        catch { /* CodecException / IllegalStateException: still release the hardware codec */ }
+        finally
+        {
+            try { _codec.Release(); } catch { /* already gone */ }
+            _codec.Dispose();
+        }
     }
 }

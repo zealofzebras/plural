@@ -23,12 +23,13 @@ public sealed class TakeLibrary
     /// <param name="root">The recording root; every sub-folder not starting with '.' is a candidate take.</param>
     /// <param name="probe">
     /// Reads the tracks of a media file (full path) for takes without a sidecar and for files received from remote devices; may throw or
-    /// return nothing, then <see cref="TakeProbe.Basic"/> is used. The caller fills in <see cref="TrackInfo.File"/>, id and device.
+    /// return nothing, then <see cref="TakeProbe.Basic"/> is used. Default: <see cref="MediaProbe.Probe"/>. The caller fills in
+    /// <see cref="TrackInfo.File"/>, id and device.
     /// </param>
     public TakeLibrary(string root, Func<string, IReadOnlyList<TrackInfo>>? probe = null)
     {
         Root = Path.GetFullPath(root).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-        _probe = probe;
+        _probe = probe ?? MediaProbe.Probe;
     }
 
     public string Root { get; }
@@ -55,9 +56,9 @@ public sealed class TakeLibrary
                 var t = Load(d);
                 if (t is not null) { result.Add(t); }
             }
-            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException or ArgumentException)
+            catch (Exception ex) when (ex is not OutOfMemoryException)
             {
-                // folder vanished, is locked or is broken: skip it
+                // folder vanished, is locked or is damaged (a parser may throw anything on hostile bytes): skip it
             }
         }
         result.Sort((a, b) =>
@@ -331,16 +332,37 @@ public sealed class TakeLibrary
         return path;
     }
 
-    /// <summary>Soft delete: moves the take to <c>.trash</c> with a deletion time and removes its stale share files. Returns the new folder.</summary>
-    public string Delete(string folder)
+    /// <summary>
+    /// Soft delete: moves the take to <c>.trash</c> with a deletion time and removes its stale share files. Returns the new folder.
+    /// Refuses (<see cref="InvalidOperationException"/>) a take that is being recorded: <paramref name="activeFolder"/> (the take the
+    /// app is recording now) or a sidecar still saying <c>recording</c> (a recovered take is fine). The folder is moved first and
+    /// <c>deletedAt</c> written in the new place, so nothing can recreate the old folder; the move is undone if that fails.
+    /// </summary>
+    public string Delete(string folder, string? activeFolder = null)
     {
         folder = RequireTake(folder);
         var name = Path.GetFileName(folder);
+        if (activeFolder is not null && string.Equals(Normalize(activeFolder), folder, PathComparison))
+        {
+            throw new InvalidOperationException("The take is being recorded.");
+        }
         Load(folder); // sidecar for old takes, so Restore brings back the same tracks
-        TakeSidecar.Update(folder, s => s.DeletedAt = DateTime.UtcNow);
+        if (TakeSidecar.Load(folder)?.Status == TakeStatus.Recording)
+        {
+            throw new InvalidOperationException("The take is being recorded.");
+        }
         Directory.CreateDirectory(TrashRoot);
         var target = UniqueFolder(TrashRoot, name);
         Directory.Move(folder, target);
+        try
+        {
+            TakeSidecar.Update(target, s => s.DeletedAt = DateTime.UtcNow);
+        }
+        catch
+        {
+            try { Directory.Move(target, folder); } catch { /* leave it in the trash rather than lose track of it */ }
+            throw;
+        }
         DeleteShareFiles(name);
         return target;
     }
@@ -364,9 +386,17 @@ public sealed class TakeLibrary
     public string Restore(string trashFolder)
     {
         trashFolder = RequireTrashed(trashFolder);
-        TakeSidecar.Update(trashFolder, s => s.DeletedAt = null);
         var target = UniqueFolder(Root, Path.GetFileName(trashFolder));
         Directory.Move(trashFolder, target);
+        try
+        {
+            TakeSidecar.Update(target, s => s.DeletedAt = null);
+        }
+        catch
+        {
+            try { Directory.Move(target, trashFolder); } catch { /* keep the take rather than lose it */ }
+            throw;
+        }
         return target;
     }
 
@@ -388,7 +418,7 @@ public sealed class TakeLibrary
                 var t = Load(d);
                 if (t is not null) { result.Add(t with { DeletedAt = t.DeletedAt ?? Directory.GetLastWriteTimeUtc(d) }); }
             }
-            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException or ArgumentException)
+            catch (Exception ex) when (ex is not OutOfMemoryException)
             {
                 // skip
             }
@@ -431,9 +461,10 @@ public sealed class TakeLibrary
     // ------------------------------------------------------------------ recovery
 
     /// <summary>
-    /// Takes whose sidecar still says <c>recording</c> were interrupted (crash, kill): marks them <c>recovered</c>, and fills in the
-    /// duration of audio tracks that have a peaks file. Call at app start; <paramref name="exceptFolder"/> is a take being recorded now.
-    /// Returns the recovered folders.
+    /// Takes whose sidecar still says <c>recording</c> were interrupted (crash, kill): marks them <c>recovered</c>, repairs the headers
+    /// of their WAV and Matroska files in place (<see cref="MediaRepair"/>), and fills in the track durations from the files (probe;
+    /// a track the probe cannot read keeps its peaks file's length). Call at app start, off the UI thread (it reads the files);
+    /// <paramref name="exceptFolder"/> is a take being recorded now. Returns the recovered folders.
     /// </summary>
     public IReadOnlyList<string> RecoverInterrupted(string? exceptFolder = null)
     {
@@ -445,15 +476,16 @@ public sealed class TakeLibrary
             if (Path.GetFileName(d).StartsWith('.') || (except is not null && string.Equals(Normalize(d), except, PathComparison))) { continue; }
             try
             {
-                if (TakeSidecar.Load(d)?.Status != TakeStatus.Recording) { continue; }
+                var loaded = TakeSidecar.Load(d);
+                if (loaded?.Status != TakeStatus.Recording) { continue; }
+                var durations = RepairAndMeasure(d, loaded.Tracks); // file work outside the sidecar lock
                 TakeSidecar.Update(d, s =>
                 {
                     if (s.Status != TakeStatus.Recording) { return; }
                     s.Status = TakeStatus.Recovered;
-                    foreach (var t in s.Tracks.Where(t => !t.IsVideo && t.DurationMs <= 0))
+                    foreach (var t in s.Tracks.Where(t => t.DurationMs <= 0))
                     {
-                        var peaks = PeakReader.Open(TrackInfo.PeakPath(d, t.Id));
-                        if (peaks is not null) { t.DurationMs = peaks.Duration.TotalMilliseconds; }
+                        if (durations.TryGetValue(t.Id, out var ms) && ms > 0) { t.DurationMs = ms; }
                     }
                 });
                 result.Add(d);
@@ -461,6 +493,32 @@ public sealed class TakeLibrary
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {
                 // skip
+            }
+        }
+        return result;
+    }
+
+    /// <summary>Repairs each distinct file of the tracks, then measures every track (probe, else the peaks file). Keyed by track id.</summary>
+    private Dictionary<string, double> RepairAndMeasure(string folder, IReadOnlyList<TrackInfo> tracks)
+    {
+        var result = new Dictionary<string, double>();
+        foreach (var group in tracks.Where(t => !string.IsNullOrEmpty(t.File)).GroupBy(t => t.File, StringComparer.OrdinalIgnoreCase))
+        {
+            var path = Path.Combine(folder, group.Key);
+            if (!File.Exists(path)) { continue; }
+            MediaRepair.TryRepair(path);
+            IReadOnlyList<TrackInfo> found = [];
+            try { found = (_probe ?? MediaProbe.Probe)(path); }
+            catch (Exception ex) when (ex is not OutOfMemoryException) { /* fall back below */ }
+            if (found.Count == 0) { found = TakeProbe.Basic(path); }
+            foreach (var t in group)
+            {
+                var match = found.FirstOrDefault(f => f.TrackIndex == t.TrackIndex);
+                if (match is { DurationMs: > 0 }) { result[t.Id] = match.DurationMs; }
+                else if (!t.IsVideo && PeakReader.Open(TrackInfo.PeakPath(folder, t.Id)) is { } peaks)
+                {
+                    result[t.Id] = peaks.Duration.TotalMilliseconds;
+                }
             }
         }
         return result;

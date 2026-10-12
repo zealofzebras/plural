@@ -27,7 +27,7 @@ public sealed class DesktopHost : IAppHost
         {
             // No camera on macOS yet (AVFoundation + VideoToolbox): the UI hides video when the hub has none.
             var audio = new MacAudio();
-            return new MikeHub(new MacBluetooth(), audio, new AppleAacEncoderFactory(), null, audio);
+            return new MikeHub(new MacBluetooth(), audio, new AppleAacEncoderFactory(), null, audio, new AppleAudioDecoderFactory(), null);
         }
         throw new PlatformNotSupportedException("Plural desktop supports Windows and macOS.");
     }

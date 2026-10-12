@@ -50,6 +50,9 @@ public sealed class AppSettings
     public string? MixOutputId { get; set; }
     public double MixFaderDb { get; set; }
     public bool MixMuted { get; set; }
+
+    /// <summary>Player page: video area height as a fraction of the page (desktop/tablet splitter); capped at 0.5 by the layout.</summary>
+    public double PlayerSplitter { get; set; } = 0.5;
 }
 
 public sealed class SavedMix

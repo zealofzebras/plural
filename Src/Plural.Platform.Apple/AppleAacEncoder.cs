@@ -71,7 +71,7 @@ public sealed unsafe class AppleAacEncoder : IAacEncoder
         _self = GCHandle.Alloc(this);
     }
 
-    private static byte[] ComputeConfig(int sampleRate, int channels)
+    internal static byte[] ComputeConfig(int sampleRate, int channels)
     {
         var idx = Array.IndexOf(SampleRates, sampleRate);
         if (idx < 0)

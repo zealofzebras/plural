@@ -4,6 +4,7 @@ using System.Text;
 using System.Text.Json;
 using Plural.Core.Audio;
 using Plural.Core.Library;
+using Plural.Core.Media;
 using Plural.Core.Platform;
 using Plural.Core.Recording;
 using Plural.Core.Remote;
@@ -11,6 +12,7 @@ using Plural.Core.Session;
 
 namespace Plural.Core.Tests;
 
+[Collection("timing")]
 public class PeakTests
 {
     private static short[] Signal(int n, int seed = 1)
@@ -600,7 +602,7 @@ public class LibraryTests
             Assert.Equal([a], recovered);
             var ta = lib.Load(a)!;
             Assert.Equal(TakeStatus.Recovered, ta.Status);
-            Assert.InRange(ta.Tracks[0].DurationMs, 999, 1001); // from the peaks file
+            Assert.InRange(ta.Tracks[0].DurationMs, 1999, 2001); // from the file (the peaks file only covers 1 s)
             Assert.Equal(TakeStatus.Recording, lib.Load(b)!.Status);
             Assert.Equal(TakeStatus.Complete, lib.Load(c)!.Status);
         });
@@ -702,6 +704,7 @@ public class LibraryTests
 }
 
 /// <summary>Real <see cref="TakeRecorder"/> takes through the hub with fake mics: sidecar, peaks, poster, and re-reading without the sidecar.</summary>
+[Collection("timing")]
 public class LibraryRecordingTests
 {
     private sealed class FakeBt : IBluetoothPlatform
@@ -716,13 +719,14 @@ public class LibraryRecordingTests
         public IAudioSink Open(AudioOutputDevice device, IAudioSource source, int sampleRate) => throw new NotSupportedException();
     }
 
-    private sealed class FakeAac : IAacEncoderFactory
+    private sealed class FakeAac(int priming = 1024) : IAacEncoderFactory
     {
-        public IAacEncoder Create(int sampleRate, int channels, int bitRate) => new Enc();
+        public IAacEncoder Create(int sampleRate, int channels, int bitRate) => new Enc(priming);
 
-        private sealed class Enc : IAacEncoder
+        private sealed class Enc(int priming) : IAacEncoder
         {
             private int _pending;
+            public int PrimingSamples => priming;
             public int SampleRate => 44100;
             public int Channels => 1;
             public ReadOnlyMemory<byte> AudioSpecificConfig => new byte[] { 0x12, 0x08 };
@@ -746,6 +750,7 @@ public class LibraryRecordingTests
         public event Action<PreviewFrame>? PreviewFrameReady;
         public event Action<EncodedSample>? SampleEncoded;
         public bool Encoding;
+        public bool NoKeyFrame; // the camera never sends an IDR
         public int PreviewSubscribers => PreviewFrameReady?.GetInvocationList().Length ?? 0;
 
         public void RaisePreview(PreviewFrame f) => PreviewFrameReady?.Invoke(f);
@@ -759,7 +764,7 @@ public class LibraryRecordingTests
                 byte[] delta = [0, 0, 1, 0x41, 9, 9, 9];
                 for (var i = 0; i < 20 && Encoding; i++)
                 {
-                    SampleEncoded?.Invoke(new EncodedSample(i == 0 ? key : delta, MediaClock.Now, i == 0));
+                    SampleEncoded?.Invoke(new EncodedSample(i == 0 && !NoKeyFrame ? key : delta, MediaClock.Now, i == 0 && !NoKeyFrame));
                     await Task.Delay(33);
                 }
             });
@@ -775,9 +780,9 @@ public class LibraryRecordingTests
         public Task<IVideoCapture> OpenAsync(CameraInfo camera, VideoSettings settings, CancellationToken ct = default) => Task.FromResult<IVideoCapture>(new FakeCamera());
     }
 
-    private static (MikeHub Hub, List<MikeSession> Sessions) NewHub(int mics)
+    private static (MikeHub Hub, List<MikeSession> Sessions) NewHub(int mics, int priming = 1024)
     {
-        var hub = new MikeHub(new FakeBt(), new FakeAudio(), new FakeAac(), new FakeVideo());
+        var hub = new MikeHub(new FakeBt(), new FakeAudio(), new FakeAac(priming), new FakeVideo());
         var sessions = new List<MikeSession>();
         for (var i = 0; i < mics; i++)
         {
@@ -962,6 +967,39 @@ public class LibraryRecordingTests
         }
     }
 
+    [Theory]
+    [InlineData(RecordingFormat.M4a, 2112)]
+    [InlineData(RecordingFormat.M4a, 1024)]
+    [InlineData(RecordingFormat.Mp4, 2112)]
+    public async Task AacTakes_StoreTheEncodersPrimingInTheEditList(RecordingFormat format, int priming)
+    {
+        var root = Path.Combine(Path.GetTempPath(), "plural_libprime_" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            var (hub, sessions) = NewHub(2, priming);
+            hub.Camera = new FakeCamera();
+            hub.RecordingSettings = new RecordingSettings { Format = format };
+            hub.StartRecordingAll(root);
+            await Feed(sessions, 1.2);
+            var take = await hub.StopRecordingAllAsync();
+            Assert.Empty(take.Errors);
+            foreach (var file in take.Files)
+            {
+                using var r = MediaReader.Open(file);
+                foreach (var t in r.Tracks.Where(t => t.Kind == MediaKind.Audio))
+                {
+                    r.SelectTracks([t.Index]);
+                    Assert.True(r.TryRead(out var first)); // sequential: the first packet carries the priming
+                    Assert.Equal(-priming * 10_000_000L / 44100, first.Timestamp);
+                }
+            }
+        }
+        finally
+        {
+            if (Directory.Exists(root)) { Directory.Delete(root, true); }
+        }
+    }
+
     [Fact]
     public async Task VideoTake_SavesAnUprightPoster_AboutASecondIn()
     {
@@ -1026,5 +1064,225 @@ public class LibraryRecordingTests
         {
             if (Directory.Exists(root)) { Directory.Delete(root, true); }
         }
+    }
+
+    [Fact]
+    public async Task BrokenPosterFrame_NeverHangsOrFailsStop_AndIsReported()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "plural_libposter3_" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            var (hub, sessions) = NewHub(1);
+            var camera = new FakeCamera();
+            hub.Camera = camera;
+            hub.RecordingSettings = new RecordingSettings { Format = RecordingFormat.Mkv };
+            var folder = hub.StartRecordingAll(root);
+            // a negative width makes the poster encoder throw an OverflowException, which used to escape the poster task
+            await Feed(sessions, 1.4, () => camera.RaisePreview(new PreviewFrame(new byte[32], -4, 2, 16)));
+            var stop = hub.StopRecordingAllAsync();
+            Assert.Same(stop, await Task.WhenAny(stop, Task.Delay(TimeSpan.FromSeconds(10))));
+            var take = await stop;
+            Assert.Contains(take.Errors, e => e.StartsWith("poster"));
+            Assert.False(File.Exists(Path.Combine(folder, TakeSidecar.PosterFileName)));
+            Assert.Equal(TakeStatus.Complete, TakeSidecar.Load(folder)!.Status);
+        }
+        finally
+        {
+            if (Directory.Exists(root)) { Directory.Delete(root, true); }
+        }
+    }
+
+    [Fact]
+    public async Task Mp4Take_WithoutKeyFrame_ReportsNoVideo_AndKeepsTheAudio()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "plural_libnokey_" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            var (hub, sessions) = NewHub(1);
+            hub.Camera = new FakeCamera { NoKeyFrame = true };
+            hub.RecordingSettings = new RecordingSettings { Format = RecordingFormat.Mp4 };
+            var folder = hub.StartRecordingAll(root);
+            await Feed(sessions, 0.6);
+            var take = await hub.StopRecordingAllAsync();
+            Assert.Contains(take.Errors, e => e.Contains("No video was recorded"));
+            var file = Assert.Single(take.Files);
+            using (var r = new Mp4Reader(File.OpenRead(file)))
+            {
+                Assert.Equal(MediaKind.Audio, Assert.Single(r.Tracks).Kind);
+            }
+            var tracks = TakeSidecar.Load(folder)!.Tracks;
+            var audio = Assert.Single(tracks); // the sidecar no longer lists a video track the file does not have
+            Assert.Equal((TrackKinds.Audio, 0), (audio.Kind, audio.TrackIndex));
+        }
+        finally
+        {
+            if (Directory.Exists(root)) { Directory.Delete(root, true); }
+        }
+    }
+}
+
+public class LibraryRobustnessTests
+{
+    private static void With(Action<string> test)
+    {
+        var root = Path.Combine(Path.GetTempPath(), "plural_libr_" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        try { test(root); }
+        finally { if (Directory.Exists(root)) { Directory.Delete(root, true); } }
+    }
+
+    private static string Take(string root, string name, string status = TakeStatus.Complete)
+    {
+        var folder = Path.Combine(root, name);
+        Directory.CreateDirectory(folder);
+        using (var w = new WavWriter(Path.Combine(folder, "a.wav"), 44100, 1)) { w.Write(new short[4410]); }
+        TakeSidecar.Update(folder, s =>
+        {
+            s.Status = status;
+            s.Title = "keep me";
+            s.Notes = "notes";
+            s.Tracks = [new TrackInfo { Id = "a.wav#0", File = "a.wav", DurationMs = 100, Codec = "pcm_s16le" }];
+        });
+        return folder;
+    }
+
+    [Fact]
+    public void Sidecar_ThatCannotBeRead_IsNotReplaced()
+    {
+        With(root =>
+        {
+            var folder = Take(root, "20261012_101010");
+            var path = Path.Combine(folder, TakeSidecar.FileName);
+            var before = File.ReadAllText(path);
+            using (new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.None)) // an AV scanner holding the file
+            {
+                Assert.ThrowsAny<IOException>(() => TakeSidecar.Update(folder, s => s.Notes = "x"));
+                Assert.ThrowsAny<IOException>(() => TakeSidecar.Load(folder));
+            }
+            Assert.Equal(before, File.ReadAllText(path));
+            Assert.Equal("keep me", TakeSidecar.Load(folder)!.Title);
+        });
+    }
+
+    [Fact]
+    public void Scan_SkipsATakeWhoseSidecarIsLocked_InsteadOfRebuildingIt()
+    {
+        With(root =>
+        {
+            var folder = Take(root, "20261012_101010");
+            var path = Path.Combine(folder, TakeSidecar.FileName);
+            using (new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.None))
+            {
+                Assert.Empty(new TakeLibrary(root).Scan());
+            }
+            Assert.Equal("keep me", new TakeLibrary(root).Scan().Single().Title);
+        });
+    }
+
+    [Fact]
+    public void CorruptSidecar_IsKeptAsBak_BeforeItIsRewritten()
+    {
+        With(root =>
+        {
+            var folder = Take(root, "20261012_101010");
+            var path = Path.Combine(folder, TakeSidecar.FileName);
+            File.WriteAllText(path, "{ not json");
+            TakeSidecar.Update(folder, s => s.Notes = "fresh");
+            Assert.Equal("{ not json", File.ReadAllText(path + ".bak"));
+            Assert.Equal("fresh", TakeSidecar.Load(folder)!.Notes);
+            Assert.False(File.Exists(path + ".tmp"));
+        });
+    }
+
+    [Fact]
+    public void Update_DoesNotCreateAFolderThatIsGone_UnlessAsked()
+    {
+        With(root =>
+        {
+            var gone = Path.Combine(root, "gone");
+            Assert.Throws<DirectoryNotFoundException>(() => TakeSidecar.Update(gone, s => s.Notes = "x"));
+            Assert.Throws<DirectoryNotFoundException>(() => TakeSidecar.Save(gone, new TakeSidecar()));
+            Assert.False(Directory.Exists(gone));
+            TakeSidecar.Update(gone, s => s.Notes = "x", createFolder: true);
+            Assert.True(File.Exists(Path.Combine(gone, TakeSidecar.FileName)));
+        });
+    }
+
+    [Fact]
+    public void Delete_RefusesATakeBeingRecorded_ButAcceptsARecoveredOne()
+    {
+        With(root =>
+        {
+            var lib = new TakeLibrary(root);
+            var live = Take(root, "20261012_101010", TakeStatus.Recording);
+            Assert.Throws<InvalidOperationException>(() => lib.Delete(live));
+            Assert.True(Directory.Exists(live));
+
+            var done = Take(root, "20261012_101011");
+            Assert.Throws<InvalidOperationException>(() => lib.Delete(done, activeFolder: done));
+            Assert.True(Directory.Exists(done));
+
+            var recovered = Take(root, "20261012_101012", TakeStatus.Recovered);
+            var trashed = lib.Delete(recovered);
+            Assert.False(Directory.Exists(recovered));
+            Assert.NotNull(TakeSidecar.Load(trashed)!.DeletedAt);
+        });
+    }
+
+    [Fact]
+    public void Delete_MovesFirst_SoALateWriteCannotResurrectTheFolder()
+    {
+        With(root =>
+        {
+            var lib = new TakeLibrary(root);
+            var folder = Take(root, "20261012_101010");
+            var trashed = lib.Delete(folder);
+            Assert.False(Directory.Exists(folder));
+            // e.g. the recorder completing, or a rename from the UI, after the take went to the trash
+            Assert.ThrowsAny<IOException>(() => TakeSidecar.Update(folder, s => s.Status = TakeStatus.Complete));
+            Assert.False(Directory.Exists(folder));
+
+            var restored = lib.Restore(trashed);
+            Assert.Null(TakeSidecar.Load(restored)!.DeletedAt);
+            Assert.Equal("keep me", TakeSidecar.Load(restored)!.Title);
+            Assert.False(Directory.Exists(trashed));
+        });
+    }
+
+    private static byte[] HostileMp4() =>
+        TinyMp4.File(TinyMp4.Box("trak", TinyMp4.Box("tkhd"))); // the last box ends exactly at the end of moov: reads past it
+
+    [Fact]
+    public void DamagedMp4_DoesNotMakeScanThrow()
+    {
+        With(root =>
+        {
+            Take(root, "20261012_101010");
+            var bad = Path.Combine(root, "20261012_101011");
+            Directory.CreateDirectory(bad);
+            File.WriteAllBytes(Path.Combine(bad, "x.mp4"), HostileMp4());
+            Assert.Empty(TakeProbe.Basic(Path.Combine(bad, "x.mp4")));
+            var takes = new TakeLibrary(root, probe: _ => []).Scan();
+            Assert.Equal(2, takes.Count);
+        });
+    }
+
+    [Fact]
+    public void Basic_IgnoresNonAudioVideoTracks_LikeMp4Reader()
+    {
+        With(root =>
+        {
+            var file = Path.Combine(root, "t.mp4");
+            File.WriteAllBytes(file, TinyMp4.File(
+                TinyMp4.Trak("text", 1000, 5000),
+                TinyMp4.Trak("soun", 44100, 44100, TinyMp4.Box("stsd", TinyMp4.U32(0), TinyMp4.U32(0))),
+                TinyMp4.Trak("tmcd", 30, 30)));
+            var tracks = TakeProbe.Basic(file);
+            var t = Assert.Single(tracks);
+            Assert.Equal(TrackKinds.Audio, t.Kind);
+            Assert.Equal(1000, t.DurationMs, 0.5);
+            using var r = new Mp4Reader(File.OpenRead(file));
+            Assert.Equal(tracks.Count, r.Tracks.Count);
+        });
     }
 }

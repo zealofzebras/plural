@@ -7,6 +7,7 @@ using Plural.Core.Remote;
 namespace Plural.Core.Tests;
 
 /// <summary>Remote mode end to end: two RemoteNetworks over loopback TCP with fake recorders.</summary>
+[Collection("timing")]
 public class RemoteTests
 {
     /// <summary>In-process transport: discovery is a shared registry, connections are loopback TCP pairs.</summary>

@@ -85,6 +85,8 @@ internal static unsafe partial class AT
     public static readonly uint PropertyCurrentDevice = FourCC.Of("aqcd");
     public static readonly uint ConverterEncodeBitRate = FourCC.Of("brat");
     public static readonly uint ConverterMaximumOutputPacketSize = FourCC.Of("xops");
+    /// <summary>kAudioConverterDecompressionMagicCookie.</summary>
+    public static readonly uint ConverterDecompressionMagicCookie = FourCC.Of("dmgc");
 
     [LibraryImport(Lib)]
     public static partial int AudioQueueNewOutput(AudioStreamBasicDescription* format,
@@ -110,6 +112,7 @@ internal static unsafe partial class AT
 
     [LibraryImport(Lib)] public static partial int AudioConverterNew(AudioStreamBasicDescription* source, AudioStreamBasicDescription* destination, IntPtr* converter);
     [LibraryImport(Lib)] public static partial int AudioConverterDispose(IntPtr converter);
+    [LibraryImport(Lib)] public static partial int AudioConverterReset(IntPtr converter);
     [LibraryImport(Lib)] public static partial int AudioConverterSetProperty(IntPtr converter, uint id, uint size, void* data);
     [LibraryImport(Lib)] public static partial int AudioConverterGetProperty(IntPtr converter, uint id, uint* size, void* data);
 

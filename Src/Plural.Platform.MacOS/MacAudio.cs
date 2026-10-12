@@ -21,6 +21,9 @@ public sealed class MacAudio : IAudioPlatform, IAudioInputPlatform
             .ThenBy(d => d.Name, StringComparer.OrdinalIgnoreCase)
             .ToList();
 
+    /// <summary>The system's default output device (kAudioHardwarePropertyDefaultOutputDevice), by UID.</summary>
+    public AudioOutputDevice? DefaultOutput => CoreAudioDevices.DefaultOutput() is { } d ? new AudioOutputDevice(d.Uid, d.Name) : null;
+
     public IAudioSink Open(AudioOutputDevice device, IAudioSource source, int sampleRate) =>
         new AudioQueueSink(device, source, sampleRate, device.Id);
 
@@ -46,6 +49,7 @@ internal static unsafe partial class CoreAudioDevices
     private static readonly uint Streams = FourCC.Of("stm#");
     private static readonly uint Name = FourCC.Of("lnam");
     private static readonly uint Uid = FourCC.Of("uid ");
+    private static readonly uint DefaultOutputDevice = FourCC.Of("dOut");
     private static readonly uint IsHidden = FourCC.Of("hidn");
     private static readonly uint ScopeGlobal = FourCC.Of("glob");
     private static readonly uint ScopeInput = FourCC.Of("inpt");
@@ -90,6 +94,18 @@ internal static unsafe partial class CoreAudioDevices
             }
         }
         return list;
+    }
+
+    /// <summary>The default output device, or null if there is none.</summary>
+    public static Device? DefaultOutput()
+    {
+        var address = new PropertyAddress(DefaultOutputDevice, ScopeGlobal);
+        uint id = 0, size = sizeof(uint);
+        if (AudioObjectGetPropertyData(SystemObject, &address, 0, null, &size, &id) != 0 || id == 0)
+        {
+            return null;
+        }
+        return GetString(id, Uid) is { Length: > 0 } uid ? new Device(uid, GetString(id, Name) ?? uid) : null;
     }
 
     private static bool HasStreams(uint id, uint scope)

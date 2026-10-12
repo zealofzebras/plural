@@ -407,7 +407,6 @@ public partial class MainViewModel
         IsStopping = false;
         if (local is not null)
         {
-            _takeInfo[take.Folder] = (local.Duration, _recMics);
             TakeManifest.Update(take.Folder, m =>
             {
                 var d = m.Device(_deviceId, ThisDeviceName);
@@ -417,10 +416,6 @@ public partial class MainViewModel
                 d.Errors = [.. local.Errors];
                 d.Status = "synced";
             });
-        }
-        else
-        {
-            _takeInfo[take.Folder] = (elapsed, 0);
         }
         if (error is not null)
         {
@@ -459,7 +454,7 @@ public partial class MainViewModel
                 return;
             }
             await LoadTakesAsync();
-            var vm = Takes.FirstOrDefault(t => string.Equals(t.Folder, take.Folder, StringComparison.OrdinalIgnoreCase));
+            var vm = Takes.Find(take.Folder);
             var count = take.Remotes.Count + (take.Local ? 1 : 0);
             ShowToast(error is null ? $"Take complete · {count} device{(count == 1 ? "" : "s")}" : "Take saved with problems",
                 error ?? "", error is not null, vm);

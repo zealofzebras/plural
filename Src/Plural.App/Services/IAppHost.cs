@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.Threading.Tasks;
 using Plural.Core.Remote;
@@ -58,4 +59,25 @@ public interface IAppHost
 
     /// <summary>Ways to find and reach other apps (Wi-Fi, Bluetooth); the UI never names them.</summary>
     IReadOnlyList<IRemoteTransport> CreateRemoteTransports(MikeHub hub);
+
+    /// <summary>Free bytes for new files on the volume holding <paramref name="folder"/>; null if unknown.</summary>
+    long? GetFreeSpace(string folder) => null;
+
+    /// <summary>This device's battery (phones, laptops); null if it has none or it is unknown.</summary>
+    HostBattery? GetBattery() => null;
+
+    /// <summary>Recording state for the system (Android: the foreground-service notification "Recording · 12:34" with Pause/Stop).</summary>
+    void UpdateRecordingStatus(TimeSpan elapsed, bool paused) { }
+
+    /// <summary>Raised by the host when the user acts outside the app (notification Pause/Resume/Stop). On any thread.</summary>
+    event Action<HostRecordingCommand>? RecordingCommand { add { } remove { } }
+}
+
+public sealed record HostBattery(int Percent, bool Charging);
+
+public enum HostRecordingCommand
+{
+    Pause,
+    Resume,
+    Stop,
 }

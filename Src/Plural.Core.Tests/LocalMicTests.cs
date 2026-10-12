@@ -6,6 +6,7 @@ using Plural.Core.Session;
 namespace Plural.Core.Tests;
 
 /// <summary>Local (OS) mics through a fake input platform: lifecycle, errors and takes without any SmartMike.</summary>
+[Collection("timing")]
 public class LocalMicTests
 {
     private sealed class FakeBt : IBluetoothPlatform

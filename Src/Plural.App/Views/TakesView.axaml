@@ -1,0 +1,469 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:Plural.App.ViewModels"
+             xmlns:c="using:Plural.App.Controls"
+             xmlns:views="using:Plural.App.Views"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             mc:Ignorable="d" d:DesignWidth="420" d:DesignHeight="760"
+             x:Class="Plural.App.Views.TakesView"
+             x:DataType="vm:TakesViewModel">
+
+    <UserControl.Styles>
+        <Style Selector="Border.takecard">
+            <Setter Property="Background" Value="{DynamicResource SurfaceBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource StrokeBrush}" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="CornerRadius" Value="{DynamicResource RadiusCard}" />
+            <Setter Property="Padding" Value="12" />
+            <Setter Property="Margin" Value="12,5,18,5" />
+        </Style>
+        <Style Selector="Border.takecard.selected">
+            <Setter Property="BorderBrush" Value="{DynamicResource AccentBrush}" />
+        </Style>
+        <Style Selector="Border.takecard.checked">
+            <Setter Property="Background" Value="{DynamicResource AccentSoftBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource AccentBrush}" />
+        </Style>
+        <Style Selector="Border.thumb">
+            <Setter Property="Width" Value="76" />
+            <Setter Property="Height" Value="76" />
+            <Setter Property="CornerRadius" Value="12" />
+            <Setter Property="ClipToBounds" Value="True" />
+            <Setter Property="Background" Value="{DynamicResource Surface2Brush}" />
+        </Style>
+        <Style Selector="Border.tick">
+            <Setter Property="Width" Value="26" />
+            <Setter Property="Height" Value="26" />
+            <Setter Property="CornerRadius" Value="13" />
+            <Setter Property="BorderThickness" Value="2" />
+            <Setter Property="BorderBrush" Value="{DynamicResource MutedBrush}" />
+            <Setter Property="VerticalAlignment" Value="Center" />
+        </Style>
+        <Style Selector="Border.tick.on">
+            <Setter Property="Background" Value="{DynamicResource AccentBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource AccentBrush}" />
+        </Style>
+        <Style Selector="Button.menurow">
+            <Setter Property="HorizontalAlignment" Value="Stretch" />
+            <Setter Property="HorizontalContentAlignment" Value="Left" />
+            <Setter Property="MinHeight" Value="48" />
+            <Setter Property="Margin" Value="0,2" />
+        </Style>
+        <Style Selector="Button.danger">
+            <Setter Property="Foreground" Value="{DynamicResource RecordBrush}" />
+        </Style>
+        <Style Selector="Border.dialog">
+            <Setter Property="Background" Value="{DynamicResource SurfaceBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource StrokeBrush}" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="CornerRadius" Value="20" />
+            <Setter Property="Padding" Value="20" />
+            <Setter Property="Margin" Value="20" />
+            <Setter Property="MaxWidth" Value="420" />
+            <Setter Property="MinWidth" Value="290" />
+            <Setter Property="HorizontalAlignment" Value="Center" />
+            <Setter Property="VerticalAlignment" Value="Center" />
+            <Setter Property="BoxShadow" Value="0 10 40 0 #66000000" />
+        </Style>
+    </UserControl.Styles>
+
+    <UserControl.Resources>
+        <!-- One take as a card: thumbnail (poster or mini waveform of the loudest track), text, status, menu -->
+        <DataTemplate x:Key="TakeCard" x:DataType="vm:TakeViewModel">
+            <Border Classes="takecard" Classes.selected="{Binding IsSelected}" Classes.checked="{Binding IsChecked}"
+                    Tapped="OnItemTapped" DoubleTapped="OnItemDoubleTapped" Holding="OnItemHolding"
+                    ContextRequested="OnItemContextRequested">
+                <Grid ColumnDefinitions="Auto,Auto,*,Auto" ColumnSpacing="12">
+                    <Border Classes="tick" Classes.on="{Binding IsChecked}" IsVisible="{Binding SelectMode}">
+                        <c:Icon Data="{StaticResource IconCheck}" Size="16" Fill="White" IsVisible="{Binding IsChecked}" />
+                    </Border>
+                    <Border Grid.Column="1" Classes="thumb" VerticalAlignment="Top">
+                        <Panel>
+                            <c:Icon Data="{StaticResource IconWave}" Size="26" Fill="{DynamicResource MutedBrush}"
+                                    IsVisible="{Binding !HasThumb}" />
+                            <c:WaveformView Peaks="{Binding WavePeaks}" Scale="{Binding WaveScale}" Margin="6,8"
+                                            Fill="{DynamicResource AccentBrush}"
+                                            IsVisible="{Binding WavePeaks, Converter={x:Static ObjectConverters.IsNotNull}}" />
+                            <Image Source="{Binding Poster}" Stretch="UniformToFill"
+                                   IsVisible="{Binding Poster, Converter={x:Static ObjectConverters.IsNotNull}}" />
+                            <c:Icon Data="{StaticResource IconVideo}" Size="16" Fill="White" HorizontalAlignment="Left"
+                                    VerticalAlignment="Bottom" Margin="5" IsVisible="{Binding IsVideo}" />
+                        </Panel>
+                    </Border>
+                    <StackPanel Grid.Column="2" VerticalAlignment="Center" Spacing="2">
+                        <TextBlock Classes="title" Text="{Binding Title}" TextTrimming="CharacterEllipsis" />
+                        <TextBlock Classes="muted" Text="{Binding Summary}" TextWrapping="Wrap" />
+                        <TextBlock Classes="muted" Text="{Binding MicsText}" TextWrapping="Wrap"
+                                   IsVisible="{Binding HasMicsText}" />
+                        <Border Classes="pill" Classes.lost="{Binding IsRecording}" Classes.busy="{Binding !IsRecording}"
+                                IsVisible="{Binding HasStatus}" HorizontalAlignment="Left" Margin="0,4,0,0">
+                            <TextBlock Text="{Binding StatusText}" />
+                        </Border>
+                        <TextBlock Classes="muted" Text="{Binding StatusDetail}" TextWrapping="Wrap"
+                                   Foreground="{DynamicResource WarnBrush}" IsVisible="{Binding IsRecovered}" />
+                    </StackPanel>
+                    <Button Grid.Column="3" Classes="icon" Command="{Binding ShowMenuCommand}" VerticalAlignment="Top"
+                            ToolTip.Tip="More" IsVisible="{Binding !SelectMode}">
+                        <c:Icon Data="{StaticResource IconMore}" />
+                    </Button>
+                </Grid>
+            </Border>
+        </DataTemplate>
+    </UserControl.Resources>
+
+    <Grid RowDefinitions="Auto,Auto,*,Auto" Background="{DynamicResource BgBrush}">
+
+        <!-- Header -->
+        <Grid Grid.Row="0" ColumnDefinitions="Auto,*,Auto" Margin="8,12,14,6">
+            <Button Classes="icon" Command="{Binding BackCommand}" ToolTip.Tip="Back (Esc)">
+                <c:Icon Data="{StaticResource IconBack}" Size="24" />
+            </Button>
+            <StackPanel Grid.Column="1" VerticalAlignment="Center" Margin="4,0,0,0">
+                <TextBlock Text="Takes" FontSize="22" FontWeight="Bold" IsVisible="{Binding !ShowTrash}" />
+                <TextBlock Text="Recently deleted" FontSize="22" FontWeight="Bold" IsVisible="{Binding ShowTrash}" />
+                <TextBlock Classes="muted" Text="{Binding CountText}" IsVisible="{Binding !ShowTrash}" />
+                <TextBlock Classes="muted" Text="Kept for 30 days, then removed for good" IsVisible="{Binding ShowTrash}" />
+            </StackPanel>
+            <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center" IsVisible="{Binding !ShowTrash}">
+                <Button Classes="icon" Command="{Binding Main.OpenRecordingsFolderCommand}" IsVisible="{Binding CanOpenFolder}"
+                        ToolTip.Tip="Open recordings folder">
+                    <c:Icon Data="{StaticResource IconFolder}" />
+                </Button>
+                <Button Classes="chip" Classes.on="{Binding IsSelecting}" Command="{Binding ToggleSelectingCommand}"
+                        IsVisible="{Binding HasAnyTakes}" ToolTip.Tip="Select several takes">
+                    <StackPanel Orientation="Horizontal" Spacing="8">
+                        <c:Icon Data="{StaticResource IconCheck}" />
+                        <TextBlock Text="Select" VerticalAlignment="Center" />
+                    </StackPanel>
+                </Button>
+            </StackPanel>
+        </Grid>
+
+        <views:RecordingBar Grid.Row="1" DataContext="{Binding Main}" />
+
+        <!-- Body: list (search, sort, filters, takes / trash / empty state) and, on wide windows, the detail pane -->
+        <Grid Grid.Row="2" ColumnDefinitions="*,Auto">
+            <Grid RowDefinitions="Auto,*">
+                <StackPanel Margin="12,2,12,6" Spacing="8" IsVisible="{Binding ShowList}">
+                    <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+                        <TextBox Text="{Binding Search}" PlaceholderText="Search title, notes, mics, date" MinHeight="44"
+                                 VerticalContentAlignment="Center" CornerRadius="22">
+                            <TextBox.InnerLeftContent>
+                                <c:Icon Data="{StaticResource IconSearch}" Margin="12,0,0,0" Fill="{DynamicResource MutedBrush}" />
+                            </TextBox.InnerLeftContent>
+                            <TextBox.InnerRightContent>
+                                <Button Classes="icon" Command="{Binding ClearSearchCommand}" Width="36" MinWidth="36" MinHeight="36"
+                                        IsVisible="{Binding Search, Converter={x:Static StringConverters.IsNotNullOrEmpty}}">
+                                    <c:Icon Data="{StaticResource IconClose}" Size="18" />
+                                </Button>
+                            </TextBox.InnerRightContent>
+                        </TextBox>
+                        <ComboBox Grid.Column="1" ItemsSource="{Binding SortOptions}" SelectedItem="{Binding SelectedSort}"
+                                  MinHeight="44" MinWidth="124" VerticalContentAlignment="Center" ToolTip.Tip="Sort"
+                                  CornerRadius="22" Padding="18,0,12,0" FontWeight="SemiBold" BorderThickness="1"
+                                  Background="{DynamicResource Surface2Brush}" BorderBrush="{DynamicResource StrokeBrush}" />
+                    </Grid>
+                    <StackPanel Orientation="Horizontal" Spacing="8">
+                        <Button Classes="chip" Classes.on="{Binding FilterAudio}" Command="{Binding ToggleAudioCommand}">
+                            <StackPanel Orientation="Horizontal" Spacing="6">
+                                <c:Icon Data="{StaticResource IconMic}" Size="18" />
+                                <TextBlock Text="Audio" VerticalAlignment="Center" />
+                            </StackPanel>
+                        </Button>
+                        <Button Classes="chip" Classes.on="{Binding FilterVideo}" Command="{Binding ToggleVideoCommand}">
+                            <StackPanel Orientation="Horizontal" Spacing="6">
+                                <c:Icon Data="{StaticResource IconVideo}" Size="18" />
+                                <TextBlock Text="Video" VerticalAlignment="Center" />
+                            </StackPanel>
+                        </Button>
+                        <Button Classes="chip" Classes.on="{Binding FilterRemote}" Command="{Binding ToggleRemoteCommand}">
+                            <StackPanel Orientation="Horizontal" Spacing="6">
+                                <c:Icon Data="{StaticResource IconDevices}" Size="18" />
+                                <TextBlock Text="Remote" VerticalAlignment="Center" />
+                            </StackPanel>
+                        </Button>
+                    </StackPanel>
+                </StackPanel>
+
+                <Panel Grid.Row="1">
+                    <!-- Takes -->
+                    <ItemsControl ItemsSource="{Binding Items}" ItemTemplate="{StaticResource TakeCard}" IsVisible="{Binding ShowList}">
+                        <ItemsControl.Template>
+                            <ControlTemplate>
+                                <ScrollViewer HorizontalScrollBarVisibility="Disabled">
+                                    <ItemsPresenter Name="PART_ItemsPresenter" ItemsPanel="{TemplateBinding ItemsPanel}" Margin="0,0,0,12" />
+                                </ScrollViewer>
+                            </ControlTemplate>
+                        </ItemsControl.Template>
+                        <ItemsControl.ItemsPanel>
+                            <ItemsPanelTemplate>
+                                <VirtualizingStackPanel />
+                            </ItemsPanelTemplate>
+                        </ItemsControl.ItemsPanel>
+                    </ItemsControl>
+
+                    <TextBlock Classes="muted" Text="No takes match." HorizontalAlignment="Center" VerticalAlignment="Top"
+                               Margin="24,32" IsVisible="{Binding ShowNoMatches}" />
+
+                    <!-- Empty state -->
+                    <StackPanel IsVisible="{Binding ShowEmpty}" HorizontalAlignment="Center" VerticalAlignment="Center"
+                                Spacing="12" Margin="28">
+                        <Border Width="72" Height="72" CornerRadius="36" Background="{DynamicResource Surface2Brush}" HorizontalAlignment="Center">
+                            <Ellipse Width="30" Height="30" Fill="{DynamicResource RecordBrush}" />
+                        </Border>
+                        <TextBlock Text="No takes yet" Classes="title" HorizontalAlignment="Center" />
+                        <TextBlock Classes="muted" TextWrapping="Wrap" TextAlignment="Center" MaxWidth="320"
+                                   Text="Press the red Record button on the main screen. Every take you record shows up here, with all its mics on separate tracks." />
+                        <Button Classes="primary" Command="{Binding BackCommand}" HorizontalAlignment="Center" Margin="0,6,0,0">
+                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                <c:Icon Data="{StaticResource IconMic}" />
+                                <TextBlock Text="Go to Record" VerticalAlignment="Center" />
+                            </StackPanel>
+                        </Button>
+                    </StackPanel>
+
+                    <!-- Recently deleted -->
+                    <Grid IsVisible="{Binding ShowTrash}">
+                        <TextBlock Classes="muted" Text="Nothing deleted lately." HorizontalAlignment="Center" VerticalAlignment="Top"
+                                   Margin="24,32" IsVisible="{Binding TrashEmpty}" />
+                        <ScrollViewer HorizontalScrollBarVisibility="Disabled">
+                            <ItemsControl ItemsSource="{Binding Trash}" Margin="0,0,0,12">
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate x:DataType="vm:TakeViewModel">
+                                        <Border Classes="takecard">
+                                            <StackPanel Spacing="10">
+                                                <StackPanel Spacing="2">
+                                                    <TextBlock Classes="title" Text="{Binding Title}" TextTrimming="CharacterEllipsis" />
+                                                    <TextBlock Classes="muted" Text="{Binding DeletedText}" TextTrimming="CharacterEllipsis" />
+                                                </StackPanel>
+                                                <Grid ColumnDefinitions="*,*" ColumnSpacing="8">
+                                                    <Button Classes="tool" Command="{Binding RestoreCommand}" HorizontalAlignment="Stretch">
+                                                        <StackPanel Orientation="Horizontal" Spacing="8">
+                                                            <c:Icon Data="{StaticResource IconUndo}" />
+                                                            <TextBlock Text="Restore" VerticalAlignment="Center" />
+                                                        </StackPanel>
+                                                    </Button>
+                                                    <Button Grid.Column="1" Classes="tool danger" Command="{Binding DeleteNowCommand}" HorizontalAlignment="Stretch">
+                                                        <StackPanel Orientation="Horizontal" Spacing="8">
+                                                            <c:Icon Data="{StaticResource IconDelete}" />
+                                                            <TextBlock Text="Delete now" VerticalAlignment="Center" />
+                                                        </StackPanel>
+                                                    </Button>
+                                                </Grid>
+                                            </StackPanel>
+                                        </Border>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                        </ScrollViewer>
+                    </Grid>
+                </Panel>
+            </Grid>
+
+            <!-- Detail pane (wide windows): the selected take's notes, tracks and actions -->
+            <Border Grid.Column="1" Width="380" IsVisible="{Binding ShowDetail}" Background="{DynamicResource SurfaceBrush}"
+                    BorderBrush="{DynamicResource StrokeBrush}" BorderThickness="1,0,0,0">
+                <Panel>
+                    <TextBlock Classes="muted" Text="Select a take to see its details." HorizontalAlignment="Center"
+                               VerticalAlignment="Center" IsVisible="{Binding NoSelectedTake}" />
+                    <ContentControl Content="{Binding Selected}" IsVisible="{Binding HasSelectedTake}">
+                        <ContentControl.ContentTemplate>
+                            <DataTemplate x:DataType="vm:TakeViewModel">
+                                <ScrollViewer>
+                                    <StackPanel Margin="20,16,20,24" Spacing="14">
+                                        <Border Classes="thumb" Width="NaN" Height="110">
+                                            <Panel>
+                                                <c:Icon Data="{StaticResource IconWave}" Size="32" Fill="{DynamicResource MutedBrush}"
+                                                        IsVisible="{Binding !HasThumb}" />
+                                                <c:WaveformView Peaks="{Binding WavePeaks}" Scale="{Binding WaveScale}" Margin="10,12"
+                                                                Fill="{DynamicResource AccentBrush}"
+                                                                IsVisible="{Binding WavePeaks, Converter={x:Static ObjectConverters.IsNotNull}}" />
+                                                <Image Source="{Binding Poster}" Stretch="UniformToFill"
+                                                       IsVisible="{Binding Poster, Converter={x:Static ObjectConverters.IsNotNull}}" />
+                                            </Panel>
+                                        </Border>
+                                        <StackPanel Spacing="3">
+                                            <TextBlock Text="{Binding Title}" FontSize="20" FontWeight="Bold" TextWrapping="Wrap" />
+                                            <TextBlock Classes="muted" Text="{Binding Summary}" TextWrapping="Wrap" />
+                                            <TextBlock Classes="muted" Text="{Binding MicsText}" TextWrapping="Wrap" IsVisible="{Binding HasMicsText}" />
+                                            <TextBlock Classes="muted" Text="{Binding StatusDetail}" TextWrapping="Wrap"
+                                                       Foreground="{DynamicResource WarnBrush}" IsVisible="{Binding HasStatus}" />
+                                        </StackPanel>
+                                        <Button Classes="primary" Command="{Binding OpenCommand}" IsEnabled="{Binding IsIdle}"
+                                                HorizontalAlignment="Stretch">
+                                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                                <c:Icon Data="{StaticResource IconPlay}" />
+                                                <TextBlock Text="Open" VerticalAlignment="Center" />
+                                            </StackPanel>
+                                        </Button>
+                                        <StackPanel Spacing="6">
+                                            <Grid ColumnDefinitions="*,Auto">
+                                                <TextBlock Classes="section" Text="NOTES" Margin="0" VerticalAlignment="Center" />
+                                                <Button Grid.Column="1" Classes="icon" Command="{Binding EditNotesCommand}" ToolTip.Tip="Edit notes">
+                                                    <c:Icon Data="{StaticResource IconEdit}" Size="18" />
+                                                </Button>
+                                            </Grid>
+                                            <TextBlock Text="{Binding Notes}" TextWrapping="Wrap" IsVisible="{Binding HasNotes}" />
+                                            <TextBlock Classes="muted" Text="No notes yet." IsVisible="{Binding !HasNotes}" />
+                                        </StackPanel>
+                                        <StackPanel Spacing="6">
+                                            <TextBlock Classes="section" Text="TRACKS" Margin="0" />
+                                            <ItemsControl ItemsSource="{Binding TrackLines}">
+                                                <ItemsControl.ItemTemplate>
+                                                    <DataTemplate x:DataType="vm:TrackLine">
+                                                        <StackPanel Margin="0,3">
+                                                            <TextBlock Text="{Binding Name}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
+                                                            <TextBlock Classes="muted" Text="{Binding Detail}" TextTrimming="CharacterEllipsis" />
+                                                        </StackPanel>
+                                                    </DataTemplate>
+                                                </ItemsControl.ItemTemplate>
+                                            </ItemsControl>
+                                        </StackPanel>
+                                        <WrapPanel Orientation="Horizontal">
+                                            <Button Classes="tool" Command="{Binding EditTitleCommand}" Margin="0,0,8,8">
+                                                <StackPanel Orientation="Horizontal" Spacing="8">
+                                                    <c:Icon Data="{StaticResource IconEdit}" />
+                                                    <TextBlock Text="Rename" VerticalAlignment="Center" />
+                                                </StackPanel>
+                                            </Button>
+                                            <Button Classes="tool" Command="{Binding ShareCommand}" IsVisible="{Binding CanShare}" Margin="0,0,8,8">
+                                                <StackPanel Orientation="Horizontal" Spacing="8">
+                                                    <c:Icon Data="{StaticResource IconShare}" />
+                                                    <TextBlock Text="Share" VerticalAlignment="Center" />
+                                                </StackPanel>
+                                            </Button>
+                                            <Button Classes="tool" Command="{Binding OpenFolderCommand}" IsVisible="{Binding CanOpenFolder}" Margin="0,0,8,8">
+                                                <StackPanel Orientation="Horizontal" Spacing="8">
+                                                    <c:Icon Data="{StaticResource IconFolder}" />
+                                                    <TextBlock Text="Open folder" VerticalAlignment="Center" />
+                                                </StackPanel>
+                                            </Button>
+                                            <Button Classes="tool danger" Command="{Binding DeleteCommand}" Margin="0,0,8,8">
+                                                <StackPanel Orientation="Horizontal" Spacing="8">
+                                                    <c:Icon Data="{StaticResource IconDelete}" />
+                                                    <TextBlock Text="Delete" VerticalAlignment="Center" />
+                                                </StackPanel>
+                                            </Button>
+                                        </WrapPanel>
+                                    </StackPanel>
+                                </ScrollViewer>
+                            </DataTemplate>
+                        </ContentControl.ContentTemplate>
+                    </ContentControl>
+                </Panel>
+            </Border>
+        </Grid>
+
+        <!-- Bottom bar: Recently deleted, or the actions for the selected takes -->
+        <Border Grid.Row="3" Background="{DynamicResource SurfaceBrush}" BorderBrush="{DynamicResource StrokeBrush}"
+                BorderThickness="0,1,0,0" Padding="12,6,12,8" IsVisible="{Binding ShowBottomBar}">
+            <Panel>
+                <Button Classes="tool" Command="{Binding OpenTrashCommand}" HorizontalAlignment="Left" IsVisible="{Binding !IsSelecting}">
+                    <StackPanel Orientation="Horizontal" Spacing="8">
+                        <c:Icon Data="{StaticResource IconTrash}" />
+                        <TextBlock Text="Recently deleted" VerticalAlignment="Center" />
+                        <TextBlock Classes="muted" Text="{Binding TrashCount}" VerticalAlignment="Center" IsVisible="{Binding HasTrash}" />
+                    </StackPanel>
+                </Button>
+                <Grid IsVisible="{Binding IsSelecting}" ColumnDefinitions="Auto,*,Auto,Auto,Auto" ColumnSpacing="8">
+                    <Button Classes="icon" Command="{Binding ToggleSelectingCommand}" ToolTip.Tip="Cancel">
+                        <c:Icon Data="{StaticResource IconClose}" />
+                    </Button>
+                    <TextBlock Grid.Column="1" Text="{Binding CheckedText}" FontWeight="SemiBold" VerticalAlignment="Center"
+                               TextTrimming="CharacterEllipsis" />
+                    <Button Grid.Column="2" Classes="tool" Command="{Binding SelectAllCommand}" Content="All" />
+                    <Button Grid.Column="3" Classes="tool" Command="{Binding ShareCheckedCommand}" IsEnabled="{Binding HasChecked}"
+                            IsVisible="{Binding CanShare}" ToolTip.Tip="Share">
+                        <c:Icon Data="{StaticResource IconShare}" />
+                    </Button>
+                    <Button Grid.Column="4" Classes="tool danger" Command="{Binding DeleteCheckedCommand}" IsEnabled="{Binding HasChecked}"
+                            ToolTip.Tip="Delete">
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                            <c:Icon Data="{StaticResource IconDelete}" />
+                            <TextBlock Text="Delete" VerticalAlignment="Center" />
+                        </StackPanel>
+                    </Button>
+                </Grid>
+            </Panel>
+        </Border>
+
+        <!-- Item menu -->
+        <Grid Grid.RowSpan="4" IsVisible="{Binding IsMenuOpen}">
+            <Border Background="{DynamicResource ScrimBrush}" Tapped="OnScrimTapped" />
+            <Border Classes="dialog" Padding="14">
+                <StackPanel Spacing="2">
+                    <TextBlock Text="{Binding MenuTake.Title}" Classes="title" TextTrimming="CharacterEllipsis" Margin="8,4,8,8" />
+                    <Button Classes="tool menurow" Command="{Binding MenuRenameCommand}">
+                        <StackPanel Orientation="Horizontal" Spacing="12">
+                            <c:Icon Data="{StaticResource IconEdit}" />
+                            <TextBlock Text="Rename" VerticalAlignment="Center" />
+                        </StackPanel>
+                    </Button>
+                    <Button Classes="tool menurow" Command="{Binding MenuNotesCommand}">
+                        <StackPanel Orientation="Horizontal" Spacing="12">
+                            <c:Icon Data="{StaticResource IconNotes}" />
+                            <TextBlock Text="Notes" VerticalAlignment="Center" />
+                        </StackPanel>
+                    </Button>
+                    <Button Classes="tool menurow" Command="{Binding MenuShareCommand}" IsVisible="{Binding CanShare}">
+                        <StackPanel Orientation="Horizontal" Spacing="12">
+                            <c:Icon Data="{StaticResource IconShare}" />
+                            <TextBlock Text="Share" VerticalAlignment="Center" />
+                        </StackPanel>
+                    </Button>
+                    <Button Classes="tool menurow" Command="{Binding MenuOpenFolderCommand}" IsVisible="{Binding CanOpenFolder}">
+                        <StackPanel Orientation="Horizontal" Spacing="12">
+                            <c:Icon Data="{StaticResource IconFolder}" />
+                            <TextBlock Text="Open folder" VerticalAlignment="Center" />
+                        </StackPanel>
+                    </Button>
+                    <Button Classes="tool menurow" Command="{Binding MenuSelectCommand}">
+                        <StackPanel Orientation="Horizontal" Spacing="12">
+                            <c:Icon Data="{StaticResource IconCheck}" />
+                            <TextBlock Text="Select several" VerticalAlignment="Center" />
+                        </StackPanel>
+                    </Button>
+                    <Button Classes="tool menurow danger" Command="{Binding MenuDeleteCommand}">
+                        <StackPanel Orientation="Horizontal" Spacing="12">
+                            <c:Icon Data="{StaticResource IconDelete}" />
+                            <TextBlock Text="Delete" VerticalAlignment="Center" />
+                        </StackPanel>
+                    </Button>
+                </StackPanel>
+            </Border>
+        </Grid>
+
+        <!-- Rename -->
+        <Grid Grid.RowSpan="4" IsVisible="{Binding IsRenameOpen}">
+            <Border Background="{DynamicResource ScrimBrush}" Tapped="OnScrimTapped" />
+            <Border Classes="dialog">
+                <StackPanel Spacing="14">
+                    <TextBlock Text="Rename take" FontSize="18" FontWeight="Bold" />
+                    <TextBox Name="RenameBox" Text="{Binding RenameText}" PlaceholderText="Title (empty shows the date)" MinHeight="44"
+                             VerticalContentAlignment="Center" MaxLength="120" />
+                    <StackPanel Orientation="Horizontal" Spacing="8" HorizontalAlignment="Right">
+                        <Button Classes="tool" Content="Cancel" Command="{Binding CancelDialogCommand}" />
+                        <Button Classes="primary" Content="Save" Command="{Binding SaveRenameCommand}" />
+                    </StackPanel>
+                </StackPanel>
+            </Border>
+        </Grid>
+
+        <!-- Notes -->
+        <Grid Grid.RowSpan="4" IsVisible="{Binding IsNotesOpen}">
+            <Border Background="{DynamicResource ScrimBrush}" Tapped="OnScrimTapped" />
+            <Border Classes="dialog">
+                <StackPanel Spacing="14">
+                    <TextBlock Text="Notes" FontSize="18" FontWeight="Bold" />
+                    <TextBox Name="NotesBox" Text="{Binding NotesText}" PlaceholderText="Who, where, what to remember" AcceptsReturn="True"
+                             TextWrapping="Wrap" MinHeight="140" MaxHeight="260" />
+                    <StackPanel Orientation="Horizontal" Spacing="8" HorizontalAlignment="Right">
+                        <Button Classes="tool" Content="Cancel" Command="{Binding CancelDialogCommand}" />
+                        <Button Classes="primary" Content="Save" Command="{Binding SaveNotesCommand}" />
+                    </StackPanel>
+                </StackPanel>
+            </Border>
+        </Grid>
+    </Grid>
+</UserControl>

@@ -50,8 +50,11 @@ public sealed class MatroskaReader : IMediaReader
         _s = stream;
         _leaveOpen = leaveOpen;
         _len = stream.Length;
-        Open();
+        try { Open(); }
+        catch (Exception ex) when (ReaderGuard.IsForeign(ex)) { throw ReaderGuard.Wrap("Matroska", ex); }
     }
+
+    private const int MaxBlock = 128 << 20, MaxMaster = 1 << 24;
 
     // ------------------------------------------------------------------ EBML primitives
 
@@ -143,7 +146,7 @@ public sealed class MatroskaReader : IMediaReader
             if (id == IdCluster) { firstCluster = q; break; }
             if (size < 0) { break; }
             var ds = q + hl;
-            var take = (int)Math.Min(size, Math.Min(_segEnd - ds, 1 << 24));
+            var take = (int)Math.Max(0, Math.Min(size, Math.Min(_segEnd - ds, MaxMaster)));
             switch (id)
             {
                 case IdInfo:
@@ -168,7 +171,8 @@ public sealed class MatroskaReader : IMediaReader
         if (cuesPos >= 0 && _clusters.Count == 0)
         {
             var abs = _segStart + cuesPos;
-            if (abs < _segEnd && Header(abs, out id, out size, out hl) && id == IdCues && size >= 0 && abs + hl + size <= _len)
+            if (abs >= _segStart && abs < _segEnd && Header(abs, out id, out size, out hl) && id == IdCues && size >= 0 && size <= MaxMaster
+                && abs + hl + size <= _len)
             {
                 ParseCues(ReadAt(abs + hl, (int)size));
             }
@@ -191,6 +195,9 @@ public sealed class MatroskaReader : IMediaReader
 
     private byte[] ReadAt(long pos, int count)
     {
+        // never allocate more than the file can deliver
+        if (pos < 0 || count < 0) { throw new InvalidDataException("Matroska read outside the file"); }
+        count = (int)Math.Min(count, Math.Max(0, _len - pos));
         var b = new byte[count];
         _s.Position = pos;
         var n = _s.ReadAtLeast(b, count, throwOnEndOfStream: false);
@@ -247,7 +254,7 @@ public sealed class MatroskaReader : IMediaReader
         foreach (var (pos, time) in byPos)
         {
             var abs = _segStart + pos;
-            if (abs < _len) { _clusters.Add((time * _scaleTicks, abs)); }
+            if (abs >= 0 && abs < _len) { _clusters.Add((time * _scaleTicks, abs)); }
         }
     }
 
@@ -328,6 +335,12 @@ public sealed class MatroskaReader : IMediaReader
 
     public bool TryRead(out MediaPacket packet)
     {
+        try { return TryReadCore(out packet); }
+        catch (Exception ex) when (ReaderGuard.IsForeign(ex)) { throw ReaderGuard.Wrap("Matroska", ex); }
+    }
+
+    private bool TryReadCore(out MediaPacket packet)
+    {
         while (_queue.Count == 0)
         {
             if (!Advance()) { packet = default; return false; }
@@ -405,14 +418,14 @@ public sealed class MatroskaReader : IMediaReader
             else if (id == 0xFB) { hasRef = true; }
             p += hl + sz;
         }
-        if (blockPos < 0) { return false; }
+        if (blockPos < 0 || blockSize < 0 || blockPos > end || blockSize > end - blockPos || blockPos + blockSize > _len) { return false; }
         ReadBlock(blockPos, blockSize, !hasRef);
         return true;
     }
 
     private void ReadBlock(long ds, long size, bool? groupKey)
     {
-        if (size < 4) { return; }
+        if (size < 4 || size > MaxBlock || ds < 0 || size > _len - ds) { return; }
         var head = ReadAt(ds, (int)Math.Min(size, 16));
         if (head.Length < 4) { return; }
         // track number vint
@@ -485,7 +498,7 @@ public sealed class MatroskaReader : IMediaReader
             sizes[count - 1] = d.Length - p - used;
             foreach (var s in sizes)
             {
-                if (s < 0 || p + s > d.Length) { break; }
+                if (s < 0 || s > d.Length - p) { break; }
                 frames.Add(d.AsSpan(p, s).ToArray());
                 p += s;
             }
@@ -557,6 +570,12 @@ public sealed class MatroskaReader : IMediaReader
     }
 
     public void Seek(TimeSpan position)
+    {
+        try { SeekCore(position); }
+        catch (Exception ex) when (ReaderGuard.IsForeign(ex)) { throw ReaderGuard.Wrap("Matroska", ex); }
+    }
+
+    private void SeekCore(TimeSpan position)
     {
         _queue.Clear();
         _inCluster = false;

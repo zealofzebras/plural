@@ -133,8 +133,16 @@ public sealed class PeakWriter : IDisposable
         _sampleRate = sampleRate;
         Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(path))!);
         _fs = new FileStream(path, FileMode.Create, FileAccess.ReadWrite, FileShare.Read, 1 << 14);
-        _fs.Write(Header(0));
-        _fs.Flush();
+        try
+        {
+            _fs.Write(Header(0));
+            _fs.Flush();
+        }
+        catch
+        {
+            _fs.Dispose();
+            throw;
+        }
         _builder = new PeakBuilder((min, max) =>
         {
             BinaryPrimitives.WriteInt16LittleEndian(_pair, min);

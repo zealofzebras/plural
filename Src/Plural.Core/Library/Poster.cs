@@ -125,6 +125,9 @@ internal sealed class PosterCapture : IDisposable
     private int _taken;
     private volatile Task _work = Task.CompletedTask;
 
+    /// <summary>Called (from the encoding task) with a message when the poster could not be written; must not throw.</summary>
+    public Action<string>? OnError { get; set; }
+
     public PosterCapture(IVideoCapture camera, string takeFolder, long t0)
     {
         _camera = camera;
@@ -144,15 +147,20 @@ internal sealed class PosterCapture : IDisposable
         _work = Task.Run(() =>
         {
             try { PosterWriter.Save(_path, copy, w, h, stride, rotation); }
-            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException) { /* no poster */ }
+            catch (Exception ex)
+            {
+                // never let a poster problem escape: the task is awaited when the take stops
+                try { OnError?.Invoke("poster: " + ex.Message); } catch { /* ignore */ }
+            }
         });
     }
 
-    /// <summary>Stops listening and waits for a poster being written.</summary>
-    public Task StopAsync()
+    /// <summary>Stops listening and waits (at most a few seconds) for a poster being written. Never throws.</summary>
+    public async Task StopAsync()
     {
         Dispose();
-        return _work;
+        try { await _work.WaitAsync(TimeSpan.FromSeconds(5)).ConfigureAwait(false); }
+        catch { /* timeout or failure: the take must still finish */ }
     }
 
     public void Dispose()

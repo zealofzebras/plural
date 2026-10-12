@@ -22,7 +22,7 @@ public sealed class IosHost : IAppHost
     {
         OnMain(IosAudio.ConfigureSession);
         var audio = new IosAudio();
-        return new MikeHub(new IosAccessories(), audio, new AppleAacEncoderFactory(), null, audio);
+        return new MikeHub(new IosAccessories(), audio, new AppleAacEncoderFactory(), null, audio, new AppleAudioDecoderFactory(), null);
     }
 
     /// <summary>Documents/Recordings: visible in the Files app (UIFileSharingEnabled + LSSupportsOpeningDocumentsInPlace).</summary>

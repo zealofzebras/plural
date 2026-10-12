@@ -16,6 +16,7 @@ public partial class MainView : UserControl
     private const double CardMargin = 6;
     private const double BodyMargin = 12;
     private IActivatableLifetime? _activatable;
+    private TopLevel? _top;
 
     public MainView()
     {
@@ -40,6 +41,30 @@ public partial class MainView : UserControl
             _activatable.Activated += OnActivated;
             _activatable.Deactivated += OnDeactivated;
         }
+        // Back: Android back gesture/button, Escape, Alt+Left (tunnel, so it works wherever the focus is).
+        _top = TopLevel.GetTopLevel(this);
+        if (_top is not null)
+        {
+            _top.BackRequested += OnBackRequested;
+            _top.AddHandler(KeyDownEvent, OnTopKeyDown, RoutingStrategies.Tunnel);
+        }
+    }
+
+    private void OnBackRequested(object? sender, RoutedEventArgs e)
+    {
+        if (_vm?.GoBack() == true)
+        {
+            e.Handled = true;
+        }
+    }
+
+    private void OnTopKeyDown(object? sender, KeyEventArgs e)
+    {
+        var back = e.Key == Key.Escape || (e.Key == Key.Left && e.KeyModifiers == KeyModifiers.Alt) || e.Key == Key.BrowserBack;
+        if (back && _vm?.GoBack() == true)
+        {
+            e.Handled = true;
+        }
     }
 
     protected override void OnDetachedFromVisualTree(VisualTreeAttachmentEventArgs e)
@@ -49,6 +74,12 @@ public partial class MainView : UserControl
             _activatable.Activated -= OnActivated;
             _activatable.Deactivated -= OnDeactivated;
             _activatable = null;
+        }
+        if (_top is not null)
+        {
+            _top.BackRequested -= OnBackRequested;
+            _top.RemoveHandler(KeyDownEvent, OnTopKeyDown);
+            _top = null;
         }
         base.OnDetachedFromVisualTree(e);
     }
@@ -111,14 +142,6 @@ public partial class MainView : UserControl
         if (DataContext is MainViewModel vm)
         {
             vm.CloseMenuCommand.Execute(null);
-        }
-    }
-
-    private void OnTakesScrimTapped(object? sender, TappedEventArgs e)
-    {
-        if (DataContext is MainViewModel vm)
-        {
-            vm.CloseTakesCommand.Execute(null);
         }
     }
 

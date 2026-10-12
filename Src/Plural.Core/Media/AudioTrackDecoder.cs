@@ -8,13 +8,15 @@ namespace Plural.Core.Media;
 /// <list type="bullet">
 /// <item>pcm_s16le and flac are decoded in managed code; aac and mp3 go through <see cref="IAudioDecoderFactory"/>. If the codec is unknown, the factory
 /// is null or <c>CanDecode</c> is false (or creating the decoder fails), <see cref="CanPlay"/> is false, <see cref="Problem"/> says why, and
-/// <see cref="Read"/> returns 0 — nothing throws at play time.</item>
+/// <see cref="Read"/> returns 0 — nothing throws at play time. A decoder, demuxer or timestamp error while playing (corrupt packet, bad seek) ends the
+/// track as if the file had ended there and sets <see cref="Problem"/> (<see cref="CanPlay"/> stays true; a later <see cref="Seek"/> may recover).</item>
 /// <item>Downmix: all channels averaged. Resampling (e.g. 48 kHz → 44.1 kHz): Blackman-windowed sinc, 8 zero crossings per side, cutoff at 97 % of the lower
 /// Nyquist, 256 phases with linear interpolation between phases, DC gain normalized; 44.1 kHz sources are copied untouched.</item>
 /// <item>Timeline: output sample n is track time n / 44100 from the file start. Decoded sample 0 sits at the first packet's timestamp (edit lists and
 /// Matroska block times are already in <see cref="MediaPacket.Timestamp"/>), so a track that starts later yields leading silence, and negative
 /// timestamps (AAC priming removed through the MP4 edit list) drop the priming samples. For pcm and flac a gap of more than 20 ms between a packet
-/// and the end of the previous one is filled with silence. For aac/mp3 no gap detection is done (decoder delay makes sample counts unreliable;
+/// and the end of the previous one is filled with silence; a gap of more than 1.5 s is not materialized (the timeline just jumps, reads in between
+/// are silent), and an implausible gap (more than an hour) ends the track with a <see cref="Problem"/>. For aac/mp3 no gap detection is done (decoder delay makes sample counts unreliable;
 /// our writers never leave gaps there).</item>
 /// <item>Seek: positions the reader at the last packet at or before the target (±1 audio block); for lossy codecs it starts 100 ms earlier and resets
 /// the decoder so the overlap/bit reservoir is primed, then drops the samples before the target.</item>
@@ -25,6 +27,8 @@ public sealed class AudioTrackDecoder : IDisposable
 {
     public const int OutputRate = 44100;
     private const long GapToleranceTicks = 200_000; // 20 ms
+    private const long MaxGapTicks = 36_000_000_000; // 1 hour: a bigger jump is a corrupt timestamp
+    private const int MaxMaterializedSilence = 1 << 16;
     private const long PrerollTicks = 1_000_000;    // 100 ms for lossy codecs
     private const long ResamplePrerollTicks = 200_000; // 20 ms
     private const int Phases = 256;
@@ -57,7 +61,7 @@ public sealed class AudioTrackDecoder : IDisposable
     /// <summary>False when this platform cannot decode the track; see <see cref="Problem"/>.</summary>
     public bool CanPlay { get; }
 
-    public string? Problem { get; }
+    public string? Problem { get; private set; }
 
     public TimeSpan Duration => _reader.Duration;
 
@@ -149,7 +153,7 @@ public sealed class AudioTrackDecoder : IDisposable
     public int Read(Span<short> dest)
     {
         if (!CanPlay) { return 0; }
-        if (!_primed) { Prime(); }
+        if (!_primed) { Guarded(Prime); }
         var written = 0;
         while (written < dest.Length)
         {
@@ -157,7 +161,7 @@ public sealed class AudioTrackDecoder : IDisposable
             if (_table is null)
             {
                 var idx = _outPos - (long)Math.Round(_t0Src);
-                while (!_eof && _srcCount <= idx) { DecodeMore(); }
+                while (!_eof && _srcCount <= idx) { Guarded(DecodeMore); }
                 if (idx >= _srcCount && _eof) { break; }
                 dest[written++] = idx < 0 ? (short)0 : At(idx);
                 _outPos++;
@@ -167,7 +171,7 @@ public sealed class AudioTrackDecoder : IDisposable
             var i0 = (long)Math.Floor(q);
             var half = _taps / 2;
             var need = i0 + half;
-            while (!_eof && _srcCount <= need) { DecodeMore(); }
+            while (!_eof && _srcCount <= need) { Guarded(DecodeMore); }
             if (_eof && q >= _srcCount) { break; }
             if (need < 0) { dest[written++] = 0; _outPos++; continue; }
 
@@ -214,11 +218,27 @@ public sealed class AudioTrackDecoder : IDisposable
         _outPos = (long)Math.Round(position.Ticks * (double)OutputRate / 10_000_000);
         _fifoLen = 0; _fifoBase = 0; _srcCount = 0;
         _primed = false; _eof = false; _drained = false;
-        _dec?.Reset();
-        // lossy codecs need their overlap / bit reservoir primed; a resampled source needs a few samples before the target for the filter
-        var preroll = !_lossless ? PrerollTicks : _table is not null ? ResamplePrerollTicks : 0;
-        var target = TimeSpan.FromTicks(Math.Max(0, position.Ticks - preroll));
-        _reader.Seek(target);
+        Guarded(() =>
+        {
+            _dec?.Reset();
+            // lossy codecs need their overlap / bit reservoir primed; a resampled source needs a few samples before the target for the filter
+            var preroll = !_lossless ? PrerollTicks : _table is not null ? ResamplePrerollTicks : 0;
+            var target = TimeSpan.FromTicks(Math.Max(0, position.Ticks - preroll));
+            _reader.Seek(target);
+        });
+    }
+
+    /// <summary>Runs source-side work; any failure (corrupt packet, decoder error, bad timestamps) ends the track and is reported through <see cref="Problem"/>.</summary>
+    private void Guarded(Action work)
+    {
+        try { work(); }
+        catch (Exception ex) when (ex is not OutOfMemoryException)
+        {
+            Problem = "Playback stopped: " + ex.Message;
+            _primed = true;
+            _eof = true;
+            _drained = true;
+        }
     }
 
     public void Dispose()
@@ -279,6 +299,7 @@ public sealed class AudioTrackDecoder : IDisposable
         {
             var expected = _t0Ticks + _srcCount * 10_000_000L / _srcRate;
             var gap = p.Timestamp - expected;
+            if (gap > MaxGapTicks) { throw new InvalidDataException("Implausible timestamp jump in the file"); }
             if (gap > GapToleranceTicks) { AppendSilence(gap * _srcRate / 10_000_000); }
         }
         var data = p.Data.Span;
@@ -303,16 +324,19 @@ public sealed class AudioTrackDecoder : IDisposable
     private void AppendSilence(long samples)
     {
         if (samples <= 0) { return; }
-        EnsureCapacity((int)Math.Min(samples, int.MaxValue / 2));
-        // silence is appended in chunks so a huge gap does not allocate everything at once
-        while (samples > 0)
+        if (samples > MaxMaterializedSilence)
         {
-            var n = (int)Math.Min(samples, 1 << 16);
-            EnsureCapacity(n);
-            Array.Clear(_fifo, _fifoLen, n);
-            _fifoLen += n; _srcCount += n; samples -= n;
-            if (samples > 0) { Trim(_fifoBase + _fifoLen - 1); }
+            // a long gap is not materialized: samples outside the FIFO read as silence, so only the counters move
+            _srcCount += samples;
+            _fifoLen = 0;
+            _fifoBase = _srcCount;
+            return;
         }
+        var n = (int)samples;
+        EnsureCapacity(n);
+        Array.Clear(_fifo, _fifoLen, n);
+        _fifoLen += n;
+        _srcCount += n;
     }
 
     private void EnsureCapacity(int extra)

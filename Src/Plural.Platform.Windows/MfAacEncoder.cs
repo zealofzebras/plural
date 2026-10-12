@@ -33,6 +33,14 @@ public sealed class MfAacEncoder : IAacEncoder
     public int Channels { get; }
     public ReadOnlyMemory<byte> AudioSpecificConfig { get; }
 
+    /// <summary>
+    /// 0: measured on Windows 11 (arm64 and x64, 64 and 128 kbps, 44.1 kHz mono) by encoding a noise burst at a known sample and decoding
+    /// the raw frames with the Media Foundation decoder and with ffmpeg: both put the burst at exactly the input position, with no
+    /// edit list. The Microsoft encoder compensates its own delay (87 frames for 88200 input samples, no extra priming frame; the first
+    /// ~512 decoded samples are silent instead). A non-zero value here would shift every playback earlier.
+    /// </summary>
+    public int PrimingSamples => 0;
+
     /// <summary>Bit rate actually configured (bits/s), the closest supported to the requested one.</summary>
     public int ActualBitRate { get; }
 

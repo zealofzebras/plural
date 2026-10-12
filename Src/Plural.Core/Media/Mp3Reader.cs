@@ -2,7 +2,7 @@ namespace Plural.Core.Media;
 
 /// <summary>
 /// MP3 frame splitter (MPEG-1/2/2.5 Layer III). Skips an ID3v2 tag, drops the Xing/Info frame (it carries the frame count for the duration,
-/// otherwise the frame headers are scanned once). Each packet is one MP3 frame, key frame,
+/// otherwise a constant bitrate is estimated from the file size, and only a file whose first frames differ in bitrate is scanned at open). Each packet is one MP3 frame, key frame,
 /// timestamp = frame index × samples per frame. The LAME encoder delay (typically 1105 samples) is not compensated.
 /// </summary>
 public sealed class Mp3Reader : IMediaReader
@@ -72,11 +72,29 @@ public sealed class Mp3Reader : IMediaReader
         Tracks = [new MediaTrack(0, MediaKind.Audio, "mp3", null, null, hdr.SampleRate, hdr.Channels, 16, 0, 0, 0, Duration)];
     }
 
+    /// <summary>
+    /// Frame count without Xing/Info/VBRI: when the first frames share one bitrate it is estimated from the file size (CBR, no scan; the
+    /// offset table is built on the first seek); otherwise the headers are scanned once.
+    /// </summary>
     private long EstimateOrScan()
     {
-        var offsets = ScanOffsets(limit: 0);
-        _offsets = offsets;
-        return offsets.Count;
+        var buf = new byte[4];
+        var p = _audioStart;
+        var cbr = true;
+        for (var i = 0; i < 8 && p + 4 <= _len; i++)
+        {
+            _s.Position = p;
+            _s.ReadExactly(buf);
+            if (!ParseHeader(buf, out var h) || h.Bitrate != _first.Bitrate || h.SampleRate != _first.SampleRate) { cbr = false; break; }
+            p += h.Length;
+        }
+        if (!cbr)
+        {
+            _offsets = ScanOffsets(limit: 0);
+            return _offsets.Count;
+        }
+        var frameBytes = _first.Bitrate / 8.0 * _first.SamplesPerFrame / _first.SampleRate;
+        return Math.Max(0, (long)Math.Round((_len - _audioStart) / frameBytes)); // rounded: the last frame is usually complete
     }
 
     private long SkipId3()

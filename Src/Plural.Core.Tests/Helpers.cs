@@ -311,3 +311,10 @@ public sealed class Mp4Box
     public ReadOnlySpan<byte> Data => File.AsSpan((int)DataStart, (int)(End - DataStart));
     public uint U32(int offsetInData) => BinaryPrimitives.ReadUInt32BigEndian(Data[offsetInData..]);
 }
+
+/// <summary>
+/// Tests that measure wall-clock timing (take start/stop, latency, poster timing): run alone after the parallel tests, so CPU load
+/// from fuzz/decoder tests can't push them out of their tolerances.
+/// </summary>
+[CollectionDefinition("timing", DisableParallelization = true)]
+public sealed class TimingCollection;

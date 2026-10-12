@@ -24,7 +24,6 @@ public partial class MainViewModel : ViewModelBase, IAsyncDisposable
     private readonly MikeHub? _hub;
     private readonly DispatcherTimer _timer;
     private readonly Stopwatch _recordClock = new();
-    private readonly Dictionary<string, (TimeSpan Duration, int Mics)> _takeInfo = new(StringComparer.OrdinalIgnoreCase);
 
     private bool _initialized, _loading, _viewShown, _appVisible = true, _cameraLoopRunning;
     private int _cameraVersion, _recMics;
@@ -38,7 +37,6 @@ public partial class MainViewModel : ViewModelBase, IAsyncDisposable
     private Task<bool>? _micPermission;
 
     public ObservableCollection<MikeViewModel> Mikes { get; } = [];
-    public ObservableCollection<TakeViewModel> Takes { get; } = [];
     public ObservableCollection<Choice> FormatOptions { get; } = [];
     public ObservableCollection<CameraInfo> Cameras { get; } = [];
     public ObservableCollection<AudioInputDevice> AvailableInputs { get; } = [];
@@ -97,15 +95,14 @@ public partial class MainViewModel : ViewModelBase, IAsyncDisposable
     [ObservableProperty] public partial string FormatDescription { get; set; } = "";
 
     // Takes and toast
-    [ObservableProperty] public partial bool HasTakes { get; set; }
     [ObservableProperty] public partial bool IsToastVisible { get; set; }
     [ObservableProperty] public partial string ToastText { get; set; } = "";
     [ObservableProperty] public partial string ToastDetail { get; set; } = "";
     [ObservableProperty] public partial bool ToastIsError { get; set; }
     [ObservableProperty] public partial TakeViewModel? ToastTake { get; set; }
+    [ObservableProperty] public partial bool HasToastUndo { get; set; }
 
     // Layout state (derived in UpdateLayoutState)
-    [ObservableProperty] public partial bool IsTakesOpen { get; set; }
     [ObservableProperty] public partial bool IsImmersive { get; set; }
     [ObservableProperty] public partial string ModeLabel { get; set; } = "Audio";
     [ObservableProperty] public partial string FormatShort { get; set; } = "WAV";
@@ -139,6 +136,7 @@ public partial class MainViewModel : ViewModelBase, IAsyncDisposable
     public MainViewModel()
     {
         _timer = new DispatcherTimer();
+        CreatePages();
         Summary = "2 of 3 mics live";
     }
 
@@ -150,6 +148,7 @@ public partial class MainViewModel : ViewModelBase, IAsyncDisposable
         _loading = true;
         RecordingRoot = host.RecordingRoot;
         HasVideo = _hub.Video is not null;
+        CreatePages();
         LoadSettings();
         CreateRemote(host, _hub);
         UpdateLayoutState();
@@ -181,6 +180,7 @@ public partial class MainViewModel : ViewModelBase, IAsyncDisposable
             return;
         }
         _appVisible = visible;
+        if (!visible) { Player.Pause(); }
         RequestCameraSync();
     }
 
@@ -221,6 +221,7 @@ public partial class MainViewModel : ViewModelBase, IAsyncDisposable
         AllowRemoteControl = s.AllowRemoteControl;
         _trustedControllers = [.. s.TrustedControllers];
         LoadMixSettings(s);
+        PlayerSplitter = Math.Clamp(s.PlayerSplitter, 0.15, 0.5);
         if (CanChangeRecordingRoot && !string.IsNullOrWhiteSpace(s.RecordingRoot))
         {
             RecordingRoot = s.RecordingRoot;
@@ -255,6 +256,7 @@ public partial class MainViewModel : ViewModelBase, IAsyncDisposable
             DeviceId = _deviceId.Length > 0 ? _deviceId : null,
             AllowRemoteControl = AllowRemoteControl,
             TrustedControllers = _trustedControllers,
+            PlayerSplitter = PlayerSplitter,
         };
         SaveMixSettings(s);
         try
@@ -388,7 +390,14 @@ public partial class MainViewModel : ViewModelBase, IAsyncDisposable
     partial void OnAutoBitRateChanged(bool value) => SettingChanged(true);
     partial void OnBitRateMbpsChanged(double value) => SettingChanged(true);
 
-    partial void OnRecordingRootChanged(string value) => SaveSettings();
+    partial void OnRecordingRootChanged(string value)
+    {
+        SaveSettings();
+        if (!_loading && _initialized)
+        {
+            _ = LoadTakesAsync();
+        }
+    }
 
     partial void OnSelectedCameraChanged(CameraInfo? value)
     {
@@ -427,8 +436,6 @@ public partial class MainViewModel : ViewModelBase, IAsyncDisposable
         RefreshRecordState();
         UpdateLayoutState();
     }
-
-    partial void OnIsTakesOpenChanged(bool value) => UpdateLayoutState();
 
     partial void OnIsImmersiveChanged(bool value)
     {
@@ -487,23 +494,6 @@ public partial class MainViewModel : ViewModelBase, IAsyncDisposable
             if (v != _uiVersion) { return; }
             StripVisible = false;
         }
-    }
-
-    [RelayCommand]
-    private void OpenTakes()
-    {
-        IsTakesOpen = true;
-        _ = LoadTakesAsync();
-    }
-
-    [RelayCommand]
-    private void CloseTakes() => IsTakesOpen = false;
-
-    [RelayCommand]
-    private void ViewTakes()
-    {
-        IsToastVisible = false;
-        OpenTakes();
     }
 
     [RelayCommand]
@@ -1040,7 +1030,6 @@ public partial class MainViewModel : ViewModelBase, IAsyncDisposable
 
     private void EnterRecordingUi()
     {
-        IsTakesOpen = false;
         _recordClock.Restart();
         RecordingTime = "00:00";
         IsToastVisible = false;
@@ -1071,7 +1060,6 @@ public partial class MainViewModel : ViewModelBase, IAsyncDisposable
         _recordClock.Reset();
         IsRecording = false;
         IsStopping = false;
-        _takeInfo[take.Folder] = (take.Duration, _recMics);
         if (_remote?.Responder.HasRemoteTake == true)
         {
             // Recorded for a controller: queue the files for it (sent now, or when it reconnects).
@@ -1088,7 +1076,7 @@ public partial class MainViewModel : ViewModelBase, IAsyncDisposable
             details.Add($"{take.DroppedItems} items were dropped because the disk was too slow.");
         }
         await LoadTakesAsync();
-        var vm = Takes.FirstOrDefault(t => string.Equals(t.Folder, take.Folder, StringComparison.OrdinalIgnoreCase));
+        var vm = Takes.Find(take.Folder);
         ShowToast(text, string.Join("\n", details), details.Count > 0, vm);
         RequestCameraSync();
     }
@@ -1111,45 +1099,7 @@ public partial class MainViewModel : ViewModelBase, IAsyncDisposable
 
     // ---------------------------------------------------------------- takes
 
-    public async Task LoadTakesAsync()
-    {
-        var root = RecordingRoot;
-        var known = new Dictionary<string, (TimeSpan, int)>(_takeInfo, StringComparer.OrdinalIgnoreCase);
-        List<TakeData> data;
-        try
-        {
-            data = await Task.Run(() => TakeData.Scan(root, known.ToDictionary(k => k.Key, k => k.Value, StringComparer.OrdinalIgnoreCase), 20));
-        }
-        catch (Exception)
-        {
-            data = [];
-        }
-        Takes.Clear();
-        foreach (var d in data)
-        {
-            Takes.Add(new TakeViewModel(d, this));
-        }
-        HasTakes = Takes.Count > 0;
-    }
-
-    public async Task ShareTakeAsync(TakeViewModel take)
-    {
-        if (_host is null || !_host.CanShare)
-        {
-            return;
-        }
-        try
-        {
-            var path = await Task.Run(() => TakeExport.GetShareFile(take.Folder));
-            _host.ShareFile(path, MimeTypes.For(path));
-        }
-        catch (Exception ex)
-        {
-            ShowToast("Cannot share", ex.Message, true, null);
-        }
-    }
-
-    public void OpenTakeFolder(TakeViewModel take) => OpenFolderCore(take.Folder);
+    public void OpenTakeFolder(string folder) => OpenFolderCore(folder);
 
     [RelayCommand]
     private void OpenRecordingsFolder()
@@ -1180,8 +1130,12 @@ public partial class MainViewModel : ViewModelBase, IAsyncDisposable
 
     // ---------------------------------------------------------------- toast
 
-    private void ShowToast(string text, string detail, bool isError, TakeViewModel? take)
+    private Func<Task>? _toastUndo;
+
+    internal void ShowToast(string text, string detail, bool isError, TakeViewModel? take, Func<Task>? undo = null)
     {
+        _toastUndo = undo;
+        HasToastUndo = undo is not null;
         ToastText = text;
         ToastDetail = detail;
         ToastIsError = isError;
@@ -1190,7 +1144,19 @@ public partial class MainViewModel : ViewModelBase, IAsyncDisposable
         IsToastVisible = true;
         _toastCts?.Cancel();
         var cts = _toastCts = new CancellationTokenSource();
-        _ = HideToastLaterAsync(isError ? TimeSpan.FromSeconds(15) : TimeSpan.FromSeconds(9), cts.Token);
+        _ = HideToastLaterAsync(isError ? TimeSpan.FromSeconds(15) : undo is not null ? TimeSpan.FromSeconds(12) : TimeSpan.FromSeconds(9), cts.Token);
+    }
+
+    [RelayCommand]
+    private async Task UndoToastAsync()
+    {
+        var undo = _toastUndo;
+        IsToastVisible = false;
+        _toastUndo = null;
+        if (undo is not null)
+        {
+            await undo();
+        }
     }
 
     private async Task HideToastLaterAsync(TimeSpan delay, CancellationToken token)

@@ -747,6 +747,7 @@ public class EndToEndTests
 }
 
 /// <summary>Full hub path with fake sessions (state and PCM injected by reflection), fake camera and fake AAC encoder.</summary>
+[Collection("timing")]
 public class HubTakeTests
 {
     private sealed class FakeBt : IBluetoothPlatform

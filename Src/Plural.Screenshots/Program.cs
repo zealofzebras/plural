@@ -34,23 +34,31 @@ internal static class Program
         new("desktop", 1280, 800, 2.25, false), // 2880 x 1800
     ];
 
+    /// <summary>Extra profile for the page scenes only: a phone held sideways.</summary>
+    private static readonly Profile PhoneLandscape = new("phone-land", 844, 390, 2.0, true);
+
     /// <summary>--mixer: render only the mixer-mode preview (for development; the store set is unchanged).</summary>
     internal static bool MixerOnly;
+
+    /// <summary>--page takes: render only the Takes page over simulated takes (development; the store set is unchanged).</summary>
+    internal static string? Page;
 
     public static int Main(string[] args)
     {
         var profileName = Arg(args, "--profile") ?? "all";
         var theme = Arg(args, "--theme") ?? "dark";
         MixerOnly = args.Contains("--mixer");
-        var outRoot = Arg(args, "--out") ?? Path.Combine(FindRepoRoot(), "Marketing", "screenshots");
+        Page = Arg(args, "--page");
+        var outRoot = Arg(args, "--out")
+            ?? (Page is null ? Path.Combine(FindRepoRoot(), "Marketing", "screenshots") : Path.Combine(Path.GetTempPath(), "plural-shots"));
 
         if (profileName == "all")
         {
             // One process per profile: the app keeps one view model per process.
-            foreach (var p in Profiles)
+            foreach (var p in Page == "player" ? [.. Profiles, PhoneLandscape] : Profiles)
             {
                 var psi = new ProcessStartInfo(Environment.ProcessPath!) { UseShellExecute = false };
-                foreach (var a in new[] { "--profile", p.Name, "--out", outRoot, "--theme", theme }.Concat(MixerOnly ? ["--mixer"] : Array.Empty<string>()))
+                foreach (var a in new[] { "--profile", p.Name, "--out", outRoot, "--theme", theme }.Concat(MixerOnly ? ["--mixer"] : Array.Empty<string>()).Concat(Page is null ? [] : ["--page", Page]))
                 {
                     psi.ArgumentList.Add(a);
                 }
@@ -65,7 +73,7 @@ internal static class Program
             return 0;
         }
 
-        var profile = Profiles.FirstOrDefault(p => p.Name == profileName);
+        var profile = Profiles.Append(PhoneLandscape).FirstOrDefault(p => p.Name == profileName);
         if (profile is null)
         {
             Console.Error.WriteLine($"Unknown profile '{profileName}'. Use all, {string.Join(", ", Profiles.Select(p => p.Name))}.");
@@ -102,6 +110,11 @@ internal static class Program
             .WithInterFont()
             .SetupWithoutStarting();
         Application.Current!.RequestedThemeVariant = theme;
+        if (Page is "takes" or "player")
+        {
+            SimulatedTakes.Create(host.RecordingRoot);
+            SimulatedPlayerTakes.Create(host.RecordingRoot);
+        }
 
         var vm = PluralApp.MainViewModel ?? throw new InvalidOperationException("The app did not create its view model.");
         var window = new Window { Width = profile.Width, Height = profile.Height, Content = new MainView { DataContext = vm } };
@@ -116,6 +129,22 @@ internal static class Program
             var path = Path.Combine(outDir, $"{++shot:00}.png");
             frame.Save(path, new PngBitmapEncoderOptions());
             Console.WriteLine($"{profile.Name}: {Path.GetFileName(path)} {frame.PixelSize.Width}x{frame.PixelSize.Height}  {what}");
+        }
+
+        if (Page == "takes")
+        {
+            TakesPage(vm, window, Shot);
+            try { Directory.Delete(work, true); } catch (IOException) { } catch (UnauthorizedAccessException) { }
+            Console.Out.Flush();
+            Environment.Exit(0);
+        }
+
+        if (Page == "player")
+        {
+            PlayerPage(vm, window, Shot);
+            try { Directory.Delete(work, true); } catch (IOException) { } catch (UnauthorizedAccessException) { }
+            Console.Out.Flush();
+            Environment.Exit(0);
         }
 
         // 1. Every mic on its own track: three SmartMikes and a USB mic, all live.
@@ -203,6 +232,109 @@ internal static class Program
         try { Directory.Delete(work, true); } catch (IOException) { } catch (UnauthorizedAccessException) { }
         Console.Out.Flush();
         Environment.Exit(0);
+    }
+
+    /// <summary>The Takes page: list, item menu, multi-select, trash, empty state.</summary>
+    private static void TakesPage(MainViewModel vm, Window window, Action<string> shot)
+    {
+        vm.OpenTakesCommand.Execute(null);
+        Require(PumpUntil(() => vm.Takes.Items.Count >= 6, 20), "takes did not load");
+        PumpUntil(() => vm.Takes.Items.Count(t => t.HasThumb) >= vm.Takes.Items.Count, 10);
+        Pump(TimeSpan.FromSeconds(1));
+        shot("takes");
+
+        vm.Takes.ShowMenu(vm.Takes.Items[1]);
+        shot("take menu");
+        vm.Takes.HandleBack();
+
+        vm.Takes.Search = "maria";
+        shot("search");
+        vm.Takes.Search = "";
+        vm.Takes.FilterVideo = true;
+        shot("video filter");
+        vm.Takes.FilterVideo = false;
+
+        vm.Takes.ToggleSelectingCommand.Execute(null);
+        vm.Takes.Items[0].IsChecked = true;
+        vm.Takes.Items[2].IsChecked = true;
+        shot("select");
+        vm.Takes.ToggleSelectingCommand.Execute(null);
+
+        vm.Takes.BeginNotes(vm.Takes.Items[0]);
+        shot("notes");
+        vm.Takes.CancelDialogCommand.Execute(null);
+
+        var del = vm.Takes.DeleteAsync([vm.Takes.Items[3]]);
+        PumpUntil(() => del.IsCompleted, 10);
+        shot("deleted with undo");
+        vm.Takes.OpenTrashCommand.Execute(null);
+        PumpUntil(() => vm.Takes.Trash.Count > 0, 10);
+        shot("recently deleted");
+        vm.Takes.CloseTrashCommand.Execute(null);
+
+        vm.OpenPlayer(vm.Takes.Items[0].Info);
+        shot("player placeholder");
+    }
+
+    /// <summary>The Player page: 1, 2 and 3 videos with mixed orientations, spotlight, fullscreen, zoom, dropouts, gain.</summary>
+    private static void PlayerPage(MainViewModel vm, Window window, Action<string> shot)
+    {
+        var takes = vm.Library.Scan();
+        PlayerViewModel Open(string title, double at)
+        {
+            vm.OpenPlayer(takes.First(t => t.Title == title));
+            var p = vm.Player;
+            Require(PumpUntil(() => p.Rows.All(r => r.Peaks is not null) && p.Player is not null, 15), "peaks did not load for " + title);
+            var seed = 0;
+            foreach (var tile in p.Videos)
+            {
+                var data = SyntheticFrames.Make(++seed, tile.Rotation);
+                tile.Push(data, SyntheticFrames.SensorWidth, SyntheticFrames.SensorHeight, SyntheticFrames.SensorWidth * 4);
+            }
+            p.SeekTo(at);
+            return p;
+        }
+
+        var p = Open("Cafe interview", 70);
+        shot("1 video (landscape)");
+        p = Open("Two phones", 50);
+        shot("2 videos (landscape + portrait)");
+        p = Open("Panel talk", 120);
+        shot("3 videos (landscape + 2 portrait), remote offsets");
+        p.TileTapped(1);
+        shot("spotlight on the first portrait");
+        p.TileTapped(1);
+        p.Rows[1].IsSolo = true;
+        p.Rows[3].IsMuted = true;
+        shot("solo and mute");
+        p.Rows[1].IsSolo = false;
+        p.Rows[3].IsMuted = false;
+        p.ToggleFullscreenCommand.Execute(null);
+        shot("fullscreen");
+        p.ToggleFullscreenCommand.Execute(null);
+        if (p.Rows[0].IsCompact)
+        {
+            p.Rows[0].IsGainOpen = true;
+            shot("gain slider (phone)");
+            p.Rows[0].IsGainOpen = false;
+        }
+        if (p.IsPhoneLandscape)
+        {
+            p.FocusVideo = true;
+            shot("focus video");
+            p.FocusVideo = false;
+        }
+        p = Open("Three portraits", 40);
+        shot("3 portrait videos");
+        p.TileTapped(2);
+        shot("3 portrait, spotlight on the last");
+        p = Open("Studio session", 125);
+        shot("6 tracks, dropout and pauses");
+        p.ZoomTo(100, 50);
+        p.SeekTo(124);
+        shot("zoomed in on the dropout, overview above");
+        p = Open("Field recording", 30);
+        shot("audio only");
     }
 
     private static void AddInput(MainViewModel vm, string name) =>

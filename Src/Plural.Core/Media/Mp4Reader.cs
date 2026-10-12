@@ -54,25 +54,36 @@ public sealed class Mp4Reader : IMediaReader
     public IReadOnlyList<MediaTrack> Tracks { get; private set; } = [];
     public TimeSpan Duration { get; private set; }
 
+    private const int MaxMoov = 256 << 20, MaxMoof = 64 << 20, MaxSampleBytes = 128 << 20;
+
     public Mp4Reader(Stream stream, bool leaveOpen = false)
     {
         _s = stream;
         _leaveOpen = leaveOpen;
         _len = stream.Length;
+        try { Open(); }
+        catch (Exception ex) when (ReaderGuard.IsForeign(ex)) { throw ReaderGuard.Wrap("MP4", ex); }
+    }
+
+    private void Open()
+    {
         byte[]? moov = null;
         long pos = 0;
         while (TryBox(pos, out var type, out var size, out _))
         {
+            var fits = size <= _len - pos;
             if (type == "moov")
             {
-                if (pos + size > _len) { break; } // truncated moov: unusable
+                if (!fits) { break; } // truncated moov: unusable
+                if (size > MaxMoov) { throw new InvalidDataException("MP4 moov box is too large"); }
                 moov = ReadAt(pos, (int)size);
             }
             else if (type == "moof")
             {
-                if (pos + size > _len) { break; } // cut fragment header: stop here
+                if (!fits || size > MaxMoof) { break; } // cut fragment header: stop here
                 _moofs.Add((pos, size));
             }
+            if (!fits) { break; }
             pos += size;
         }
         if (moov is null) { throw new InvalidDataException("MP4 file without moov (not finalized and not fragmented)"); }
@@ -116,6 +127,9 @@ public sealed class Mp4Reader : IMediaReader
 
     private byte[] ReadAt(long pos, int count)
     {
+        // never allocate more than the file can deliver
+        if (pos < 0 || count < 0) { throw new InvalidDataException("MP4 read outside the file"); }
+        count = (int)Math.Min(count, Math.Max(0, _len - pos));
         var b = new byte[count];
         _s.Position = pos;
         var n = _s.ReadAtLeast(b, count, throwOnEndOfStream: false);
@@ -145,6 +159,11 @@ public sealed class Mp4Reader : IMediaReader
             if (b.Type == type) { return (b.Start, b.End); }
         }
         return null;
+    }
+
+    private static void Need(byte[] d, (string Type, int Start, int End) b, int n)
+    {
+        if (b.End - b.Start < n) { throw new InvalidDataException($"MP4 box '{b.Type}' is too short"); }
     }
 
     private static uint U32(byte[] d, int p) => BinaryPrimitives.ReadUInt32BigEndian(d.AsSpan(p));
@@ -177,7 +196,9 @@ public sealed class Mp4Reader : IMediaReader
         {
             if (b.Type == "mvhd")
             {
+                Need(d, b, 1);
                 var v = d[b.Start];
+                Need(d, b, v == 1 ? 32 : 20);
                 if (v == 1) { _movieTimescale = U32(d, b.Start + 20); _movieDuration = U64(d, b.Start + 24); }
                 else { _movieTimescale = U32(d, b.Start + 12); _movieDuration = U32(d, b.Start + 16); }
                 if (_movieTimescale == 0) { _movieTimescale = 1000; }
@@ -189,10 +210,13 @@ public sealed class Mp4Reader : IMediaReader
                 {
                     if (m.Type == "mehd")
                     {
+                        Need(d, m, 1);
+                        Need(d, m, d[m.Start] == 1 ? 12 : 8);
                         _fragmentDuration = d[m.Start] == 1 ? U64(d, m.Start + 4) : U32(d, m.Start + 4);
                     }
                     else if (m.Type == "trex")
                     {
+                        Need(d, m, 24);
                         var id = (int)U32(d, m.Start + 4);
                         _trex[id] = (U32(d, m.Start + 12), U32(d, m.Start + 16), U32(d, m.Start + 20));
                     }
@@ -232,9 +256,12 @@ public sealed class Mp4Reader : IMediaReader
             {
                 case "tkhd":
                 {
+                    Need(d, b, 1);
                     var v = d[b.Start];
                     var o = v == 1 ? 52 : 40;
+                    Need(d, b, v == 1 ? 24 : 16);
                     t.Id = (int)U32(d, b.Start + (v == 1 ? 20 : 12));
+                    if (b.End - b.Start < o + 44) { break; }
                     var a = I32(d, b.Start + o); var bb = I32(d, b.Start + o + 4);
                     rotation = (a, bb) switch { (_, > 0) when a == 0 => 90, (< 0, _) => 180, (_, < 0) when a == 0 => 270, _ => 0 };
                     width = (int)(U32(d, b.Start + o + 36) >> 16);
@@ -242,6 +269,7 @@ public sealed class Mp4Reader : IMediaReader
                     break;
                 }
                 case "edts":
+                case "free": // Mp4Writer keeps the elst in a free box until the file is finalized (a crashed file never gets the edts)
                     ParseElst(d, b.Start, b.End, t);
                     break;
                 case "udta":
@@ -255,12 +283,15 @@ public sealed class Mp4Reader : IMediaReader
                     {
                         if (m.Type == "mdhd")
                         {
+                            Need(d, m, 1);
                             var v = d[m.Start];
+                            Need(d, m, v == 1 ? 32 : 20);
                             if (v == 1) { t.Timescale = U32(d, m.Start + 20); t.MdhdDuration = U64(d, m.Start + 24); }
                             else { t.Timescale = U32(d, m.Start + 12); t.MdhdDuration = U32(d, m.Start + 16); }
                         }
                         else if (m.Type == "hdlr")
                         {
+                            Need(d, m, 12);
                             handler = Encoding.Latin1.GetString(d, m.Start + 8, 4);
                             var nameStart = m.Start + 24;
                             if (nameStart < m.End)
@@ -295,7 +326,7 @@ public sealed class Mp4Reader : IMediaReader
     private void ParseElst(byte[] d, int start, int end, Trak t)
     {
         var elst = Child(d, start, end, "elst");
-        if (elst is not { } e) { return; }
+        if (elst is not { } e || e.End - e.Start < 8) { return; }
         var v = d[e.Start];
         var count = (int)U32(d, e.Start + 4);
         var p = e.Start + 8;
@@ -320,8 +351,10 @@ public sealed class Mp4Reader : IMediaReader
             switch (b.Type)
             {
                 case "stsd":
+                    if (b.End - b.Start < 8) { break; }
                     foreach (var e in Boxes(d, b.Start + 8, b.End))
                     {
+                        if (e.End - e.Start < 28) { break; }
                         var fourcc = Encoding.Latin1.GetString(d, e.Start - 4, 4);
                         // e.Start is the entry payload (after size+type)
                         if (fourcc is "avc1" or "avc3")
@@ -355,18 +388,21 @@ public sealed class Mp4Reader : IMediaReader
                     break;
                 case "stts":
                 {
+                    if (b.End - b.Start < 8) { break; }
                     var n = (int)U32(d, b.Start + 4);
                     for (var i = 0; i < n && b.Start + 8 + 8 * i + 8 <= b.End; i++) { tb.Stts.Add((U32(d, b.Start + 8 + 8 * i), U32(d, b.Start + 12 + 8 * i))); }
                     break;
                 }
                 case "ctts":
                 {
+                    if (b.End - b.Start < 8) { break; }
                     var n = (int)U32(d, b.Start + 4);
                     for (var i = 0; i < n && b.Start + 8 + 8 * i + 8 <= b.End; i++) { tb.Ctts.Add((U32(d, b.Start + 8 + 8 * i), I32(d, b.Start + 12 + 8 * i))); }
                     break;
                 }
                 case "stss":
                 {
+                    if (b.End - b.Start < 8) { break; }
                     var n = (int)U32(d, b.Start + 4);
                     for (var i = 0; i < n && b.Start + 8 + 4 * i + 4 <= b.End; i++) { tb.Stss.Add(U32(d, b.Start + 8 + 4 * i)); }
                     tb.HasStss = true;
@@ -374,12 +410,14 @@ public sealed class Mp4Reader : IMediaReader
                 }
                 case "stsc":
                 {
+                    if (b.End - b.Start < 8) { break; }
                     var n = (int)U32(d, b.Start + 4);
                     for (var i = 0; i < n && b.Start + 8 + 12 * i + 12 <= b.End; i++) { tb.Stsc.Add((U32(d, b.Start + 8 + 12 * i), U32(d, b.Start + 12 + 12 * i))); }
                     break;
                 }
                 case "stsz":
                 {
+                    if (b.End - b.Start < 12) { break; }
                     tb.FixedSize = U32(d, b.Start + 4);
                     tb.SampleCount = U32(d, b.Start + 8);
                     if (tb.FixedSize == 0)
@@ -392,6 +430,7 @@ public sealed class Mp4Reader : IMediaReader
                 }
                 case "stco":
                 {
+                    if (b.End - b.Start < 8) { break; }
                     var n = (int)Math.Min(U32(d, b.Start + 4), (b.End - b.Start - 8) / 4);
                     tb.Chunks = new long[n];
                     for (var i = 0; i < n; i++) { tb.Chunks[i] = U32(d, b.Start + 8 + 4 * i); }
@@ -399,6 +438,7 @@ public sealed class Mp4Reader : IMediaReader
                 }
                 case "co64":
                 {
+                    if (b.End - b.Start < 8) { break; }
                     var n = (int)Math.Min(U32(d, b.Start + 4), (b.End - b.Start - 8) / 8);
                     tb.Chunks = new long[n];
                     for (var i = 0; i < n; i++) { tb.Chunks[i] = U64(d, b.Start + 8 + 8 * i); }
@@ -412,12 +452,13 @@ public sealed class Mp4Reader : IMediaReader
     private static void ParseEsds(byte[] d, int p, int end, ref string codec, ref byte[]? asc)
     {
         if (!Desc(d, ref p, end, out var tag, out var len) || tag != 3) { return; }
+        if (p + 3 > end) { return; }
         p += 2; // ES_ID
         var flags = d[p++];
         if ((flags & 0x80) != 0) { p += 2; }
-        if ((flags & 0x40) != 0) { p += 1 + d[p]; }
+        if ((flags & 0x40) != 0) { if (p >= end) { return; } p += 1 + d[p]; }
         if ((flags & 0x20) != 0) { p += 2; }
-        if (!Desc(d, ref p, end, out tag, out len) || tag != 4) { return; }
+        if (!Desc(d, ref p, end, out tag, out len) || tag != 4 || p >= end) { return; }
         var objectType = d[p];
         if (objectType is 0x6B or 0x69) { codec = "mp3"; }
         p += 13;
@@ -457,7 +498,7 @@ public sealed class Mp4Reader : IMediaReader
         {
             foreach (var (pos, size) in _moofs)
             {
-                var moof = ReadAt(pos, (int)size);
+                var moof = ReadAt(pos, (int)size); // size <= MaxMoof (checked when scanning)
                 if (moof.Length < size) { break; }
                 if (!AddFragment(moof, pos, list)) { break; }
             }
@@ -469,27 +510,30 @@ public sealed class Mp4Reader : IMediaReader
         _skipBefore = new int[_traks.Count];
     }
 
+    private bool InRange(long off, uint size) => off >= 0 && size <= MaxSampleBytes && off <= _len - size;
+
     private long ToTicks(Trak t, long mediaUnits) => (mediaUnits - t.MediaTime) * 10_000_000 / t.Timescale + t.EmptyTicks;
 
     private void AddProgressive(Trak t, Tables tb, List<Sample> list)
     {
-        var count = tb.FixedSize != 0 ? (int)tb.SampleCount : tb.Sizes.Length;
+        // bounded by the stsz payload, or (fixed size) by what the file can hold
+        long count = tb.FixedSize != 0 ? Math.Min(tb.SampleCount, _len / tb.FixedSize) : tb.Sizes.Length;
         if (count == 0 || tb.Chunks.Length == 0 || tb.Stsc.Count == 0) { return; }
         // dts per sample
         long dts = 0;
         var sttsIdx = 0; uint sttsLeft = tb.Stts.Count > 0 ? tb.Stts[0].Count : 0;
         var cttsIdx = 0; uint cttsLeft = tb.Ctts.Count > 0 ? tb.Ctts[0].Count : 0;
         var keys = tb.HasStss ? new HashSet<uint>(tb.Stss) : null;
-        var sample = 0;
+        long sample = 0;
+        var stscIdx = 0; // linear walk over the (sorted) stsc runs
         for (var chunk = 0; chunk < tb.Chunks.Length && sample < count; chunk++)
         {
-            // samples per chunk
-            var per = tb.Stsc[0].Per;
-            for (var i = 0; i < tb.Stsc.Count && tb.Stsc[i].First <= chunk + 1; i++) { per = tb.Stsc[i].Per; }
+            while (stscIdx + 1 < tb.Stsc.Count && tb.Stsc[stscIdx + 1].First <= chunk + 1) { stscIdx++; }
+            var per = tb.Stsc[stscIdx].Per;
             var off = tb.Chunks[chunk];
-            for (var k = 0; k < per && sample < count; k++, sample++)
+            for (long k = 0; k < per && sample < count; k++, sample++)
             {
-                var size = tb.FixedSize != 0 ? (int)tb.FixedSize : (int)tb.Sizes[sample];
+                var size = tb.FixedSize != 0 ? tb.FixedSize : tb.Sizes[sample];
                 var cto = 0;
                 if (tb.Ctts.Count > 0)
                 {
@@ -498,7 +542,7 @@ public sealed class Mp4Reader : IMediaReader
                     if (cttsLeft > 0) { cttsLeft--; }
                 }
                 var key = keys is null || keys.Contains((uint)sample + 1);
-                list.Add(new Sample(off, size, t.Index, ToTicks(t, dts + cto), key));
+                if (InRange(off, size)) { list.Add(new Sample(off, (int)size, t.Index, ToTicks(t, dts + cto), key)); }
                 off += size;
                 if (tb.Stts.Count > 0)
                 {
@@ -527,12 +571,16 @@ public sealed class Mp4Reader : IMediaReader
             {
                 if (b.Type == "tfhd")
                 {
+                    Need(moof, b, 8);
                     tfFlags = U32(moof, b.Start) & 0xFFFFFF;
                     var id = (int)U32(moof, b.Start + 4);
                     t = _traks.FirstOrDefault(x => x.Id == id);
                     if (t is null) { break; }
                     defDur = t.DefDuration; defSize = t.DefSize; defFlags = t.DefFlags;
                     var p = b.Start + 8;
+                    var need = 8 + ((tfFlags & 0x1) != 0 ? 8 : 0) + ((tfFlags & 0x2) != 0 ? 4 : 0) + ((tfFlags & 0x8) != 0 ? 4 : 0)
+                        + ((tfFlags & 0x10) != 0 ? 4 : 0) + ((tfFlags & 0x20) != 0 ? 4 : 0);
+                    Need(moof, b, need);
                     if ((tfFlags & 0x1) != 0) { baseOffset = U64(moof, p); p += 8; }
                     if ((tfFlags & 0x2) != 0) { p += 4; }
                     if ((tfFlags & 0x8) != 0) { defDur = U32(moof, p); p += 4; }
@@ -541,24 +589,29 @@ public sealed class Mp4Reader : IMediaReader
                 }
                 else if (b.Type == "tfdt")
                 {
+                    Need(moof, b, 1);
+                    Need(moof, b, moof[b.Start] == 1 ? 12 : 8);
                     tfdt = moof[b.Start] == 1 ? U64(moof, b.Start + 4) : U32(moof, b.Start + 4);
                 }
                 else if (b.Type == "trun" && t is not null)
                 {
+                    Need(moof, b, 8);
                     if (tfdt is { } td) { t.NextDts = td; tfdt = null; }
                     var flags = U32(moof, b.Start) & 0xFFFFFF;
                     var version = moof[b.Start];
-                    var n = (int)U32(moof, b.Start + 4);
+                    var n = U32(moof, b.Start + 4);
                     var p = b.Start + 8;
+                    var each = 4 * (((flags & 0x100) != 0 ? 1 : 0) + ((flags & 0x200) != 0 ? 1 : 0) + ((flags & 0x400) != 0 ? 1 : 0) + ((flags & 0x800) != 0 ? 1 : 0));
+                    Need(moof, b, 8 + ((flags & 0x1) != 0 ? 4 : 0) + ((flags & 0x4) != 0 ? 4 : 0));
                     long dataOffset = 0;
                     if ((flags & 0x1) != 0) { dataOffset = I32(moof, p); p += 4; }
                     uint firstFlags = 0;
                     var haveFirst = (flags & 0x4) != 0;
                     if (haveFirst) { firstFlags = U32(moof, p); p += 4; }
                     var off = baseOffset + dataOffset;
-                    for (var i = 0; i < n; i++)
+                    for (long i = 0; i < n; i++)
                     {
-                        if (p > b.End) { break; }
+                        if (p + each > b.End) { break; }
                         var dur = defDur; var size = defSize; var sflags = defFlags; var cto = 0L;
                         if ((flags & 0x100) != 0) { dur = U32(moof, p); p += 4; }
                         if ((flags & 0x200) != 0) { size = U32(moof, p); p += 4; }
@@ -566,7 +619,8 @@ public sealed class Mp4Reader : IMediaReader
                         else if (i == 0 && haveFirst) { sflags = firstFlags; }
                         if ((flags & 0x800) != 0) { cto = version == 0 ? (long)U32(moof, p) : I32(moof, p); p += 4; }
                         _ = haveDefFlags;
-                        if (off + size > _len) { return false; } // sample cut by the end of the file
+                        if (!InRange(off, size)) { return false; } // sample cut by the end of the file (or nonsense)
+                        if (list.Count > _len) { throw new InvalidDataException("MP4 has more samples than bytes"); }
                         var key = (sflags & 0x00010000) == 0;
                         list.Add(new Sample(off, (int)size, t.Index, ToTicks(t, t.NextDts + cto), key));
                         off += size;
@@ -604,6 +658,12 @@ public sealed class Mp4Reader : IMediaReader
 
     public bool TryRead(out MediaPacket packet)
     {
+        try { return TryReadCore(out packet); }
+        catch (Exception ex) when (ReaderGuard.IsForeign(ex)) { throw ReaderGuard.Wrap("MP4", ex); }
+    }
+
+    private bool TryReadCore(out MediaPacket packet)
+    {
         LoadSamples();
         while (_next < _samples.Count)
         {
@@ -620,6 +680,12 @@ public sealed class Mp4Reader : IMediaReader
     }
 
     public void Seek(TimeSpan position)
+    {
+        try { SeekCore(position); }
+        catch (Exception ex) when (ReaderGuard.IsForeign(ex)) { throw ReaderGuard.Wrap("MP4", ex); }
+    }
+
+    private void SeekCore(TimeSpan position)
     {
         LoadSamples();
         var target = position.Ticks;

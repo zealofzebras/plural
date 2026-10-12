@@ -55,6 +55,12 @@ public sealed record AudioOutputDevice(string Id, string Name)
 public interface IAudioSink : IDisposable
 {
     AudioOutputDevice Device { get; }
+
+    /// <summary>
+    /// Time between the source delivering a sample and it being audible (device + driver buffers). Playback subtracts it from the
+    /// delivered-sample clock; platforms that cannot tell leave the default.
+    /// </summary>
+    TimeSpan Latency => TimeSpan.Zero;
 }
 
 /// <summary>Audio output enumeration and opening. Implemented per OS.</summary>
