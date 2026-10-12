@@ -355,7 +355,7 @@ internal sealed class TakeRecorder
     private readonly bool[] _failed;
     private readonly List<string> _errors = [];
     private readonly ClockLockedTrack[] _tracks;
-    private readonly List<(IMicSource Source, PcmHandler Handler)> _subs = [];
+    private readonly List<(MikeChannel Channel, PcmHandler Handler)> _subs = [];
     private readonly IVideoCapture? _camera;
     private readonly Action<EncodedSample>? _videoHandler;
     private readonly TaskCompletionSource _done = new(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -477,10 +477,11 @@ internal sealed class TakeRecorder
         for (var i = 0; i < _tracks.Length; i++)
         {
             var track = _tracks[i];
-            var source = Mics[i].Channel.Source;
+            // After the channel's fader and mute, so mixer moves during the take are recorded.
+            var channel = Mics[i].Channel;
             PcmHandler h = (_, mono, rate) => track.Write(mono, rate);
-            source.PcmReceived += h;
-            _subs.Add((source, h));
+            channel.PcmProcessed += h;
+            _subs.Add((channel, h));
         }
         if (_camera is not null)
         {
@@ -500,7 +501,7 @@ internal sealed class TakeRecorder
             var wait = _tracks.Max(t => t.Latency) + TimeSpan.FromMilliseconds(50);
             if (wait > TimeSpan.FromMilliseconds(500)) { wait = TimeSpan.FromMilliseconds(500); }
             if (_tracks.Any(t => t.Latency > TimeSpan.Zero)) { await Task.Delay(wait).ConfigureAwait(false); }
-            foreach (var (s, h) in _subs) { s.PcmReceived -= h; }
+            foreach (var (c, h) in _subs) { c.PcmProcessed -= h; }
             if (_camera is not null)
             {
                 _camera.SampleEncoded -= _videoHandler;

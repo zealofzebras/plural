@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- macOS implementations: IBluetoothPlatform (IOBluetooth RFCOMM through the Objective-C runtime), IAudioPlatform and
+       IAudioInputPlatform (Core Audio devices + AudioQueue). Plain net10.0: the desktop head publishes for osx-arm64/osx-x64. -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <IsAotCompatible>true</IsAotCompatible>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Plural.Core\Plural.Core.csproj" />
+    <ProjectReference Include="..\Plural.Platform.Apple\Plural.Platform.Apple.csproj" />
+  </ItemGroup>
+</Project>

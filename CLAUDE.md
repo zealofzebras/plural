@@ -1,14 +1,14 @@
 # Plural — project guide
 
 Reverse-engineered Sabinetek SmartMike+ wireless mics (discontinued; MetAudio app) and our own app
-that streams several mics at once. Apps: **Windows desktop** and **Android**, one shared Avalonia UI.
+that streams several mics at once. Apps: **Windows/macOS desktop**, **Android** and **iOS**, one shared Avalonia UI.
 Docs/ is the source of truth — read `Docs/Plural/Design.md` (app) or `Docs/Protocol/*` (protocol) before changing related code.
 
 ## Hard rules
 - **Never install, flash or send firmware to a device.** Never build CSR DFU parsers/extractors.
 - After hardware tests, restore device settings: monitor volume 80, AGC on, mic gain 50.
 - Core (`Plural.Core`) has no OS APIs — platform code goes in `Plural.Platform.*` or an app head.
-- Everything must work natively on win-arm64 **and** win-x64, android-arm64 (phones) and android-x64 (emulator). Don't block later macOS/Linux ports.
+- Everything must work natively on win-arm64 **and** win-x64, android-arm64 (phones) and android-x64 (emulator); also osx-arm64/osx-x64 and ios-arm64 (built, untested on Apple hardware). Don't block a later Linux port.
 
 ## Layout
 ```
@@ -17,12 +17,18 @@ Src/Plural.slnx
   Plural.Core.Tests/         xUnit, incl. decoding a real capture (TestData/)
   Plural.Platform.Windows/   AF_BTH RFCOMM socket, paired devices from registry, WASAPI sink (NAudio 3.1)
   Plural.Platform.Android/   BluetoothSocket RFCOMM, bonded devices, AudioTrack sink
+  Plural.Platform.Apple/     macOS+iOS (net10.0, P/Invoke): AudioQueue sink/input, AudioConverter AAC, QueueStream
+  Plural.Platform.MacOS/     IOBluetooth RFCOMM via ObjC runtime (RunLoopThread), Core Audio devices (MacAudio)
+  Plural.Platform.iOS/       External Accessory (MFi only; no RFCOMM on iOS), AVAudioSession routes
   Plural.App/                shared UI: Views/MainView.axaml, ViewModels/, Services/IAppHost.cs
-  Plural.App.Desktop/        desktop head → Plural.exe (DesktopHost)
+  Plural.App.Desktop/        desktop head → Plural.exe / Plural.app (DesktopHost: Windows + macOS)
   Plural.App.Android/        Android head → net.getplural.app (AndroidHost, MainActivity)
+  Plural.App.iOS/            iOS head → net.getplural.app (IosHost, AppDelegate); compiles on Windows, link/sign need a Mac
+  Plural.Screenshots/        headless UI + simulated mics/peers → Marketing/screenshots (Tools/store/screenshots.ps1)
   Plural.Cli/                headless runner: list | outputs | inputs | search | serve | control | run [--input X] [--output X] [--record N] [--format wav|m4a|mp3|mka|mkv|mp4]
 Native/celt/                    CELT 0.7.1 per RID; build-windows.sh (llvm-mingw), build-android.sh (NDK r29)
-Native/lame/                    LAME 3.100 (MP3) per RID; build-windows.sh, build-android.sh (same toolchains); build-macos.sh (both libs) for CI
+Native/lame/                    LAME 3.100 (MP3) per RID; build-windows.sh, build-android.sh (same toolchains)
+                                both libs: build-macos.sh (dylibs) and build-ios.sh (xcframeworks via Native/ios-framework.sh), run in CI
 Marketing/                      store text per locale (*.txt), store.toml, brand/icon.png, screenshots/ — see Marketing/README.md
 Packaging/                      MSIX manifest + build-msix.ps1 (Windows), Info.plist/entitlements/build-app.sh (macOS)
 .github/workflows/release.yml   on release: builds Windows/Android/macOS(/iOS), store packages via Tools/store/store_assets.py, attaches to release
@@ -38,6 +44,7 @@ Docs/                           App/, Firmware/, Protocol/, Plural/Design.md, Pl
 ## Commands (run from `Src/`)
 - Tests: `dotnet test Plural.Core.Tests` and `dotnet test Plural.Core.Tests --arch x64`
 - Desktop: `dotnet build Plural.App.Desktop` / `dotnet run --project Plural.App.Desktop`
+- macOS: `dotnet publish Plural.App.Desktop -c Release -r osx-arm64 --self-contained -p:UseAppHost=true` · iOS: `dotnet build Plural.App.iOS` (compile check)
 - Android: `dotnet build Plural.App.Android` · release APK: `dotnet publish Plural.App.Android -c Release`
   → `Plural.App.Android/bin/Release/net10.0-android/publish/net.getplural.app-Signed.apk`
 - adb: `"C:\Program Files (x86)\Android\android-sdk\platform-tools\adb.exe"` (install `-r`, `logcat`)

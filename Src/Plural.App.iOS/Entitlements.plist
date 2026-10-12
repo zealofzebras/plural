@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Remote mode's Wi-Fi discovery sends subnet broadcasts, which iOS only allows with
+     <key>com.apple.developer.networking.multicast</key><true/>
+     That entitlement must first be granted by Apple for the app id (and be in the provisioning profile); add it here then. -->
+<plist version="1.0">
+<dict>
+</dict>
+</plist>

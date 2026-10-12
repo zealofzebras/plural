@@ -14,13 +14,13 @@ It also records **without any SmartMike**: local mics of the device (built-in, U
 
 ## Constraints
 - Native on **Windows ARM64 and x64**, and **Android** (arm64 phones, x64 emulator).
-- Portable later to **macOS and Linux** — we don't build those now, but nothing may block them.
+- **macOS** (desktop head, `osx-arm64`/`osx-x64`) and **iOS** (own head) are built but not yet tested on Apple hardware; **Linux** later — nothing may block it.
 - Stack: **C# / .NET 10**, UI in **Avalonia** (Windows, macOS, Linux, Android, iOS).
 
 ## Architecture
 
 ```
-┌──────────── Plural.App (shared Avalonia UI) + heads: .Desktop, .Android ─────────┐
+┌──────── Plural.App (shared Avalonia UI) + heads: .Desktop, .Android, .iOS ───────┐
 │ device list · per-mic status/battery/level · settings · output mapping · Record All │
 └──────────────────────────────────────┬───────────────────────────────────────────────┘
                                        │ (plain .NET API, no UI types)
@@ -39,13 +39,16 @@ It also records **without any SmartMike**: local mics of the device (built-in, U
 │ Plural.Platform.Android   RFCOMM: BluetoothSocket (SPP UUID) · bonded devices     │
 │ (net10.0-android)            Audio sink: AudioTrack (float, low latency) → monitor   │
 │ later: Platform.Linux        RFCOMM: AF_BLUETOOTH socket · sink: PipeWire source     │
-│ later: Platform.MacOS        RFCOMM: IOBluetooth helper · sink: AudioServerPlugIn    │
+│ Plural.Platform.MacOS     RFCOMM: IOBluetooth (ObjC runtime) · Core Audio devices  │
+│ (net10.0)                    sink/input: AudioQueue · AAC: AudioConverter         │
+│ Plural.Platform.iOS       External Accessory (MFi only) · AVAudioSession routes   │
+│ (net10.0-ios)                AudioQueue + AAC shared via Plural.Platform.Apple       │
 └─────────────────────────────────────────────────────────────────────────────────────┘
 ```
 
 - **Mic sources**: every channel wraps an `IMicSource` (mono PCM, state, peak, `PcmReceived`). `MikeSession` is the SmartMike source; `LocalMic` wraps an OS input through `IAudioInputPlatform` (`WasapiAudio` on Windows, `AndroidAudioInput` on Android). Platforms deliver 44.1 kHz mono 16-bit; recording and live output treat both kinds the same. Local mic IDs are `input:<platform id>` and are saved in the app settings (`LocalMics`) so added mics come back on start.
 - **Core has no OS dependencies** — runs on any .NET 10 RID and is unit-tested against real captures.
-- **Native CELT**: `Native/celt/runtimes/<rid>/native/celt071.{dll,so,dylib}`, built from the stock CELT 0.7.1 source: `win-x64`, `win-arm64` (llvm-mingw), `android-arm64`, `android-x64` (NDK r29). Loaded with `[LibraryImport("celt071")]`; on Android the APK carries it as `lib/<abi>/libcelt071.so`.
+- **Native CELT**: `Native/celt/runtimes/<rid>/native/celt071.{dll,so,dylib}`, built from the stock CELT 0.7.1 source: `win-x64`, `win-arm64` (llvm-mingw), `android-arm64`, `android-x64` (NDK r29), `osx-*` (CI). Always compiled with `-DVAR_ARRAYS`: without it CELT uses one process-wide scratch stack and two mics decoding on their own threads corrupt memory (test `Capture_DecodesIdenticallyOnSeveralThreadsAtOnce`). Loaded with `[LibraryImport("celt071")]`; on Android the APK carries it as `lib/<abi>/libcelt071.so`.
 - **Native LAME** (MP3 only): `Native/lame/runtimes/<rid>/native/mp3lame.dll` or `libmp3lame.so`, LAME 3.100, same four RIDs. Resolved with the CELT lib in `Plural.Core/Codec/NativeLibs.cs`.
 - **Recording formats and video**: `Plural.Core/Recording/` (managed FLAC, Matroska, MP4/M4A writers, clock-locked tracks, `TakeRecorder`); platform AAC and H.264 come from `IAacEncoderFactory` and `IVideoPlatform`. Full spec and status: [Recording.md](Recording.md).
 - **App heads** supply an `IAppHost` (hub factory, recording folder, permission prompt, open/share recordings, keep-awake). The UI lives in `MainView` (a `UserControl`) so desktop wraps it in a window and Android shows it directly.
@@ -68,6 +71,55 @@ macOS: AudioServerPlugIn (BlackHole-style). Linux: PipeWire virtual source per m
 - The screen stays on while recording. Recording with the screen off needs a foreground service (later).
 - min Android 8.0 (API 26); 16 KB-page-aligned native lib for Android 15+.
 
+## Mixer mode
+- A third view next to Audio/Video cards (bottom-bar **Mixer** chip; stays available while recording audio, hidden while recording video).
+  One console-style channel strip per mic: power (connect), state/battery, SmartMike gain knob + AGC/NS buttons + phones knob
+  (device settings, as on the cards), direct output picker, fader with dB scale, post-fader LED meter, MUTE, name strip.
+- **Channel fader and mute** live in `MikeChannel` (`FaderDb` −60 = −∞ … +12 dB, `Muted`): applied once in the channel, so the
+  recording (`TakeRecorder` subscribes to `MikeChannel.PcmProcessed`, not the raw source), the direct output and the mix all get it,
+  from the next audio block, also mid-take. 0 dB is bit-exact pass-through.
+- **Master strip / mixed live output**: `MixBus` (`MikeHub.Mix`) sums every channel after fader and mute into one mono output at
+  44.1 kHz, each channel through its own `JitterBuffer` (drift-compensated), with master fader, mute and meter. Live only: each mic still
+  records to its own track. Platform sinks take an `IAudioSource` (`JitterBuffer` or `MixBus`).
+- Controls: `Controls/Knob.cs`, `Fader.cs` (console taper, relative drag so touching never jumps the level, double-tap = 0 dB),
+  `MixerMeter.cs`. Fader/mute per mic (by source id), mix output, master fader and mixer mode persist in settings.
+- Preview without hardware: `dotnet run --project Src/Plural.Screenshots -c Release -- --profile desktop --out <dir> --mixer`.
+
+## macOS
+- Desktop head (`Plural.App.Desktop`, same `Plural` executable) published for `osx-arm64`/`osx-x64` and wrapped into `Plural.app` by
+  `Packaging/macos/build-app.sh`; `DesktopHost` picks `Plural.Platform.MacOS` when `OperatingSystem.IsMacOS()`.
+- `Plural.Platform.MacOS` is plain `net10.0` with P/Invoke only (no Xamarin bindings, so the Avalonia desktop head stays one project):
+  - `MacBluetooth`: IOBluetooth through the Objective-C runtime (`ObjC.cs`). Paired devices from `[IOBluetoothDevice pairedDevices]`;
+    connect = cached SDP record for the SPP UUID (or `performSDPQuery:`), then `openRFCOMMChannelAsync:` with a runtime-created delegate
+    class. All IOBluetooth calls and callbacks run on one CFRunLoop thread (`RunLoopThread`), so it also works in the CLI. Writes use
+    `writeSync:` in MTU-sized chunks. No RFCOMM server yet, so remote mode on macOS is Wi-Fi only.
+  - `MacAudio`: Core Audio HAL device list (IDs are device UIDs; hidden devices skipped; BlackHole/Loopback count as virtual devices
+    and sort first), output and capture through AudioQueue (`kAudioQueueProperty_CurrentDevice`).
+- Shared with iOS in `Plural.Platform.Apple` (`net10.0`): `AudioQueueSink` (float, 3 × 512 frames), `AudioQueueInput` (44.1 kHz mono
+  16-bit; the queue stopping on its own is reported as an error), `AppleAacEncoder` (AudioConverter AAC-LC), `QueueStream`
+  (callback transport → `Stream`).
+- Permissions: Bluetooth and microphone prompts come from macOS on first use (`NSBluetoothAlwaysUsageDescription`,
+  `NSMicrophoneUsageDescription` in `Packaging/macos/Info.plist`); an unbundled `dotnet run` attributes them to the terminal.
+- Recordings: `~/Documents/Plural Recordings`; settings: `~/Library/Application Support/Plural/settings.json`.
+- Native libs: `Native/celt/build-macos.sh`, `Native/lame/build-macos.sh` (built in the release workflow).
+- Not yet: camera (AVFoundation + VideoToolbox), own virtual device (AudioServerPlugIn; use BlackHole meanwhile).
+
+## iOS
+- Head `Plural.App.iOS` (`net10.0-ios`, iOS 15+, iPhone and iPad, `AvaloniaAppDelegate<App>`), `IosHost`, platform `Plural.Platform.iOS`.
+- **Bluetooth: iOS has no public RFCOMM/SPP API.** A Classic Bluetooth accessory is reachable only through External Accessory, which
+  requires an MFi (iAP2) accessory, its protocol string under `UISupportedExternalAccessoryProtocols` in `Info.plist`, and — for the
+  App Store — the accessory maker's approval with Apple. Whether the SmartMike+ is MFi is unknown. `IosAccessories` lists connected
+  EA accessories as paired devices (address = stable hash of the serial number with the locally administered bit set, since iOS hides
+  MACs) and opens an `EASession` on the main run loop; if the mic's protocol is not declared, the error names the protocols it offers.
+- Local mics: the audio session's available inputs (built-in, wired/USB, Bluetooth HFP); one records at a time (`SetPreferredInput`).
+  Monitoring goes to the current route. Session: PlayAndRecord, default to speaker, A2DP/AirPlay allowed.
+- Recordings in `Documents/Recordings` (visible in the Files app); Share via `UIActivityViewController`. Background mode `audio` keeps
+  recording with the screen locked; the screen stays on while recording.
+- Remote mode: Wi-Fi only; subnet broadcast discovery needs Apple's `com.apple.developer.networking.multicast` entitlement.
+- Native libs: dynamic frameworks in `Native/{celt,lame}/runtimes/ios/*.xcframework` from `build-ios.sh` (via `Native/ios-framework.sh`);
+  `NativeLibs` loads `Frameworks/<name>.framework/<name>`.
+- Not yet: camera; SmartMike connection (pending the MFi question).
+
 ## Recording
 `MikeHub.StartRecordingAll(root)` / `StopRecordingAllAsync()` start and stop every connected mic through `TakeRecorder`, at the same instant. Take folder: `<root>/<yyyyMMdd_HHmmss>/`. Formats: WAV, M4A, MP3, MKA, MKV, MP4 (see [Recording.md](Recording.md)); the default is WAV, 44.1 kHz mono 16-bit (the capsule is mono; L = R). Each mic is locked to `MediaClock`, so takes stay aligned over long recordings. Recording works with or without a virtual cable.
 
@@ -85,12 +137,16 @@ Src/
   Plural.Core.Tests/         xUnit — frames, headers, decode of Captures/*
   Plural.Platform.Windows/   RFCOMM, discovery, WASAPI sink
   Plural.Platform.Android/   RFCOMM (BluetoothSocket), bonded devices, AudioTrack sink
+  Plural.Platform.Apple/     macOS + iOS: AudioQueue output/input, AudioConverter AAC, QueueStream
+  Plural.Platform.MacOS/     IOBluetooth RFCOMM (ObjC runtime), Core Audio devices
+  Plural.Platform.iOS/       External Accessory, AVAudioSession inputs/outputs
   Plural.Cli/                headless runner
   Plural.App/                shared Avalonia UI (MainView, view models, IAppHost, settings JSON)
   Plural.App.Desktop/        desktop head → Plural.exe
   Plural.App.Android/        Android head → net.getplural.app.apk
-Native/celt/                    per-RID CELT binaries (build-windows.sh, build-android.sh)
-Native/lame/                    per-RID LAME 3.100 binaries (build-windows.sh, build-android.sh)
+  Plural.App.iOS/            iOS head → net.getplural.app (.ipa)
+Native/celt/                    per-RID CELT binaries (build-windows.sh, build-android.sh, build-macos.sh, build-ios.sh)
+Native/lame/                    per-RID LAME 3.100 binaries (same four scripts)
 ```
 
 ## Status (2026-10-11)
@@ -105,6 +161,8 @@ Native/lame/                    per-RID LAME 3.100 binaries (build-windows.sh, b
 | `Plural.App` | UI redesign built: design system (dark/light, coral Record, blue accent), Audio/Video mode with camera preview, mic cards with status pill, battery, gradient level meter with peak hold, round Record button with format chip, settings sheet (format, Matroska codec, AAC/MP3 bitrate, video res/fps/bitrate, folder), persisted JSON settings, recent takes, save toast. Not yet hardware-tested |
 | `Plural.App.Desktop` | Runs on Windows with the shared UI (hosted as `MainView`); `OpenFolder` via `IAppHost`. Redesigned UI not yet tested on the desktop head |
 | `Plural.App.Android` | Builds; Debug and Release APKs (arm64 + x64) with CELT and LAME included. Installed on a Pixel 8 (Android 17) and launches; the previous version recorded WAV on the phone. The new formats, AAC and the camera are **not yet run on the phone** |
+| `Plural.Platform.MacOS` / `.Apple` | Built 2026-10-11: IOBluetooth RFCOMM, Core Audio output/input, AudioQueue, AAC; the desktop head and CLI use it on macOS; cross-publish for `osx-arm64` works. **Never run on a Mac**: Bluetooth connect, audio and AAC untested. No camera |
+| `Plural.App.iOS` / `Plural.Platform.iOS` | Built 2026-10-11; compiles on Windows, while linking, signing and running need a Mac. **Never run on a device.** SmartMike connection depends on MFi support (unknown); local mics, recording, share and Wi-Fi remote should work. No camera |
 | Virtual cable | Not installed yet; the output picker lists cables first when present |
 
 ### Known open items (recording and video)
@@ -120,4 +178,9 @@ Native/lame/                    per-RID LAME 3.100 binaries (build-windows.sh, b
 - `dotnet test Src/Plural.Core.Tests` (ARM64) and `dotnet test Src/Plural.Core.Tests --arch x64` both pass.
 - Android CELT: `bash Native/celt/build-android.sh` (NDK r29 in `%LOCALAPPDATA%\Android\Sdk\ndk`, installed with `sdkmanager --sdk_root=%LOCALAPPDATA%\Android\Sdk "ndk;29.0.14206865"`; `sdkmanager.bat` needs a `JAVA_HOME` without parentheses, e.g. the Microsoft JDK).
 - Desktop: `dotnet run --project Src/Plural.App.Desktop`. Windows-only code is marked `[SupportedOSPlatform("windows")]` and chosen in `Plural.App.Desktop/DesktopHost.cs`.
+- macOS: `dotnet publish Src/Plural.App.Desktop -c Release -r osx-arm64 --self-contained -p:UseAppHost=true -o out/publish/osx-arm64`
+  (works from Windows), then `bash Packaging/macos/build-app.sh …` on a Mac (see the release workflow). macOS-only code is marked
+  `[SupportedOSPlatform("macos")]`.
+- iOS: `dotnet build Src/Plural.App.iOS` compiles on Windows; device/simulator builds, signing and `.ipa` need a Mac with Xcode
+  (`dotnet publish Src/Plural.App.iOS -c Release -r ios-arm64` with a signing identity and provisioning profile).
 - Android: `dotnet publish Src/Plural.App.Android -c Release` → `bin/Release/net10.0-android/publish/net.getplural.app-Signed.apk` (debug-key signed, for sideloading). With a phone on USB debugging: `dotnet build Src/Plural.App.Android -t:Install` or `adb install -r <apk>`.

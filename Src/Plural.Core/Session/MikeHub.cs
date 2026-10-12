@@ -47,8 +47,73 @@ public sealed class MikeChannel : IAsyncDisposable
         Source.PcmReceived += OnPcm;
     }
 
+    /// <summary>Lowest fader setting; at or below it the channel is silent (−∞).</summary>
+    public const double MinFaderDb = -60;
+
+    /// <summary>Highest fader setting.</summary>
+    public const double MaxFaderDb = 12;
+
+    private volatile float _gain = 1f;
+    private double _faderDb;
+    private volatile bool _muted;
+    private short[] _scratch = [];
+
+    /// <summary>
+    /// Channel fader in dB (<see cref="MinFaderDb"/> = off … <see cref="MaxFaderDb"/>), applied to the recording and the live output
+    /// from the next audio block on, so it can be moved while recording. 0 dB passes audio through unchanged.
+    /// </summary>
+    public double FaderDb
+    {
+        get => _faderDb;
+        set
+        {
+            _faderDb = Math.Clamp(value, MinFaderDb, MaxFaderDb);
+            _gain = _faderDb <= MinFaderDb ? 0f : (float)Math.Pow(10, _faderDb / 20);
+        }
+    }
+
+    /// <summary>Silences the channel in the recording and the live output (the mic keeps streaming and metering).</summary>
+    public bool Muted
+    {
+        get => _muted;
+        set => _muted = value;
+    }
+
+    /// <summary>Linear gain currently applied (0 when muted or the fader is off).</summary>
+    public float Gain => _muted ? 0f : _gain;
+
+    /// <summary>Peak of the last block after fader and mute (0…1, clipped at full scale).</summary>
+    public float PostFaderPeak => Math.Min(1f, Source.PeakLevel * Gain);
+
+    /// <summary>
+    /// The mic's PCM after fader and mute, on the source's thread. The recorder and live output use this, not
+    /// <see cref="IMicSource.PcmReceived"/>.
+    /// </summary>
+    public event PcmHandler? PcmProcessed;
+
     private void OnPcm(IMicSource s, ReadOnlySpan<short> mono, int rate)
     {
+        var gain = Gain;
+        if (gain != 1f)
+        {
+            if (_scratch.Length < mono.Length)
+            {
+                _scratch = new short[mono.Length];
+            }
+            var dst = _scratch.AsSpan(0, mono.Length);
+            if (gain == 0f)
+            {
+                dst.Clear();
+            }
+            else
+            {
+                for (var i = 0; i < mono.Length; i++)
+                {
+                    dst[i] = (short)Math.Clamp((int)MathF.Round(mono[i] * gain), short.MinValue, short.MaxValue);
+                }
+            }
+            mono = dst;
+        }
         lock (_lock)
         {
             if (_buffer is null && _pendingOutput is { } dev)
@@ -57,6 +122,7 @@ public sealed class MikeChannel : IAsyncDisposable
             }
             _buffer?.Write(mono);
         }
+        PcmProcessed?.Invoke(s, mono, rate);
     }
 
     private AudioOutputDevice? _pendingOutput;
@@ -106,6 +172,9 @@ public sealed class MikeHub : IAsyncDisposable
     /// <summary>OS microphones (built-in, USB, Bluetooth headset, …); null if the platform has none.</summary>
     public IAudioInputPlatform? Inputs { get; }
     public IReadOnlyList<MikeChannel> Channels => _channels;
+
+    /// <summary>Master bus: every channel mixed into one live output (the mixer's master strip).</summary>
+    public MixBus Mix { get; }
     public bool IsRecording { get; private set; }
     public string? RecordingFolder { get; private set; }
 
@@ -117,6 +186,7 @@ public sealed class MikeHub : IAsyncDisposable
         Aac = aac;
         Video = video;
         Inputs = inputs;
+        Mix = new MixBus(audio);
     }
 
     public IReadOnlyList<PairedDevice> FindSmartMikes() =>
@@ -134,6 +204,7 @@ public sealed class MikeHub : IAsyncDisposable
         }
         var ch = new MikeChannel(new MikeSession(device, Bluetooth), Audio);
         _channels.Add(ch);
+        Mix.Attach(ch);
         return ch;
     }
 
@@ -149,12 +220,14 @@ public sealed class MikeHub : IAsyncDisposable
         }
         var ch = new MikeChannel(new LocalMic(device, inputs), Audio);
         _channels.Add(ch);
+        Mix.Attach(ch);
         return ch;
     }
 
     public async Task RemoveAsync(MikeChannel channel)
     {
         _channels.Remove(channel);
+        Mix.Detach(channel);
         await channel.DisposeAsync().ConfigureAwait(false);
     }
 
@@ -285,6 +358,7 @@ public sealed class MikeHub : IAsyncDisposable
             try { await StopRecordingAllAsync().ConfigureAwait(false); }
             catch (Exception) { /* shutting down */ }
         }
+        Mix.Dispose();
         foreach (var ch in _channels.ToList())
         {
             await ch.DisposeAsync().ConfigureAwait(false);

@@ -10,10 +10,11 @@
 
   <!-- Native CELT 0.7.1 per RID (built from stock source, see Docs/Protocol/Audio.md).
        Copied to runtimes/<rid>/native/ of every desktop app referencing Core; CeltDecoder picks the right one.
-       Android binaries are packaged by Plural.App.Android as lib/<abi>/libcelt071.so instead. -->
+       Android binaries are packaged by Plural.App.Android as lib/<abi>/libcelt071.so instead, and the iOS xcframeworks
+       (runtimes/ios/) by Plural.App.iOS as Frameworks/<name>.framework. -->
   <ItemGroup>
-    <None Include="..\..\Native\celt\runtimes\**\*" Exclude="..\..\Native\celt\runtimes\android-*\**" LinkBase="runtimes" CopyToOutputDirectory="PreserveNewest" Visible="false" />
-    <None Include="..\..\Native\lame\runtimes\**\*" Exclude="..\..\Native\lame\runtimes\android-*\**" LinkBase="runtimes" CopyToOutputDirectory="PreserveNewest" Visible="false" />
+    <None Include="..\..\Native\celt\runtimes\**\*" Exclude="..\..\Native\celt\runtimes\android-*\**;..\..\Native\celt\runtimes\ios\**" LinkBase="runtimes" CopyToOutputDirectory="PreserveNewest" Visible="false" />
+    <None Include="..\..\Native\lame\runtimes\**\*" Exclude="..\..\Native\lame\runtimes\android-*\**;..\..\Native\lame\runtimes\ios\**" LinkBase="runtimes" CopyToOutputDirectory="PreserveNewest" Visible="false" />
   </ItemGroup>
 
 </Project>

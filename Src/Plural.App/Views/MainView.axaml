@@ -135,6 +135,143 @@
             <Setter Property="Opacity" Value="1" />
             <Setter Property="RenderTransform" Value="translateY(0px)" />
         </Style>
+
+        <!-- Mixer console -->
+        <Style Selector="Border.console">
+            <Setter Property="Background" Value="{DynamicResource SurfaceBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource StrokeBrush}" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="CornerRadius" Value="{DynamicResource RadiusCard}" />
+            <Setter Property="ClipToBounds" Value="True" />
+        </Style>
+        <Style Selector="Border.chstrip">
+            <Setter Property="Width" Value="108" />
+            <Setter Property="Padding" Value="8,10" />
+            <Setter Property="BorderBrush" Value="{DynamicResource StrokeBrush}" />
+            <Setter Property="BorderThickness" Value="0,0,1,0" />
+        </Style>
+        <Style Selector="Border.chstrip.master">
+            <Setter Property="Width" Value="124" />
+            <Setter Property="BorderThickness" Value="1,0,0,0" />
+            <Setter Property="Background" Value="{DynamicResource Surface2Brush}" />
+        </Style>
+        <Style Selector="TextBlock.chlabel">
+            <Setter Property="FontSize" Value="10" />
+            <Setter Property="FontWeight" Value="Bold" />
+            <Setter Property="LetterSpacing" Value="1" />
+            <Setter Property="Foreground" Value="{DynamicResource MutedBrush}" />
+            <Setter Property="HorizontalAlignment" Value="Center" />
+        </Style>
+        <Style Selector="TextBlock.chvalue">
+            <Setter Property="FontSize" Value="12" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="HorizontalAlignment" Value="Center" />
+        </Style>
+        <Style Selector="TextBlock.chstate">
+            <Setter Property="FontSize" Value="12" />
+            <Setter Property="FontWeight" Value="Bold" />
+        </Style>
+        <Style Selector="TextBlock.chsmall">
+            <Setter Property="FontSize" Value="10" />
+            <Setter Property="Foreground" Value="{DynamicResource MutedBrush}" />
+        </Style>
+        <Style Selector="c|Knob">
+            <Setter Property="Width" Value="44" />
+            <Setter Property="Height" Value="44" />
+            <Setter Property="HorizontalAlignment" Value="Center" />
+            <Setter Property="TrackBrush" Value="{DynamicResource MeterTrackBrush}" />
+            <Setter Property="ValueBrush" Value="{DynamicResource AccentBrush}" />
+            <Setter Property="CapBrush" Value="{DynamicResource Surface2Brush}" />
+            <Setter Property="PointerBrush" Value="{DynamicResource SystemControlForegroundBaseHighBrush}" />
+        </Style>
+        <Style Selector="c|Fader">
+            <Setter Property="GrooveBrush" Value="{DynamicResource MeterTrackBrush}" />
+            <Setter Property="ScaleBrush" Value="{DynamicResource MutedBrush}" />
+            <Setter Property="CapLineBrush" Value="#2A2E36" />
+            <Setter Property="CapBrush">
+                <LinearGradientBrush StartPoint="0%,0%" EndPoint="0%,100%">
+                    <GradientStop Color="#E4E7EE" Offset="0" />
+                    <GradientStop Color="#B9BFCA" Offset="0.5" />
+                    <GradientStop Color="#9097A4" Offset="1" />
+                </LinearGradientBrush>
+            </Setter>
+        </Style>
+        <Style Selector="c|MixerMeter">
+            <Setter Property="TrackBrush" Value="{DynamicResource MeterTrackBrush}" />
+        </Style>
+        <Style Selector="ComboBox.mini">
+            <Setter Property="FontSize" Value="11" />
+            <Setter Property="MinHeight" Value="30" />
+            <Setter Property="Padding" Value="6,0,0,0" />
+            <Setter Property="HorizontalAlignment" Value="Stretch" />
+        </Style>
+        <Style Selector="ToggleButton.led, ToggleButton.mute">
+            <Setter Property="FontSize" Value="10" />
+            <Setter Property="FontWeight" Value="Bold" />
+            <Setter Property="MinHeight" Value="26" />
+            <Setter Property="Padding" Value="0" />
+            <Setter Property="CornerRadius" Value="6" />
+            <Setter Property="HorizontalAlignment" Value="Stretch" />
+            <Setter Property="HorizontalContentAlignment" Value="Center" />
+            <Setter Property="VerticalContentAlignment" Value="Center" />
+            <Setter Property="Background" Value="{DynamicResource Surface2Brush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource StrokeBrush}" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="Foreground" Value="{DynamicResource MutedBrush}" />
+        </Style>
+        <Style Selector="ToggleButton.mute">
+            <Setter Property="MinHeight" Value="34" />
+            <Setter Property="FontSize" Value="11" />
+        </Style>
+        <Style Selector="ToggleButton.led:checked /template/ ContentPresenter#PART_ContentPresenter, ToggleButton.led:checked:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+            <Setter Property="Background" Value="{DynamicResource AccentSoftBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource AccentBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource AccentBrush}" />
+        </Style>
+        <Style Selector="ToggleButton.mute:checked /template/ ContentPresenter#PART_ContentPresenter, ToggleButton.mute:checked:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+            <Setter Property="Background" Value="{DynamicResource RecordBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource RecordBrush}" />
+            <Setter Property="Foreground" Value="White" />
+        </Style>
+        <Style Selector="Button.power">
+            <Setter Property="Width" Value="32" />
+            <Setter Property="Height" Value="32" />
+            <Setter Property="MinHeight" Value="32" />
+            <Setter Property="Padding" Value="0" />
+            <Setter Property="CornerRadius" Value="16" />
+            <Setter Property="HorizontalContentAlignment" Value="Center" />
+            <Setter Property="VerticalContentAlignment" Value="Center" />
+            <Setter Property="Background" Value="{DynamicResource Surface2Brush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource StrokeBrush}" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="Foreground" Value="{DynamicResource MutedBrush}" />
+        </Style>
+        <Style Selector="Button.power.busy">
+            <Setter Property="Foreground" Value="{DynamicResource WarnBrush}" />
+        </Style>
+        <Style Selector="Button.power.on /template/ ContentPresenter#PART_ContentPresenter, Button.power.on:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+            <Setter Property="Background" Value="{DynamicResource LiveBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource LiveBrush}" />
+            <Setter Property="Foreground" Value="White" />
+        </Style>
+        <Style Selector="Border.scribble">
+            <Setter Property="Background" Value="#0B0D12" />
+            <Setter Property="CornerRadius" Value="4" />
+            <Setter Property="Padding" Value="4,5" />
+            <Setter Property="BorderThickness" Value="0,0,0,2" />
+            <Setter Property="BorderBrush" Value="{DynamicResource StrokeBrush}" />
+        </Style>
+        <Style Selector="Border.scribble TextBlock">
+            <Setter Property="FontSize" Value="11" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="Foreground" Value="#E6E9F0" />
+        </Style>
+        <Style Selector="Border.scribble.live">
+            <Setter Property="BorderBrush" Value="{DynamicResource LiveBrush}" />
+        </Style>
+        <Style Selector="Border.scribble.rec">
+            <Setter Property="BorderBrush" Value="{DynamicResource RecordBrush}" />
+        </Style>
     </UserControl.Styles>
 
     <ThemeVariantScope Name="Scope">
@@ -221,7 +358,7 @@
 
         <!-- Content -->
         <Panel Grid.Row="2">
-            <ScrollViewer Name="BodyScroll">
+            <ScrollViewer Name="BodyScroll" IsVisible="{Binding IsCardsMode}">
                 <Grid Name="Body" Margin="12,6,12,24" RowDefinitions="Auto,Auto,*" ColumnDefinitions="*">
 
                     <StackPanel Grid.Row="0">
@@ -452,6 +589,137 @@
                 </Grid>
             </ScrollViewer>
 
+            <!-- Mixer: one channel strip per mic, and a master strip that plays the mix of all mics to one output.
+                 Faders and mutes act on the recording and the outputs immediately, also while recording. -->
+            <Border Name="Mixer" Classes="console" IsVisible="{Binding IsMixerMode}" Margin="12,6,12,12">
+                <Grid ColumnDefinitions="*,Auto">
+                    <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled">
+                        <Grid>
+                            <TextBlock Classes="muted" IsVisible="{Binding !HasMikes}" Margin="24" MaxWidth="280"
+                                       VerticalAlignment="Center" HorizontalAlignment="Left" TextWrapping="Wrap"
+                                       Text="No mics yet. Scan for paired SmartMikes or add a microphone from the menu." />
+                            <ItemsControl ItemsSource="{Binding Mikes}">
+                                <ItemsControl.ItemsPanel>
+                                    <ItemsPanelTemplate>
+                                        <StackPanel Orientation="Horizontal" />
+                                    </ItemsPanelTemplate>
+                                </ItemsControl.ItemsPanel>
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate x:DataType="vm:MikeViewModel">
+                                        <Border Classes="chstrip">
+                                            <Grid RowDefinitions="Auto,Auto,Auto,*,Auto,Auto,Auto" RowSpacing="8">
+                                                <!-- Power (connect) and state -->
+                                                <Grid ColumnDefinitions="Auto,*" Height="36">
+                                                    <Button Classes="power" Classes.on="{Binding IsStreaming}" Classes.busy="{Binding IsConnecting}"
+                                                            Command="{Binding ToggleConnectionCommand}" IsEnabled="{Binding !IsBusy}"
+                                                            ToolTip.Tip="{Binding ConnectButtonText}">
+                                                        <c:Icon Data="{StaticResource IconPower}" Size="16" />
+                                                    </Button>
+                                                    <StackPanel Grid.Column="1" Margin="6,0,0,0" VerticalAlignment="Center" Spacing="1">
+                                                        <TextBlock Classes="chstate" Text="{Binding StateText}" />
+                                                        <TextBlock Classes="chsmall" Text="{Binding BatteryText}" IsVisible="{Binding HasBattery}" />
+                                                        <TextBlock Classes="chsmall" Text="Local mic" IsVisible="{Binding IsLocal}" />
+                                                    </StackPanel>
+                                                </Grid>
+
+                                                <!-- Mic section (SmartMike settings); fixed height so all faders line up -->
+                                                <Panel Grid.Row="1" Height="196">
+                                                    <StackPanel IsVisible="{Binding IsSmartMike}" Spacing="6">
+                                                        <StackPanel Spacing="2">
+                                                            <TextBlock Classes="chlabel" Text="GAIN" />
+                                                            <c:Knob Minimum="0" Maximum="100" SmallChange="2" LargeChange="10" DefaultValue="50"
+                                                                    Value="{Binding MicGain}" IsEnabled="{Binding !Agc}"
+                                                                    ToolTip.Tip="Mic gain on the SmartMike (turn AGC off to set it)" />
+                                                            <TextBlock Classes="chvalue" Text="{Binding MicGain}" />
+                                                        </StackPanel>
+                                                        <Grid ColumnDefinitions="*,*" ColumnSpacing="4">
+                                                            <ToggleButton Classes="led" Content="AGC" IsChecked="{Binding Agc}" ToolTip.Tip="Automatic gain" />
+                                                            <ToggleButton Grid.Column="1" Classes="led" Content="NS" IsChecked="{Binding NoiseSuppression}"
+                                                                          ToolTip.Tip="Noise suppression" />
+                                                        </Grid>
+                                                        <StackPanel Spacing="2">
+                                                            <TextBlock Classes="chlabel" Text="PHONES" />
+                                                            <c:Knob Minimum="0" Maximum="100" SmallChange="2" LargeChange="10" DefaultValue="80"
+                                                                    Value="{Binding MonitorVolume}" ToolTip.Tip="Headphone monitor on the SmartMike" />
+                                                            <TextBlock Classes="chvalue" Text="{Binding MonitorVolume}" />
+                                                        </StackPanel>
+                                                    </StackPanel>
+                                                    <StackPanel IsVisible="{Binding IsLocal}" VerticalAlignment="Center" Spacing="6">
+                                                        <c:Icon Data="{StaticResource IconMic}" Size="28" Fill="{DynamicResource MutedBrush}" HorizontalAlignment="Center" />
+                                                        <TextBlock Classes="chsmall" Text="Device mic" HorizontalAlignment="Center" />
+                                                    </StackPanel>
+                                                </Panel>
+
+                                                <!-- Direct output of this mic -->
+                                                <StackPanel Grid.Row="2" Spacing="3">
+                                                    <TextBlock Classes="chlabel" Text="DIRECT OUT" />
+                                                    <ComboBox Classes="mini" ItemsSource="{Binding Outputs}" SelectedItem="{Binding SelectedOutput}"
+                                                              ToolTip.Tip="{Binding OutputLabel}">
+                                                        <ComboBox.ItemTemplate>
+                                                            <DataTemplate x:DataType="vm:OutputOption">
+                                                                <TextBlock Text="{Binding ShortName}" TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding Name}" />
+                                                            </DataTemplate>
+                                                        </ComboBox.ItemTemplate>
+                                                    </ComboBox>
+                                                </StackPanel>
+
+                                                <!-- Fader and post-fader meter -->
+                                                <Grid Grid.Row="3" ColumnDefinitions="*,Auto" ColumnSpacing="6" MinHeight="150">
+                                                    <c:Fader Value="{Binding FaderDb}" ToolTip.Tip="Level in the recording and outputs (double-tap: 0 dB)" />
+                                                    <c:MixerMeter Grid.Column="1" Width="8" Margin="0,18" Level="{Binding MixLevel}" Peak="{Binding MixPeakHold}" />
+                                                </Grid>
+                                                <TextBlock Grid.Row="4" Classes="chvalue mono" Text="{Binding FaderText}" />
+                                                <ToggleButton Grid.Row="5" Classes="mute" Content="MUTE" IsChecked="{Binding Muted}"
+                                                              ToolTip.Tip="Mute this mic in the recording and outputs" />
+                                                <Border Grid.Row="6" Classes="scribble" Classes.live="{Binding IsStreaming}" Classes.rec="{Binding IsRecording}"
+                                                        ToolTip.Tip="{Binding Error}">
+                                                    <TextBlock Text="{Binding Name}" TextTrimming="CharacterEllipsis" HorizontalAlignment="Center" />
+                                                </Border>
+                                            </Grid>
+                                        </Border>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                        </Grid>
+                    </ScrollViewer>
+
+                    <!-- Master: the mix of all mics (after their faders) to one live output -->
+                    <Border Grid.Column="1" Classes="chstrip master">
+                        <Grid RowDefinitions="Auto,Auto,*,Auto,Auto,Auto" RowSpacing="8">
+                            <StackPanel Height="36" VerticalAlignment="Center" Spacing="1">
+                                <TextBlock Classes="chstate" Text="MASTER" />
+                                <TextBlock Classes="chsmall" Text="Live mix" />
+                            </StackPanel>
+                            <StackPanel Grid.Row="1" Height="252" Spacing="3">
+                                <TextBlock Classes="chlabel" Text="MIX OUT" />
+                                <ComboBox Classes="mini" ItemsSource="{Binding MixOutputs}" SelectedItem="{Binding SelectedMixOutput}"
+                                          ToolTip.Tip="Play the mix of all mics on this output">
+                                                        <ComboBox.ItemTemplate>
+                                                            <DataTemplate x:DataType="vm:OutputOption">
+                                                                <TextBlock Text="{Binding ShortName}" TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding Name}" />
+                                                            </DataTemplate>
+                                                        </ComboBox.ItemTemplate>
+                                                    </ComboBox>
+                                <TextBlock Classes="chsmall" Text="{Binding MixError}" IsVisible="{Binding HasMixError}" TextWrapping="Wrap"
+                                           Foreground="{DynamicResource RecordBrush}" />
+                                <TextBlock Classes="chsmall" TextWrapping="Wrap" Margin="0,6,0,0"
+                                           Text="Live only: each mic still records to its own track." />
+                            </StackPanel>
+                            <Grid Grid.Row="2" ColumnDefinitions="*,Auto" ColumnSpacing="6" MinHeight="150">
+                                <c:Fader Value="{Binding MixFaderDb}" ToolTip.Tip="Master level of the mix output (double-tap: 0 dB)" />
+                                <c:MixerMeter Grid.Column="1" Width="10" Margin="0,18" Level="{Binding MixLevel}" Peak="{Binding MixPeakHold}" />
+                            </Grid>
+                            <TextBlock Grid.Row="3" Classes="chvalue mono" Text="{Binding MixFaderText}" />
+                            <ToggleButton Grid.Row="4" Classes="mute" Content="MUTE" IsChecked="{Binding MixMuted}"
+                                          ToolTip.Tip="Mute the mix output" />
+                            <Border Grid.Row="5" Classes="scribble" Classes.rec="{Binding IsRecording}">
+                                <TextBlock Text="MIX" HorizontalAlignment="Center" />
+                            </Border>
+                        </Grid>
+                    </Border>
+                </Grid>
+            </Border>
+
             <!-- Big timer in the middle while recording audio -->
             <StackPanel IsVisible="{Binding ShowRecordingCenter}" IsHitTestVisible="False" Spacing="6"
                         HorizontalAlignment="Center" VerticalAlignment="Center">
@@ -495,7 +763,7 @@
                 </Border>
 
                 <!-- Compact strip of the recording mics (name + meter) -->
-                <Border Name="Strip" Classes="strip" Classes.on="{Binding StripOn}" IsVisible="{Binding StripVisible}"
+                <Border Name="Strip" Classes="strip" Classes.on="{Binding StripOn}" IsVisible="{Binding ShowStrip}"
                         Margin="12,0,12,8" Padding="8,6" CornerRadius="16" HorizontalAlignment="Center"
                         BorderBrush="{DynamicResource StrokeBrush}" BorderThickness="1">
                     <StackPanel>
@@ -540,9 +808,9 @@
                 <TextBlock Classes="muted" Text="{Binding RecordHint}" IsVisible="{Binding HasRecordHint}"
                            HorizontalAlignment="Center" Margin="0,4,0,0" />
                 <Panel>
-                    <StackPanel Orientation="Horizontal" Spacing="8" HorizontalAlignment="Left" VerticalAlignment="Center"
+                    <StackPanel Orientation="Horizontal" Spacing="8" HorizontalAlignment="Left" VerticalAlignment="Center">
+                        <Button Classes="chip" Command="{Binding OpenSettingsCommand}" ToolTip.Tip="Recording settings"
                                 IsVisible="{Binding ShowControls}">
-                        <Button Classes="chip" Command="{Binding OpenSettingsCommand}" ToolTip.Tip="Recording settings">
                             <StackPanel Orientation="Horizontal" Spacing="8">
                                 <c:Icon Classes="wideonly" Data="{StaticResource IconTune}" />
                                 <TextBlock Classes="wideonly" Text="{Binding FormatChip}" VerticalAlignment="Center" />
@@ -555,6 +823,13 @@
                                 <c:Icon Data="{StaticResource IconMic}" IsVisible="{Binding IsAudioMode}" />
                                 <c:Icon Data="{StaticResource IconVideo}" IsVisible="{Binding IsVideoMode}" />
                                 <TextBlock Classes="wideonly" Text="{Binding ModeLabel}" VerticalAlignment="Center" />
+                            </StackPanel>
+                        </Button>
+                        <Button Classes="chip" Classes.on="{Binding IsMixerMode}" Command="{Binding ToggleMixerCommand}"
+                                IsVisible="{Binding ShowMixerChip}" ToolTip.Tip="Mixer: adjust every mic, also while recording">
+                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                <c:Icon Data="{StaticResource IconFaders}" />
+                                <TextBlock Classes="wideonly" Text="Mixer" VerticalAlignment="Center" />
                             </StackPanel>
                         </Button>
                     </StackPanel>

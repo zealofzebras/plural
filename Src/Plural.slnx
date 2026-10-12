@@ -2,9 +2,14 @@
   <Project Path="Plural.App/Plural.App.csproj" />
   <Project Path="Plural.App.Desktop/Plural.App.Desktop.csproj" />
   <Project Path="Plural.App.Android/Plural.App.Android.csproj" />
+  <Project Path="Plural.App.iOS/Plural.App.iOS.csproj" />
   <Project Path="Plural.Cli/Plural.Cli.csproj" />
   <Project Path="Plural.Core.Tests/Plural.Core.Tests.csproj" />
   <Project Path="Plural.Core/Plural.Core.csproj" />
   <Project Path="Plural.Platform.Windows/Plural.Platform.Windows.csproj" />
   <Project Path="Plural.Platform.Android/Plural.Platform.Android.csproj" />
+  <Project Path="Plural.Platform.Apple/Plural.Platform.Apple.csproj" />
+  <Project Path="Plural.Platform.MacOS/Plural.Platform.MacOS.csproj" />
+  <Project Path="Plural.Platform.iOS/Plural.Platform.iOS.csproj" />
+  <Project Path="Plural.Screenshots/Plural.Screenshots.csproj" />
 </Solution>

@@ -11,9 +11,12 @@ using Plural.Core.Session;
 namespace Plural.App.ViewModels;
 
 /// <summary>"None" or a real output device, for the per-mic output picker.</summary>
-public sealed record OutputOption(AudioOutputDevice? Device)
+public sealed record OutputOption(AudioOutputDevice? Device, string? NoneLabel = null)
 {
-    public string Name => Device is null ? "None (record only)" : (Device.IsVirtualCable ? "Cable: " : "") + Device.Name;
+    public string Name => Device is null ? NoneLabel ?? "None (record only)" : (Device.IsVirtualCable ? "Cable: " : "") + Device.Name;
+
+    /// <summary>For the mixer's narrow pickers.</summary>
+    public string ShortName => Device?.Name ?? "Off";
     public override string ToString() => Name;
 }
 
@@ -21,7 +24,8 @@ public partial class MikeViewModel : ViewModelBase
 {
     private readonly MainViewModel _owner;
     private bool _applyingDeviceValues;
-    private int _peakHoldTicks;
+    private readonly MeterState _meter = new();
+    private readonly MeterState _mixMeter = new();
 
     public MikeChannel Channel { get; }
     private IMicSource Source => Channel.Source;
@@ -62,6 +66,13 @@ public partial class MikeViewModel : ViewModelBase
     [ObservableProperty] public partial int MonitorVolume { get; set; } = 80;
     [ObservableProperty] public partial bool NoiseSuppression { get; set; } = true;
 
+    // Mixer: channel fader and mute (applied to the recording and every live output), post-fader meter.
+    [ObservableProperty] public partial double FaderDb { get; set; }
+    [ObservableProperty] public partial bool Muted { get; set; }
+    [ObservableProperty] public partial string FaderText { get; set; } = "0.0 dB";
+    [ObservableProperty] public partial double MixLevel { get; set; }
+    [ObservableProperty] public partial double MixPeakHold { get; set; }
+
     public IReadOnlyList<OutputOption> Outputs => _owner.Outputs;
     public string OutputLabel => _owner.OutputLabel;
 
@@ -72,6 +83,24 @@ public partial class MikeViewModel : ViewModelBase
         Channel = channel;
         _owner = owner;
         SelectedOutput = owner.Outputs.FirstOrDefault();
+        if (owner.SavedMixFor(channel.Source.Id) is { } mix)
+        {
+            FaderDb = mix.FaderDb;
+            Muted = mix.Muted;
+        }
+    }
+
+    partial void OnFaderDbChanged(double value)
+    {
+        Channel.FaderDb = value;
+        FaderText = MeterState.FormatDb(Channel.FaderDb);
+        _owner.ScheduleMixSave();
+    }
+
+    partial void OnMutedChanged(bool value)
+    {
+        Channel.Muted = value;
+        _owner.ScheduleMixSave();
     }
 
     partial void OnIsBusyChanged(bool value) => OnPropertyChanged(nameof(ConnectButtonText));
@@ -237,22 +266,12 @@ public partial class MikeViewModel : ViewModelBase
         }
         HasHeadphones = Session?.HeadphonesPlugged == true;
 
-        // Peak meter with a dB-ish scale (-60 dBFS … 0 dBFS → 0 … 100).
-        var peak = IsStreaming ? s.PeakLevel : 0f;
-        var db = peak > 0 ? 20 * Math.Log10(peak) : -60;
-        Level = Math.Clamp((db + 60) / 60 * 100, 0, 100);
-        if (Level >= PeakHold)
-        {
-            PeakHold = Level;
-            _peakHoldTicks = 12;
-        }
-        else if (_peakHoldTicks > 0)
-        {
-            _peakHoldTicks--;
-        }
-        else
-        {
-            PeakHold = Math.Max(Level, PeakHold - 3);
-        }
+        // Input meter (cards) and post-fader meter (mixer), dB-ish scale (-60 dBFS … 0 dBFS → 0 … 100).
+        _meter.Update(IsStreaming ? s.PeakLevel : 0f);
+        Level = _meter.Level;
+        PeakHold = _meter.Peak;
+        _mixMeter.Update(IsStreaming ? Channel.PostFaderPeak : 0f);
+        MixLevel = _mixMeter.Level;
+        MixPeakHold = _mixMeter.Peak;
     }
 }

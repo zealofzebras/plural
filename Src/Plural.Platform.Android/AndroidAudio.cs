@@ -39,7 +39,7 @@ public sealed class AndroidAudio(Context context) : IAudioPlatform
         };
     }
 
-    public IAudioSink Open(AudioOutputDevice device, JitterBuffer source, int sampleRate)
+    public IAudioSink Open(AudioOutputDevice device, IAudioSource source, int sampleRate)
     {
         var info = device.Id == DefaultId
             ? null
@@ -54,13 +54,13 @@ public sealed class AndroidAudio(Context context) : IAudioPlatform
         private const int ChunkFrames = 256;
 
         private readonly AudioTrack _track;
-        private readonly JitterBuffer _source;
+        private readonly IAudioSource _source;
         private readonly Thread _thread;
         private volatile bool _running = true;
 
         public AudioOutputDevice Device { get; }
 
-        public TrackSink(AudioOutputDevice device, AudioDeviceInfo? info, JitterBuffer source, int sampleRate)
+        public TrackSink(AudioOutputDevice device, AudioDeviceInfo? info, IAudioSource source, int sampleRate)
         {
             Device = device;
             _source = source;

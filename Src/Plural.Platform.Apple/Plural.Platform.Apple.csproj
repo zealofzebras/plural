@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Code shared by macOS and iOS over Apple's plain C APIs (CoreFoundation, AudioToolbox): AudioQueue output and capture,
+       AAC encoding. Plain net10.0 so the desktop head (osx-*) and the iOS head can both use it. -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <IsAotCompatible>true</IsAotCompatible>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Plural.Core\Plural.Core.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Plural.Platform.MacOS" />
+    <InternalsVisibleTo Include="Plural.Platform.iOS" />
+  </ItemGroup>
+</Project>

@@ -17,7 +17,7 @@ for pair in x86_64:win-x64 aarch64:win-arm64; do
   rid="${pair#*:}"
   out="$here/runtimes/$rid/native"
   mkdir -p "$out"
-  (cd "$src" && "$tc/$arch-w64-mingw32-clang" -shared -O2 -static -DWIN32 -DHAVE_LRINTF \
+  (cd "$src" && "$tc/$arch-w64-mingw32-clang" -shared -O2 -static -DWIN32 -DHAVE_LRINTF -DVAR_ARRAYS \
       -Wno-everything -o "$out/celt071.dll" $files)
   echo "built $out/celt071.dll"
 done

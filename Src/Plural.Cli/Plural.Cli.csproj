@@ -3,6 +3,7 @@
   <ItemGroup>
     <ProjectReference Include="..\Plural.Core\Plural.Core.csproj" />
     <ProjectReference Include="..\Plural.Platform.Windows\Plural.Platform.Windows.csproj" />
+    <ProjectReference Include="..\Plural.Platform.MacOS\Plural.Platform.MacOS.csproj" />
   </ItemGroup>
 
   <PropertyGroup>

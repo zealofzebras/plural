@@ -7,11 +7,13 @@ using Plural.App.Services;
 using Plural.Core.Platform;
 using Plural.Core.Remote;
 using Plural.Core.Session;
+using Plural.Platform.Apple;
+using Plural.Platform.MacOS;
 using Plural.Platform.Windows;
 
 namespace Plural.App.Desktop;
 
-/// <summary>Desktop platform services. Windows today; Linux (BlueZ + PipeWire) and macOS go here later.</summary>
+/// <summary>Desktop platform services: Windows and macOS; Linux (BlueZ + PipeWire) goes here later.</summary>
 public sealed class DesktopHost : IAppHost
 {
     public MikeHub CreateHub()
@@ -21,15 +23,25 @@ public sealed class DesktopHost : IAppHost
             var audio = new WasapiAudio();
             return new MikeHub(new WindowsBluetooth(), audio, new MfAacEncoderFactory(), new MfVideoPlatform(), audio);
         }
-        throw new PlatformNotSupportedException("Plural desktop currently supports Windows only.");
+        if (OperatingSystem.IsMacOS())
+        {
+            // No camera on macOS yet (AVFoundation + VideoToolbox): the UI hides video when the hub has none.
+            var audio = new MacAudio();
+            return new MikeHub(new MacBluetooth(), audio, new AppleAacEncoderFactory(), null, audio);
+        }
+        throw new PlatformNotSupportedException("Plural desktop supports Windows and macOS.");
     }
 
-    public string RecordingRoot { get; } =
-        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "Plural Recordings");
+    /// <summary>Documents/Plural Recordings (on macOS .NET maps MyDocuments to the home folder, so Documents is added explicitly).</summary>
+    public string RecordingRoot { get; } = OperatingSystem.IsMacOS()
+        ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Documents", "Plural Recordings")
+        : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "Plural Recordings");
 
     public bool CanChangeRecordingRoot => true;
 
-    public string OutputLabel => OperatingSystem.IsWindows() ? "Windows input (virtual cable)" : "Live output";
+    public string OutputLabel => OperatingSystem.IsWindows() ? "Windows input (virtual cable)"
+        : OperatingSystem.IsMacOS() ? "Mac input (virtual device, e.g. BlackHole)"
+        : "Live output";
 
     public bool CanOpenFolder => true;
 
@@ -44,15 +56,21 @@ public sealed class DesktopHost : IAppHost
     public void OpenFolder(string folder) =>
         Process.Start(new ProcessStartInfo(folder) { UseShellExecute = true });
 
+    /// <summary>macOS asks for Bluetooth access itself on first use (NSBluetoothAlwaysUsageDescription in Info.plist).</summary>
     public Task<bool> EnsurePermissionsAsync() => Task.FromResult(true);
 
     /// <summary>Windows has no runtime prompt for desktop apps; denied access surfaces as an error when opening the camera.</summary>
     public Task<bool> EnsureCameraPermissionAsync() => Task.FromResult(true);
 
-    /// <summary>Same as the camera: a blocked microphone shows as an error when the mic is opened.</summary>
+    /// <summary>Same as the camera: a blocked microphone shows as an error when the mic is opened (macOS prompts on first capture).</summary>
     public Task<bool> EnsureMicrophonePermissionAsync() => Task.FromResult(true);
 
-    public string SettingsPath { get; } = MigratedSettingsPath();
+    public string SettingsPath { get; } = OperatingSystem.IsMacOS() ? MacSettingsPath() : MigratedSettingsPath();
+
+    /// <summary>~/Library/Application Support/Plural/settings.json (inside the container when sandboxed).</summary>
+    private static string MacSettingsPath() =>
+        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Library", "Application Support", "Plural",
+            "settings.json");
 
     /// <summary>%AppData%\Plural\settings.json; copies the file from the app's former name ("SmartMike Hub") once.</summary>
     private static string MigratedSettingsPath()

@@ -15,7 +15,7 @@ for pair in arm64:osx-arm64 x86_64:osx-x64; do
   rid="${pair#*:}"
   out="$here/runtimes/$rid/native"
   mkdir -p "$out"
-  (cd "$src" && clang -arch "$arch" -mmacosx-version-min="$min" -dynamiclib -O2 -DHAVE_LRINTF \
+  (cd "$src" && clang -arch "$arch" -mmacosx-version-min="$min" -dynamiclib -O2 -DHAVE_LRINTF -DVAR_ARRAYS \
       -install_name @rpath/libcelt071.dylib -Wno-everything \
       -o "$out/libcelt071.dylib" $files)
   echo "built $out/libcelt071.dylib"

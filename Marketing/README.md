@@ -36,19 +36,34 @@ Every store gets the new language automatically. The screenshots are shared; onl
 
 ## Screenshots
 
-Add **real captures of the app** as PNGs. Files are used in name order, so name them `01.png`, `02.png`, … and put the
-most important screen first. The first two or three are all most people see in search results. For each store size,
-the build frames every capture on the brand gradient with its caption above it.
+Screenshots are **rendered automatically** from the real app. `Src/Plural.Screenshots` runs the Plural UI without a
+window (headless Avalonia) against simulated hardware:
+- three SmartMike+ mics that replay a recorded mic session, so the level meters show real audio
+- the device's own mics, fed with synthetic speech
+- two other Plural devices for "record together"
 
-- **Phone:** capture on an Android phone (power + volume down), portrait. 1080×2400 or similar works.
-- **Desktop:** capture the Plural window on Windows (Win+Shift+S, window mode) at 1920×1200 or larger, using a 16:10
-  window if you can. The same captures are used for the Mac App Store.
-- Show the app with real content: two or three connected mics with levels moving, a recording in progress, the
-  format picker. Avoid empty states.
-- Keep captions short, describe the benefit, and use sentence case: "Every mic on its own track", not "Multi-track support".
+It steps through five scenes in the order of `captions.txt`: all mics live, recording, local mics, other devices, and
+recording settings. Each scene is saved as `01.png` … `05.png` in `screenshots/phone/` (1080×2376), `tablet/`
+(1600×2560) and `desktop/` (2880×1800).
 
-Without captures, the build still finishes. It lists the missing screenshots in `REPORT.md` and writes example
-layouts to `preview/` that are never packaged. Every store requires screenshots before you can submit.
+```powershell
+./Tools/store/screenshots.ps1              # all three; or -Profile phone|tablet|desktop, -Theme light
+./Tools/store/screenshots.ps1 -Preview     # also builds the framed store images into out/store
+```
+
+The release workflow renders the same screenshots on a Windows runner. **Committed screenshots win.** If a folder
+here contains PNGs, the release uses them; if it's empty, the release uses freshly rendered ones. So commit the
+rendered set to freeze it, replace files with hand-taken captures, or leave the folders empty to always get the
+current UI. If you change the scenes in `Src/Plural.Screenshots/Program.cs`, change `captions.txt` to match.
+
+For a hand-taken capture, use an Android phone (power + volume down) for `phone/`, and the Plural window on Windows
+(Win+Shift+S, window mode, 16:10 if you can) for `desktop/`. Files are used in name order, and the first two or three
+are all most people see in search results. Keep captions short, describe the benefit, and use sentence case:
+"Every mic on its own track", not "Multi-track support".
+
+For each store size, the build frames every capture on the brand gradient with its caption above it. If a folder has
+no captures at all, the build still finishes. It lists the gap in `REPORT.md` and writes example layouts to
+`preview/`, which are never packaged.
 
 Sizes made from each folder (change them in `store.toml`):
 
@@ -85,7 +100,7 @@ When you publish a release tagged `v1.2.3`, these files are attached to it:
 | `Plural-1.2.3-android.aab` | Android App Bundle for Google Play |
 | `Plural-1.2.3-macos-arm64.dmg/.zip`, `-macos-x64.dmg/.zip` | macOS app |
 | `Plural-1.2.3-macos-appstore.pkg` | Mac App Store upload (only when the Mac App Store secrets are set) |
-| `Plural-1.2.3-ios.ipa` | iOS app (only once an iOS app project exists and is signed) |
+| `Plural-1.2.3-ios.ipa` | iOS app (only when the iOS signing secrets are set) |
 | `Plural-1.2.3-<store>-store.zip` | One per store: `listing/` (text and images in that store's layout), `binaries/`, `REPORT.md` |
 | `SHA256SUMS.txt` | Checksums |
 
@@ -119,9 +134,11 @@ Add secrets under Settings → Secrets and variables → Actions.
 ## Platform status
 
 - **Windows, Android:** complete apps, ready for the stores.
-- **macOS:** the app builds, is packaged, and can be signed and notarized. It **can't record yet**: `DesktopHost` has
-  no macOS Bluetooth or audio layer (see `Docs/Plural/Design.md`, "later: Platform.MacOS"). Don't submit it to the Mac
-  App Store before that exists.
-- **iOS:** there is no iOS app project yet (`Src/Plural.App.iOS`), so the iOS job is skipped and only the App Store
-  listing is produced. iOS only allows Bluetooth Classic serial links to MFi accessories through External Accessory,
-  so check whether the SmartMike+ supports that before building an iOS app.
+- **macOS:** the app builds, is packaged, and can be signed and notarized. `Plural.Platform.MacOS` provides
+  Bluetooth (IOBluetooth RFCOMM), audio output and local mics (Core Audio), and AAC; there is no camera yet. It is
+  **not yet tested on a Mac**: run it with a SmartMike before submitting to the Mac App Store.
+- **iOS:** `Src/Plural.App.iOS` builds in the iOS job (an `.ipa` only with the signing secrets). Local mics, recording,
+  sharing and Wi-Fi remote mode are there; no camera yet. iOS only lets apps reach Bluetooth Classic accessories that are
+  MFi through External Accessory, so SmartMikes work on iOS only if the SmartMike+ is an MFi accessory and its protocol
+  string is added to `Src/Plural.App.iOS/Info.plist`. The app's error message lists the protocols a connected mic offers.
+  Wi-Fi discovery also needs Apple's multicast entitlement (see `Src/Plural.App.iOS/Entitlements.plist`).

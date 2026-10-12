@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- iOS implementations: IBluetoothPlatform over External Accessory (iOS has no public RFCOMM API; only MFi accessories
+       whose protocol string is declared in the app's Info.plist can be opened), IAudioPlatform/IAudioInputPlatform over the
+       audio session + AudioQueue (shared with macOS in Plural.Platform.Apple). -->
+  <PropertyGroup>
+    <TargetFramework>net10.0-ios</TargetFramework>
+    <SupportedOSPlatformVersion>15.0</SupportedOSPlatformVersion>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Plural.Core\Plural.Core.csproj" />
+    <ProjectReference Include="..\Plural.Platform.Apple\Plural.Platform.Apple.csproj" />
+  </ItemGroup>
+</Project>

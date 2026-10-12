@@ -50,7 +50,10 @@
 - [ ] Install a virtual cable (VB-CABLE has ARM64 since Oct 2024) and verify a mic appears in another app
 - [ ] Test with 2+ SmartMikes simultaneously (Bluetooth bandwidth)
 - [ ] Packaging (self-contained win-arm64 / win-x64 builds), app icon, auto-reconnect
-- [ ] Own virtual-mic driver (later), Linux/macOS platform layers (later)
+- [x] macOS platform layer (IOBluetooth, Core Audio, AAC) and iOS head (External Accessory, audio session): built, compile-checked
+- [ ] Run macOS on a Mac with a SmartMike; find out whether the SmartMike+ is MFi (iOS needs its External Accessory protocol string)
+- [ ] Camera on macOS/iOS (AVFoundation + VideoToolbox); RFCOMM server on macOS for Bluetooth remote mode
+- [ ] Own virtual-mic driver (later), Linux platform layer (later)
 
 ## Phase 4 — Firmware (stretch, risk of bricking)
 - [x] Try to get newer images from the server API — all Sabinetek API servers are offline; device's 0.4.37 is the newest known

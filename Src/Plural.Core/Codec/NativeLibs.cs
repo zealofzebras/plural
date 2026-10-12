@@ -5,7 +5,8 @@ namespace Plural.Core.Codec;
 
 /// <summary>
 /// Single DllImport resolver for Core's native libraries (only one resolver can be registered per assembly).
-/// Desktop: <c>runtimes/&lt;rid&gt;/native/&lt;file&gt;</c> next to the app; Android: loaded by soname from the APK.
+/// Desktop: <c>runtimes/&lt;rid&gt;/native/&lt;file&gt;</c> next to the app; Android: loaded by soname from the APK;
+/// iOS: the dynamic framework embedded in the app bundle (<c>Frameworks/&lt;name&gt;.framework/&lt;name&gt;</c>).
 /// </summary>
 internal static class NativeLibs
 {
@@ -41,6 +42,11 @@ internal static class NativeLibs
         if (OperatingSystem.IsAndroid())
         {
             return NativeLibrary.TryLoad(f.Unix, out var lib) ? lib : IntPtr.Zero;
+        }
+        if (OperatingSystem.IsIOS())
+        {
+            var framework = Path.Combine(AppContext.BaseDirectory, "Frameworks", $"{name}.framework", name);
+            return NativeLibrary.TryLoad(framework, out var lib) ? lib : IntPtr.Zero;
         }
         var os = OperatingSystem.IsWindows() ? "win" : OperatingSystem.IsMacOS() ? "osx" : "linux";
         var arch = RuntimeInformation.ProcessArchitecture switch

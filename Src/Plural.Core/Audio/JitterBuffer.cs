@@ -6,7 +6,7 @@ namespace Plural.Core.Audio;
 /// (measured ≈ 0.2 %), so <see cref="Read"/> resamples by a ratio steered by the buffer
 /// level (clamped to ±0.5 %, inaudible) to keep latency near <see cref="TargetSamples"/>.
 /// </summary>
-public sealed class JitterBuffer
+public sealed class JitterBuffer : IAudioSource
 {
     private const double MaxRatioDeviation = 0.005;
     private const double Gain = 0.01;

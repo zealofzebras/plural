@@ -62,12 +62,50 @@ jobs:
           } >> "$GITHUB_OUTPUT"
           echo "Version $v, build $build, iOS head: $has_ios" >> "$GITHUB_STEP_SUMMARY"
 
+  screenshots:
+    name: Screenshots (simulated mics)
+    needs: [plan, native]
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: native-celt
+          path: Native/celt/runtimes
+      - name: Render
+        run: dotnet run --project Src/Plural.Screenshots -c Release -- --out out/screenshots
+      - uses: actions/upload-artifact@v4
+        with:
+          name: screenshots
+          path: out/screenshots
+          if-no-files-found: error
+
   store-assets:
     name: Store listings and images
-    needs: plan
+    needs: [plan, screenshots]
+    if: ${{ !cancelled() && needs.plan.result == 'success' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          name: screenshots
+          path: ${{ runner.temp }}/screenshots
+      - name: Use rendered screenshots where none are committed
+        run: |
+          for dir in "$RUNNER_TEMP"/screenshots/*/; do
+            [ -d "$dir" ] || continue
+            name="$(basename "$dir")"; dest="Marketing/screenshots/$name"
+            if ls "$dest"/*.png "$dest"/*.jpg "$dest"/*.jpeg > /dev/null 2>&1; then
+              echo "$name: using the committed screenshots"
+            else
+              mkdir -p "$dest" && cp "$dir"*.png "$dest/" && echo "$name: using rendered screenshots"
+            fi
+          done
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
@@ -127,6 +165,7 @@ jobs:
   windows:
     name: Windows (x64, arm64, MSIX)
     needs: [plan, native, store-assets]
+    if: ${{ !cancelled() && needs.native.result == 'success' && needs.store-assets.result == 'success' }}
     runs-on: windows-latest
     env:
       VERSION: ${{ needs.plan.outputs.version }}
@@ -268,6 +307,7 @@ jobs:
   macos:
     name: macOS (arm64, x64)
     needs: [plan, store-assets]
+    if: ${{ !cancelled() && needs.store-assets.result == 'success' }}
     runs-on: macos-15
     env:
       VERSION: ${{ needs.plan.outputs.version }}
@@ -408,6 +448,17 @@ jobs:
         with:
           dotnet-version: ${{ env.DOTNET_VERSION }}
       - run: dotnet workload install ios
+      - name: Native libraries
+        run: |
+          mkdir -p "$RUNNER_TEMP/src"
+          curl -fsSL -o celt.tar.gz "$CELT_URL"
+          echo "$CELT_SHA256  celt.tar.gz" | shasum -a 256 -c -
+          curl -fsSL -o lame.tar.gz "$LAME_URL"
+          echo "$LAME_SHA256  lame.tar.gz" | shasum -a 256 -c -
+          tar -xzf celt.tar.gz -C "$RUNNER_TEMP/src"
+          tar -xzf lame.tar.gz -C "$RUNNER_TEMP/src"
+          CELT_SRC="$RUNNER_TEMP/src/celt-0.7.1" bash Native/celt/build-ios.sh
+          LAME_SRC="$RUNNER_TEMP/src/lame-3.100" bash Native/lame/build-ios.sh
       - name: Signing
         if: env.HAS_IOS_CERT == 'true'
         env:
@@ -438,8 +489,8 @@ jobs:
             ipa="$(find Src/Plural.App.iOS/bin/Release -name '*.ipa' | head -n 1)"
             cp "$ipa" "out/dist/Plural-$VERSION-ios.ipa"
           else
-            echo "::warning::No IOS_CERT_P12_BASE64 secret: iOS is compiled but no .ipa is produced (Apple requires signing)."
-            dotnet build Src/Plural.App.iOS -c Release -f net10.0-ios -r ios-arm64 -p:Version="$VERSION"
+            echo "::warning::No IOS_CERT_P12_BASE64 secret: iOS is compiled for the simulator but no .ipa is produced (Apple requires signing)."
+            dotnet build Src/Plural.App.iOS -c Release -f net10.0-ios -r iossimulator-arm64 -p:Version="$VERSION"
             echo "unsigned build only" > out/dist/ios-unsigned.txt
           fi
       - name: Clean up keychain

@@ -17,7 +17,7 @@ public class LocalMicTests
     private sealed class FakeAudio : IAudioPlatform
     {
         public IReadOnlyList<AudioOutputDevice> GetOutputDevices() => [];
-        public IAudioSink Open(AudioOutputDevice device, JitterBuffer source, int sampleRate) => throw new NotSupportedException();
+        public IAudioSink Open(AudioOutputDevice device, IAudioSource source, int sampleRate) => throw new NotSupportedException();
     }
 
     private sealed class FakeInputs(int rate = 44100) : IAudioInputPlatform

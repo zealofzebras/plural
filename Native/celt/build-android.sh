@@ -23,7 +23,7 @@ for pair in aarch64:android-arm64 x86_64:android-x64; do
   rid="${pair#*:}"
   out="$here/runtimes/$rid/native"
   mkdir -p "$out"
-  (cd "$src" && "$clang" --target="$arch-linux-android$api" -shared -fPIC -O2 -DHAVE_LRINTF \
+  (cd "$src" && "$clang" --target="$arch-linux-android$api" -shared -fPIC -O2 -DHAVE_LRINTF -DVAR_ARRAYS \
       -Wl,-z,max-page-size=16384 -Wl,-soname,libcelt071.so -Wno-everything \
       -o "$out/libcelt071.so" $files -lm)
   echo "built $out/libcelt071.so"

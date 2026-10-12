@@ -77,6 +77,8 @@
             <StreamGeometry x:Key="IconDevices">M4 6h18V4H4c-1.1 0-2 .9-2 2v11H0v3h14v-3H4V6zm19 2h-6c-.55 0-1 .45-1 1v10c0 .55.45 1 1 1h6c.55 0 1-.45 1-1V9c0-.55-.45-1-1-1zm-1 9h-4v-7h4v7z</StreamGeometry>
             <StreamGeometry x:Key="IconAdd">M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z</StreamGeometry>
             <StreamGeometry x:Key="IconFlipCamera">M9.5 5.5L8 7H5c-1.1 0-2 .9-2 2v7c0 1.1.9 2 2 2h4v-2H5V9h3.5l1.5-1.5h4L15.5 9H19v4h2V9c0-1.1-.9-2-2-2h-3l-1.5-1.5h-5zM12 15.5c1.38 0 2.5-1.12 2.5-2.5S13.38 10.5 12 10.5 9.5 11.62 9.5 13s1.12 2.5 2.5 2.5zM19 17.5V15l-3.5 3.5L19 22v-2.5c1.65 0 3-1.35 3-3h-2c0 .55-.45 1-1 1z</StreamGeometry>
+            <StreamGeometry x:Key="IconPower">M13 3h-2v10h2V3zm4.83 2.17l-1.42 1.42C17.99 7.86 19 9.81 19 12c0 3.87-3.13 7-7 7s-7-3.13-7-7c0-2.19 1.01-4.14 2.58-5.42L6.17 5.17C4.23 6.82 3 9.26 3 12c0 4.97 4.03 9 9 9s9-4.03 9-9c0-2.74-1.23-5.18-3.17-6.83z</StreamGeometry>
+            <StreamGeometry x:Key="IconFaders">M6 3h2v6h2v3H8v9H6v-9H4V9h2zM11 3h2v12h2v3h-2v3h-2v-3H9v-3h2zM16 3h2v3h2v3h-2v12h-2V9h-2V6h2z</StreamGeometry>
         </ResourceDictionary>
     </Application.Resources>
 

@@ -65,6 +65,34 @@ public class CaptureTests
         Assert.True(maxDiff <= 2, $"max sample difference {maxDiff}"); // float rounding between architectures
     }
 
+    [Fact]
+    public void Capture_DecodesIdenticallyOnSeveralThreadsAtOnce()
+    {
+        // Each SmartMike decodes on its own receive thread. CELT must be built with VAR_ARRAYS (or USE_ALLOCA):
+        // its default scratch stack is a process-wide global and corrupts memory when two decoders run at once.
+        var audio = Frames().Where(f => f.IsCommand && f.Command == Command.AudioStreamVer).Select(f => f.Raw).ToList();
+        short[] DecodeAll()
+        {
+            using var dec = new QCeltStreamDecoder();
+            var pcm = new List<short>();
+            for (var pass = 0; pass < 4; pass++)
+            {
+                foreach (var raw in audio)
+                {
+                    var f = new ReceivedFrame { Raw = raw };
+                    dec.Decode(f.Payload[4..], (_, s) => pcm.AddRange(s));
+                }
+            }
+            Assert.Equal(0, dec.Errors);
+            return [.. pcm];
+        }
+
+        var expected = DecodeAll();
+        var results = new short[6][];
+        Parallel.For(0, results.Length, new ParallelOptions { MaxDegreeOfParallelism = results.Length }, i => results[i] = DecodeAll());
+        Assert.All(results, r => Assert.Equal(expected, r));
+    }
+
     private static short[] ReadWavLeft(string path)
     {
         var b = File.ReadAllBytes(path);

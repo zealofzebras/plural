@@ -1,0 +1,35 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- iOS head (iPhone and iPad): device ios-arm64, simulator iossimulator-arm64/-x64.
+       Compiles on Windows; linking, signing and running need a Mac with Xcode (or CI: .github/workflows/release.yml). -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0-ios</TargetFramework>
+    <SupportedOSPlatformVersion>15.0</SupportedOSPlatformVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>Plural.App.iOS</RootNamespace>
+    <ApplicationId>net.getplural.app</ApplicationId>
+    <ApplicationTitle>Plural</ApplicationTitle>
+    <ApplicationVersion>1</ApplicationVersion>
+    <ApplicationDisplayVersion>$(Version)</ApplicationDisplayVersion>
+    <CodesignEntitlements>Entitlements.plist</CodesignEntitlements>
+  </PropertyGroup>
+
+  <!-- CELT 0.7.1 and LAME as dynamic frameworks (device + simulator), built by Native/*/build-ios.sh; optional until present
+       (without CELT the app runs but cannot decode SmartMike audio). -->
+  <ItemGroup>
+    <NativeReference Include="..\..\Native\celt\runtimes\ios\celt071.xcframework" Kind="Framework"
+                     Condition="Exists('..\..\Native\celt\runtimes\ios\celt071.xcframework')" />
+    <NativeReference Include="..\..\Native\lame\runtimes\ios\mp3lame.xcframework" Kind="Framework"
+                     Condition="Exists('..\..\Native\lame\runtimes\ios\mp3lame.xcframework')" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Avalonia.iOS" Version="12.1.4" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Plural.App\Plural.App.csproj" />
+    <ProjectReference Include="..\Plural.Platform.iOS\Plural.Platform.iOS.csproj" />
+  </ItemGroup>
+</Project>

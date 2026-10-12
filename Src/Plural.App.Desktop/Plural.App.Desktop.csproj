@@ -1,5 +1,6 @@
 <Project Sdk="Microsoft.NET.Sdk">
-  <!-- Desktop head (Windows today; macOS/Linux hosts plug in via DesktopHost). -->
+  <!-- Desktop head: Windows (win-x64/win-arm64) and macOS (osx-arm64/osx-x64, bundled by Packaging/macos/build-app.sh).
+       Linux plugs in via DesktopHost later. -->
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
     <TargetFramework>net10.0</TargetFramework>
@@ -16,5 +17,6 @@
   <ItemGroup>
     <ProjectReference Include="..\Plural.App\Plural.App.csproj" />
     <ProjectReference Include="..\Plural.Platform.Windows\Plural.Platform.Windows.csproj" />
+    <ProjectReference Include="..\Plural.Platform.MacOS\Plural.Platform.MacOS.csproj" />
   </ItemGroup>
 </Project>

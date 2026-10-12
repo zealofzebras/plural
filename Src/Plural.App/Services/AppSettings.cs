@@ -39,6 +39,24 @@ public sealed class AppSettings
 
     /// <summary>Controllers the user chose to always allow.</summary>
     public List<string> TrustedControllers { get; set; } = [];
+
+    /// <summary>The mixer is the main view (audio recording with a channel strip per mic).</summary>
+    public bool MixerMode { get; set; }
+
+    /// <summary>Fader and mute per mic, by source id.</summary>
+    public List<SavedMix> Mix { get; set; } = [];
+
+    /// <summary>Output device id the mix plays to; null = mix output off.</summary>
+    public string? MixOutputId { get; set; }
+    public double MixFaderDb { get; set; }
+    public bool MixMuted { get; set; }
+}
+
+public sealed class SavedMix
+{
+    public string Id { get; set; } = "";
+    public double FaderDb { get; set; }
+    public bool Muted { get; set; }
 }
 
 public sealed class SavedInput

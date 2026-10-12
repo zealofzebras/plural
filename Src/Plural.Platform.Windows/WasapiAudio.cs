@@ -21,7 +21,7 @@ public sealed class WasapiAudio : IAudioPlatform, IAudioInputPlatform
             .ToList();
     }
 
-    public IAudioSink Open(AudioOutputDevice device, JitterBuffer source, int sampleRate) =>
+    public IAudioSink Open(AudioOutputDevice device, IAudioSource source, int sampleRate) =>
         new WasapiSink(device, source, sampleRate);
 
     /// <summary>Every active capture endpoint; Windows can capture from any number of them at once.</summary>
@@ -136,7 +136,7 @@ public sealed class WasapiAudio : IAudioPlatform, IAudioInputPlatform
 
         public AudioOutputDevice Device { get; }
 
-        public WasapiSink(AudioOutputDevice device, JitterBuffer source, int sampleRate)
+        public WasapiSink(AudioOutputDevice device, IAudioSource source, int sampleRate)
         {
             Device = device;
             using var en = new MMDeviceEnumerator();
@@ -161,7 +161,7 @@ public sealed class WasapiAudio : IAudioPlatform, IAudioInputPlatform
     }
 
     /// <summary>IEEE-float wave provider reading from the jitter buffer (silence on underrun).</summary>
-    private sealed class JitterBufferProvider(JitterBuffer source, int sampleRate) : IWaveProvider
+    private sealed class JitterBufferProvider(IAudioSource source, int sampleRate) : IWaveProvider
     {
         public WaveFormat WaveFormat { get; } = WaveFormat.CreateIeeeFloatWaveFormat(sampleRate, source.Channels);
 

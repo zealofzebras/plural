@@ -220,6 +220,7 @@ public partial class MainViewModel : ViewModelBase, IAsyncDisposable
         _deviceId = s.DeviceId ?? "";
         AllowRemoteControl = s.AllowRemoteControl;
         _trustedControllers = [.. s.TrustedControllers];
+        LoadMixSettings(s);
         if (CanChangeRecordingRoot && !string.IsNullOrWhiteSpace(s.RecordingRoot))
         {
             RecordingRoot = s.RecordingRoot;
@@ -255,6 +256,7 @@ public partial class MainViewModel : ViewModelBase, IAsyncDisposable
             AllowRemoteControl = AllowRemoteControl,
             TrustedControllers = _trustedControllers,
         };
+        SaveMixSettings(s);
         try
         {
             Directory.CreateDirectory(Path.GetDirectoryName(_host.SettingsPath)!);
@@ -401,6 +403,10 @@ public partial class MainViewModel : ViewModelBase, IAsyncDisposable
     partial void OnIsVideoModeChanged(bool value)
     {
         OnPropertyChanged(nameof(IsAudioMode));
+        if (value && IsMixerMode)
+        {
+            IsMixerMode = false;
+        }
         UpdateLayoutState();
         if (_loading)
         {
@@ -445,9 +451,10 @@ public partial class MainViewModel : ViewModelBase, IAsyncDisposable
         ImmersiveActive = IsVideoMode && IsImmersive;
         ShowPreviewPanel = IsVideoMode && !IsImmersive;
         ShowControls = !rec;
-        ShowModeSeg = HasVideo && !rec;
+        ShowModeSeg = HasVideo && !rec && !IsMixerMode;
         ShowVideoTools = IsVideoMode && !rec;
-        ShowRecordingCenter = rec && !IsVideoMode;
+        ShowRecordingCenter = rec && !IsVideoMode && !IsMixerMode;
+        ShowMixerChip = !(rec && IsVideoMode);
         ModeLabel = IsVideoMode ? "Video" : "Audio";
         OnPropertyChanged(nameof(IsRecordingUi));
         if (rec != _lastRecUi)
@@ -798,6 +805,7 @@ public partial class MainViewModel : ViewModelBase, IAsyncDisposable
     {
         Outputs = [new OutputOption(null), .. hub.Audio.GetOutputDevices().Select(d => new OutputOption(d))];
         OnPropertyChanged(nameof(Outputs));
+        RefreshMixOutputs();
     }
 
     /// <summary>Brings back the local mics the user added (they stay listed, marked, while unplugged).</summary>
@@ -1096,6 +1104,7 @@ public partial class MainViewModel : ViewModelBase, IAsyncDisposable
         }
         UpdateSummary();
         RefreshRemote();
+        TickMixer();
         if (IsRecording)
         {
             var e = _recordClock.Elapsed;

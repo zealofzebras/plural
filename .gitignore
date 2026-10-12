@@ -11,3 +11,5 @@ Firmware/Updater/extracted/
 Firmware/Updater/extracted_mac/
 Native/celt/runtimes/
 out/
+Native/lame/runtimes/osx-*/
+Native/lame/runtimes/ios/

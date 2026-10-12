@@ -586,7 +586,7 @@ public class HubRecordingTests
     private sealed class FakeAudio : IAudioPlatform
     {
         public IReadOnlyList<AudioOutputDevice> GetOutputDevices() => [];
-        public IAudioSink Open(AudioOutputDevice device, JitterBuffer source, int sampleRate) => throw new NotSupportedException();
+        public IAudioSink Open(AudioOutputDevice device, IAudioSource source, int sampleRate) => throw new NotSupportedException();
     }
 
     [Fact]
@@ -735,7 +735,7 @@ public class HubTakeTests
     private sealed class FakeAudio : IAudioPlatform
     {
         public IReadOnlyList<AudioOutputDevice> GetOutputDevices() => [];
-        public IAudioSink Open(AudioOutputDevice device, JitterBuffer source, int sampleRate) => throw new NotSupportedException();
+        public IAudioSink Open(AudioOutputDevice device, IAudioSource source, int sampleRate) => throw new NotSupportedException();
     }
 
     private sealed class FakeAac : IAacEncoderFactory

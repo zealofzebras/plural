@@ -3,6 +3,8 @@ using Plural.Core.Protocol;
 using Plural.Core.Recording;
 using Plural.Core.Remote;
 using Plural.Core.Session;
+using Plural.Platform.Apple;
+using Plural.Platform.MacOS;
 using Plural.Platform.Windows;
 
 // Headless SmartMike runner.
@@ -16,14 +18,25 @@ using Plural.Platform.Windows;
 //   smartmike control [--record SECONDS] [--peer NAME] [--video] search, control the first (or named) remote, record, collect files
 //   smartmike search                                   list Plural apps reachable over Wi-Fi and Bluetooth
 
-if (!OperatingSystem.IsWindows())
+MikeHub hub;
+string platform;
+if (OperatingSystem.IsWindows())
 {
-    Console.Error.WriteLine("Only the Windows platform layer exists so far.");
+    var audio = new WasapiAudio();
+    hub = new MikeHub(new WindowsBluetooth(), audio, inputs: audio);
+    platform = "Windows";
+}
+else if (OperatingSystem.IsMacOS())
+{
+    var audio = new MacAudio();
+    hub = new MikeHub(new MacBluetooth(), audio, new AppleAacEncoderFactory(), inputs: audio);
+    platform = "macOS";
+}
+else
+{
+    Console.Error.WriteLine("Only the Windows and macOS platform layers exist so far.");
     return 1;
 }
-
-var audio = new WasapiAudio();
-var hub = new MikeHub(new WindowsBluetooth(), audio, inputs: audio);
 var cmd = args.FirstOrDefault() ?? "help";
 
 switch (cmd)
@@ -53,7 +66,7 @@ switch (cmd)
     case "control":
         return await Control(args.Skip(1).ToArray());
     case "search":
-        await using (var net = new RemoteNetwork(new RemoteIdentity(Guid.NewGuid().ToString("N"), "cli search", "Windows"), Transports(), new CliRecorder(hub, Path.GetTempPath())))
+        await using (var net = new RemoteNetwork(new RemoteIdentity(Guid.NewGuid().ToString("N"), "cli search", platform), Transports(), new CliRecorder(hub, Path.GetTempPath())))
         {
             var sw = System.Diagnostics.Stopwatch.StartNew();
             await net.SearchAsync(p => Console.WriteLine($"{sw.ElapsedMilliseconds,6} ms  {p.Name} ({p.Platform})  {string.Join(", ", p.Endpoints.Select(e => $"{e.Transport} {e.Address}"))}"),
@@ -197,7 +210,9 @@ async Task<int> Run(string[] a)
     return 0;
 }
 
-List<IRemoteTransport> Transports() => [new LanTransport(), new BluetoothRemoteTransport(hub.Bluetooth, (IBluetoothServicePlatform)hub.Bluetooth)];
+List<IRemoteTransport> Transports() => hub.Bluetooth is IBluetoothServicePlatform bt
+    ? [new LanTransport(), new BluetoothRemoteTransport(hub.Bluetooth, bt)]
+    : [new LanTransport()];
 
 string? OptOf(string[] a, string name) => a.SkipWhile(x => x != name).Skip(1).FirstOrDefault();
 
@@ -213,7 +228,7 @@ async Task<int> Serve(string[] a)
     var root = Path.Combine(AppContext.BaseDirectory, "Recordings", "remote");
     var recorder = new CliRecorder(hub, root);
     var name = OptOf(a, "--name") ?? Environment.MachineName + " (cli)";
-    await using var net = new RemoteNetwork(new RemoteIdentity(Guid.NewGuid().ToString("N"), name, "Windows"), Transports(), recorder);
+    await using var net = new RemoteNetwork(new RemoteIdentity(Guid.NewGuid().ToString("N"), name, platform), Transports(), recorder);
     recorder.Net = net;
     net.StartListening();
     Console.WriteLine($"serving as \"{name}\" — Ctrl+C to stop");
@@ -235,7 +250,7 @@ async Task<int> Control(string[] a)
     var seconds = OptOf(a, "--record") is { } r ? double.Parse(r, System.Globalization.CultureInfo.InvariantCulture) : 3;
     var want = OptOf(a, "--peer");
     var recorder = new CliRecorder(hub, Path.GetTempPath());
-    await using var net = new RemoteNetwork(new RemoteIdentity(Guid.NewGuid().ToString("N"), Environment.MachineName + " (controller)", "Windows"), Transports(), recorder);
+    await using var net = new RemoteNetwork(new RemoteIdentity(Guid.NewGuid().ToString("N"), Environment.MachineName + " (controller)", platform), Transports(), recorder);
     recorder.Net = net;
     var found = new TaskCompletionSource<DiscoveredPeer>(TaskCreationOptions.RunContinuationsAsynchronously);
     var sw = System.Diagnostics.Stopwatch.StartNew();

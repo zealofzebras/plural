@@ -44,7 +44,9 @@ public sealed record AudioOutputDevice(string Id, string Name)
     public bool IsVirtualCable =>
         Name.Contains("CABLE", StringComparison.OrdinalIgnoreCase) ||
         Name.Contains("Virtual", StringComparison.OrdinalIgnoreCase) ||
-        Name.Contains("VoiceMeeter", StringComparison.OrdinalIgnoreCase);
+        Name.Contains("VoiceMeeter", StringComparison.OrdinalIgnoreCase) ||
+        Name.Contains("BlackHole", StringComparison.OrdinalIgnoreCase) ||
+        Name.Contains("Loopback", StringComparison.OrdinalIgnoreCase);
 
     public override string ToString() => Name;
 }
@@ -61,7 +63,7 @@ public interface IAudioPlatform
     IReadOnlyList<AudioOutputDevice> GetOutputDevices();
 
     /// <summary>Starts playing <paramref name="source"/> (mono or interleaved at <paramref name="sampleRate"/>) to the device.</summary>
-    IAudioSink Open(AudioOutputDevice device, JitterBuffer source, int sampleRate);
+    IAudioSink Open(AudioOutputDevice device, IAudioSource source, int sampleRate);
 }
 
 /// <summary>A microphone the OS exposes (built-in, USB, wired or Bluetooth headset, virtual cable output, …).</summary>

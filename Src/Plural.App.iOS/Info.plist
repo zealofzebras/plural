@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Bundle id, name, versions and MinimumOSVersion come from Plural.App.iOS.csproj. -->
+<plist version="1.0">
+<dict>
+  <key>LSRequiresIPhoneOS</key><true/>
+  <key>UIDeviceFamily</key>
+  <array>
+    <integer>1</integer>
+    <integer>2</integer>
+  </array>
+  <key>UIRequiredDeviceCapabilities</key>
+  <array>
+    <string>arm64</string>
+  </array>
+  <key>UISupportedInterfaceOrientations</key>
+  <array>
+    <string>UIInterfaceOrientationPortrait</string>
+    <string>UIInterfaceOrientationLandscapeLeft</string>
+    <string>UIInterfaceOrientationLandscapeRight</string>
+  </array>
+  <key>UISupportedInterfaceOrientations~ipad</key>
+  <array>
+    <string>UIInterfaceOrientationPortrait</string>
+    <string>UIInterfaceOrientationPortraitUpsideDown</string>
+    <string>UIInterfaceOrientationLandscapeLeft</string>
+    <string>UIInterfaceOrientationLandscapeRight</string>
+  </array>
+  <key>UILaunchScreen</key><dict/>
+  <key>UIApplicationSceneManifest</key>
+  <dict>
+    <key>UIApplicationSupportsMultipleScenes</key><false/>
+  </dict>
+  <key>XSAppIconAssets</key><string>Assets.xcassets/AppIcon.appiconset</string>
+  <key>LSApplicationCategoryType</key><string>public.app-category.music</string>
+  <key>ITSAppUsesNonExemptEncryption</key><false/>
+
+  <!-- Recordings live in Documents/Recordings and show up in the Files app. -->
+  <key>UIFileSharingEnabled</key><true/>
+  <key>LSSupportsOpeningDocumentsInPlace</key><true/>
+
+  <!-- Keep recording with the screen locked; keep accessory sessions alive in the background. -->
+  <key>UIBackgroundModes</key>
+  <array>
+    <string>audio</string>
+    <string>external-accessory</string>
+  </array>
+
+  <!-- MFi accessory protocols Plural may open (External Accessory). The SmartMike+'s protocol string is not known yet: when a
+       connected mic offers protocols not listed here, connecting fails with a message naming them; add the right one here.
+       Publishing an app that talks to an MFi accessory also needs the accessory maker's approval with Apple. -->
+  <key>UISupportedExternalAccessoryProtocols</key>
+  <array/>
+
+  <key>NSBluetoothAlwaysUsageDescription</key><string>Plural connects to your wireless microphones over Bluetooth.</string>
+  <key>NSMicrophoneUsageDescription</key><string>Plural records from the microphones you add.</string>
+  <key>NSLocalNetworkUsageDescription</key><string>Plural finds and controls other Plural devices on your network to record together.</string>
+</dict>
+</plist>
