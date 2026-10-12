@@ -62,6 +62,9 @@ public interface IAudioPlatform
 {
     IReadOnlyList<AudioOutputDevice> GetOutputDevices();
 
+    /// <summary>The system's default output (speakers/headphones), used for playback; null if there is none.</summary>
+    AudioOutputDevice? DefaultOutput => GetOutputDevices().FirstOrDefault(d => !d.IsVirtualCable) ?? GetOutputDevices().FirstOrDefault();
+
     /// <summary>Starts playing <paramref name="source"/> (mono or interleaved at <paramref name="sampleRate"/>) to the device.</summary>
     IAudioSink Open(AudioOutputDevice device, IAudioSource source, int sampleRate);
 }

@@ -92,3 +92,65 @@ public interface IVideoPlatform
     /// <summary>Opens the camera; may prompt for permission first (the app head handles prompts before calling).</summary>
     Task<IVideoCapture> OpenAsync(CameraInfo camera, VideoSettings settings, CancellationToken ct = default);
 }
+
+// ------------------------------------------------------------------ playback (decoders)
+//
+// Codec names used by the demuxers (Plural.Core.Media) and the decoder factories:
+//   "pcm_s16le", "flac" (managed in Core), "aac" (AAC-LC, CodecPrivate = AudioSpecificConfig), "mp3", "h264" (CodecPrivate = avcC).
+
+/// <summary>Audio decoder for a compressed codec (platform: Media Foundation, MediaCodec, AudioConverter).</summary>
+public interface IAudioDecoder : IDisposable
+{
+    /// <summary>Output rate and channel count (interleaved 16-bit PCM).</summary>
+    int SampleRate { get; }
+    int Channels { get; }
+
+    /// <summary>Decodes one packet (an AAC raw frame or an MP3 frame); decoded PCM is returned through <paramref name="output"/> (zero or more times, synchronously).</summary>
+    void Decode(ReadOnlySpan<byte> packet, Action<ReadOnlySpan<short>> output);
+
+    /// <summary>Drains PCM still held by the decoder at end of stream.</summary>
+    void Drain(Action<ReadOnlySpan<short>> output);
+
+    /// <summary>Discards decoder state (after a seek); the next packet starts a new stream.</summary>
+    void Reset();
+}
+
+public interface IAudioDecoderFactory
+{
+    /// <summary>True if this platform can decode <paramref name="codec"/> ("aac", "mp3").</summary>
+    bool CanDecode(string codec);
+
+    /// <summary>Creates a decoder. Throws <see cref="NotSupportedException"/> for codecs <see cref="CanDecode"/> rejects.</summary>
+    IAudioDecoder Create(string codec, int sampleRate, int channels, ReadOnlyMemory<byte> codecPrivate);
+}
+
+/// <summary>A decoded video frame: BGRA (not rotated; the UI applies the track's rotation) and its timestamp (100 ns ticks, file time).</summary>
+public readonly record struct DecodedVideoFrame(PreviewFrame Frame, long Timestamp);
+
+/// <summary>H.264 decoder (platform: Media Foundation, MediaCodec, VideoToolbox).</summary>
+public interface IVideoDecoder : IDisposable
+{
+    /// <summary>
+    /// Decodes one access unit (AVCC: length-prefixed NAL units, 4-byte lengths). Frames come out in presentation order through
+    /// <paramref name="output"/>, possibly later than their input (decoder delay), scaled so the longer side ≤ the requested max size.
+    /// </summary>
+    void Decode(ReadOnlySpan<byte> accessUnit, long timestamp, bool keyFrame, Action<DecodedVideoFrame> output);
+
+    /// <summary>Returns frames still held by the decoder (end of stream).</summary>
+    void Drain(Action<DecodedVideoFrame> output);
+
+    /// <summary>Discards queued frames and state (seek); the next access unit must be a key frame.</summary>
+    void Flush();
+}
+
+public interface IVideoDecoderFactory
+{
+    /// <summary>True if this platform can decode <paramref name="codec"/> ("h264").</summary>
+    bool CanDecode(string codec);
+
+    /// <summary>
+    /// Creates a decoder for a <paramref name="width"/>×<paramref name="height"/> stream; output frames are scaled down (aspect kept) so
+    /// the longer side is at most <paramref name="maxSize"/> px.
+    /// </summary>
+    IVideoDecoder Create(string codec, ReadOnlyMemory<byte> codecPrivate, int width, int height, int maxSize);
+}

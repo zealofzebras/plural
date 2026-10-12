@@ -171,6 +171,10 @@ public sealed class MikeHub : IAsyncDisposable
     public IVideoPlatform? Video { get; }
     /// <summary>OS microphones (built-in, USB, Bluetooth headset, …); null if the platform has none.</summary>
     public IAudioInputPlatform? Inputs { get; }
+    /// <summary>AAC/MP3 decoders for playing takes back; null if the platform has none (those tracks then can't play).</summary>
+    public IAudioDecoderFactory? AudioDecoders { get; }
+    /// <summary>H.264 decoder for playing video takes back; null if the platform has none (the player shows the poster).</summary>
+    public IVideoDecoderFactory? VideoDecoders { get; }
     public IReadOnlyList<MikeChannel> Channels => _channels;
 
     /// <summary>Master bus: every channel mixed into one live output (the mixer's master strip).</summary>
@@ -179,13 +183,15 @@ public sealed class MikeHub : IAsyncDisposable
     public string? RecordingFolder { get; private set; }
 
     public MikeHub(IBluetoothPlatform bluetooth, IAudioPlatform audio, IAacEncoderFactory? aac = null, IVideoPlatform? video = null,
-        IAudioInputPlatform? inputs = null)
+        IAudioInputPlatform? inputs = null, IAudioDecoderFactory? audioDecoders = null, IVideoDecoderFactory? videoDecoders = null)
     {
         Bluetooth = bluetooth;
         Audio = audio;
         Aac = aac;
         Video = video;
         Inputs = inputs;
+        AudioDecoders = audioDecoders;
+        VideoDecoders = videoDecoders;
         Mix = new MixBus(audio);
     }
 
