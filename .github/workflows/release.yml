@@ -37,14 +37,14 @@ env:
 jobs:
   plan:
     name: Version
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     outputs:
       version: ${{ steps.v.outputs.version }}
       build: ${{ steps.v.outputs.build }}
       msix: ${{ steps.v.outputs.msix }}
       has_ios: ${{ steps.v.outputs.has_ios }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - id: v
         env:
           RAW: ${{ github.event.release.tag_name || inputs.version }}
@@ -67,17 +67,17 @@ jobs:
     needs: [plan, native]
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-dotnet@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-dotnet@v6
         with:
           dotnet-version: ${{ env.DOTNET_VERSION }}
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: native-celt
           path: Native/celt/runtimes
       - name: Render
         run: dotnet run --project Src/Plural.Screenshots -c Release -- --out out/screenshots
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: screenshots
           path: out/screenshots
@@ -87,10 +87,10 @@ jobs:
     name: Store listings and images
     needs: [plan, screenshots]
     if: ${{ !cancelled() && needs.plan.result == 'success' }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
         continue-on-error: true
         with:
           name: screenshots
@@ -106,7 +106,7 @@ jobs:
               mkdir -p "$dest" && cp "$dir"*.png "$dest/" && echo "$name: using rendered screenshots"
             fi
           done
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
       - run: pip install "pillow==11.3.0"
@@ -126,7 +126,7 @@ jobs:
       - name: Summary
         if: always()
         run: '[ -f out/store/REPORT.md ] && cat out/store/REPORT.md >> "$GITHUB_STEP_SUMMARY" || true'
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: store-assets
           path: out/store
@@ -135,9 +135,9 @@ jobs:
   native:
     name: Native libraries (Windows, Android)
     needs: plan
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Sources and toolchains
         run: |
           mkdir -p "$RUNNER_TEMP/src"
@@ -156,7 +156,7 @@ jobs:
         run: |
           bash Native/celt/build-windows.sh
           ANDROID_NDK="$ANDROID_HOME/ndk/$ANDROID_NDK_VERSION" bash Native/celt/build-android.sh
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: native-celt
           path: Native/celt/runtimes
@@ -172,15 +172,15 @@ jobs:
       MSIX_VERSION: ${{ needs.plan.outputs.msix }}
       HAS_PFX: ${{ secrets.WINDOWS_CERT_PFX_BASE64 != '' }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-dotnet@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-dotnet@v6
         with:
           dotnet-version: ${{ env.DOTNET_VERSION }}
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: native-celt
           path: Native/celt/runtimes
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: store-assets
           path: out/store
@@ -238,7 +238,7 @@ jobs:
           $code = $LASTEXITCODE
           Remove-Item $pfx
           exit $code
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: windows
           path: out/dist
@@ -247,22 +247,22 @@ jobs:
   android:
     name: Android (APK, AAB)
     needs: [plan, native]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     env:
       VERSION: ${{ needs.plan.outputs.version }}
       BUILD: ${{ needs.plan.outputs.build }}
       HAS_KEYSTORE: ${{ secrets.ANDROID_KEYSTORE_BASE64 != '' }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-java@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-java@v6
         with:
           distribution: microsoft
           java-version: "21"
-      - uses: actions/setup-dotnet@v4
+      - uses: actions/setup-dotnet@v6
         with:
           dotnet-version: ${{ env.DOTNET_VERSION }}
       - run: dotnet workload install android
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: native-celt
           path: Native/celt/runtimes
@@ -291,14 +291,14 @@ jobs:
             echo "::warning::No ANDROID_KEYSTORE_BASE64 secret: the APK/AAB are debug-signed and cannot be uploaded to Google Play."
           fi
           dotnet publish Src/Plural.App.Android -c Release -p:AndroidSdkDirectory="$ANDROID_HOME" \
-            -p:AndroidPackageFormats='aab%3Bapk' -p:ApplicationVersion="$BUILD" \
+            -p:AndroidPackageFormat=aab -p:ApplicationVersion="$BUILD" \
             -p:ApplicationDisplayVersion="$VERSION" -p:Version="$VERSION" "${signing[@]}"
           pub=Src/Plural.App.Android/bin/Release/net10.0-android/publish
           mkdir -p out/dist
           cp "$pub/net.getplural.app-Signed.apk" "out/dist/Plural-$VERSION-android.apk"
           cp "$pub/net.getplural.app-Signed.aab" "out/dist/Plural-$VERSION-android.aab"
           rm -f "$RUNNER_TEMP/upload.keystore"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: android
           path: out/dist
@@ -317,11 +317,11 @@ jobs:
       HAS_MAS: ${{ secrets.MAS_CERT_P12_BASE64 != '' }}
       MACOSX_DEPLOYMENT_TARGET: "12.0"
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-dotnet@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-dotnet@v6
         with:
           dotnet-version: ${{ env.DOTNET_VERSION }}
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: store-assets
           path: out/store
@@ -427,7 +427,7 @@ jobs:
       - name: Clean up keychain
         if: always()
         run: security delete-keychain "$RUNNER_TEMP/signing.keychain-db" 2>/dev/null || true
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: macos
           path: out/dist
@@ -437,17 +437,26 @@ jobs:
     name: iOS
     needs: [plan]
     if: needs.plan.outputs.has_ios == 'true'
-    runs-on: macos-15
+    # The .NET iOS workload tracks the newest Xcode (27.x), which only the xcode-27 image has.
+    runs-on: xcode-27
     env:
       VERSION: ${{ needs.plan.outputs.version }}
       BUILD: ${{ needs.plan.outputs.build }}
       HAS_IOS_CERT: ${{ secrets.IOS_CERT_P12_BASE64 != '' }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-dotnet@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-dotnet@v6
         with:
           dotnet-version: ${{ env.DOTNET_VERSION }}
       - run: dotnet workload install ios
+      - name: Select Xcode
+        run: |
+          # The workload requires the Xcode matching its iOS SDK pack (Microsoft.iOS.Sdk.net10.0_<xcode>).
+          xc=$(ls -d "${DOTNET_ROOT:-$HOME/.dotnet}"/packs/Microsoft.iOS.Sdk.net10.0_* | sed 's/.*_//' | sort -V | tail -n 1)
+          for app in "/Applications/Xcode_$xc.app" "/Applications/Xcode_$xc.0.app" "/Applications/Xcode_${xc%.0}.app"; do
+            if [ -d "$app" ]; then sudo xcode-select -s "$app"; break; fi
+          done
+          xcodebuild -version
       - name: Native libraries
         run: |
           mkdir -p "$RUNNER_TEMP/src"
@@ -496,7 +505,7 @@ jobs:
       - name: Clean up keychain
         if: always()
         run: security delete-keychain "$RUNNER_TEMP/ios.keychain-db" 2>/dev/null || true
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: ios
           path: out/dist
@@ -505,13 +514,13 @@ jobs:
     name: Store packages and release upload
     needs: [plan, store-assets, windows, android, macos, ios]
     if: ${{ !cancelled() && needs.plan.result == 'success' && needs.store-assets.result == 'success' }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       contents: write
     env:
       VERSION: ${{ needs.plan.outputs.version }}
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           path: in
       - name: Assemble store packages
@@ -545,7 +554,7 @@ jobs:
             echo
             echo "Jobs: windows=${{ needs.windows.result }}, android=${{ needs.android.result }}, macos=${{ needs.macos.result }}, ios=${{ needs.ios.result }}"
           } >> "$GITHUB_STEP_SUMMARY"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: release-${{ env.VERSION }}
           path: dist
