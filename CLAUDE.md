@@ -25,7 +25,8 @@ Src/Plural.slnx
   Plural.App.Android/        Android head → net.getplural.app (AndroidHost, MainActivity)
   Plural.App.iOS/            iOS head → net.getplural.app (IosHost, AppDelegate); compiles on Windows, link/sign need a Mac
   Plural.Screenshots/        headless UI + simulated mics/peers → Marketing/screenshots (Tools/store/screenshots.ps1)
-  Plural.Cli/                headless runner: list | outputs | inputs | search | serve | control | run [--input X] [--output X] [--record N] [--format wav|m4a|mp3|mka|mkv|mp4]
+  Plural.Cli/                headless app: list | outputs | inputs | cameras | formats | search | serve | control | run (mics, direct outs,
+                             faders/mutes, --mix output, record any format incl. video; live commands on stdin — `run --help`)
 Native/celt/                    CELT 0.7.1 per RID; build-windows.sh (llvm-mingw), build-android.sh (NDK r29)
 Native/lame/                    LAME 3.100 (MP3) per RID; build-windows.sh, build-android.sh (same toolchains)
                                 both libs: build-macos.sh (dylibs) and build-ios.sh (xcframeworks via Native/ios-framework.sh), run in CI

@@ -11,7 +11,8 @@ namespace Plural.App.ViewModels;
 /// <summary>
 /// Mixer mode: a channel strip per mic (device gain/AGC/NS/phones, direct output, fader, mute, post-fader meter) and a master
 /// strip that plays the mix of all mics to one output. Faders and mutes act on the recording and the live outputs immediately,
-/// also while recording; the mix itself is live output only (every mic still records to its own track).
+/// also while recording; the mix itself is live output only (every mic still records to its own track). The mixer is a layout
+/// next to the cards, independent of Audio/Video: in video mode the camera shows as a small window over the console.
 /// </summary>
 public partial class MainViewModel
 {
@@ -21,7 +22,7 @@ public partial class MainViewModel
     private long _mixSaveAt;
 
     [ObservableProperty] public partial bool IsMixerMode { get; set; }
-    [ObservableProperty] public partial bool ShowMixerChip { get; set; } = true;
+    [ObservableProperty] public partial bool ShowMixerPreview { get; set; }
     [ObservableProperty] public partial OutputOption? SelectedMixOutput { get; set; }
     [ObservableProperty] public partial double MixFaderDb { get; set; }
     [ObservableProperty] public partial bool MixMuted { get; set; }
@@ -41,25 +42,14 @@ public partial class MainViewModel
 
     internal SavedMix? SavedMixFor(string id) => _savedMix.GetValueOrDefault(id);
 
+    /// <summary>Switches between cards and mixer at any time, also while recording audio or video.</summary>
     [RelayCommand]
-    private void ToggleMixer()
-    {
-        // Video takes keep their layout; audio takes can switch between cards and mixer at any time.
-        if (IsRecordingUi && IsVideoMode)
-        {
-            return;
-        }
-        IsMixerMode = !IsMixerMode;
-    }
+    private void ToggleMixer() => IsMixerMode = !IsMixerMode;
 
     partial void OnIsMixerModeChanged(bool value)
     {
         OnPropertyChanged(nameof(IsCardsMode));
         OnPropertyChanged(nameof(ShowStrip));
-        if (value && IsVideoMode && !IsRecordingUi)
-        {
-            IsVideoMode = false;
-        }
         UpdateLayoutState();
         SaveSettings();
     }
@@ -128,7 +118,7 @@ public partial class MainViewModel
         _savedMixOutputId = s.MixOutputId;
         MixFaderDb = s.MixFaderDb;
         MixMuted = s.MixMuted;
-        IsMixerMode = s.MixerMode && !IsVideoMode;
+        IsMixerMode = s.MixerMode;
     }
 
     private void SaveMixSettings(AppSettings s)

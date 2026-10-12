@@ -17,6 +17,29 @@
         <!-- Updated from code-behind so cards fill the available width. -->
         <x:Double x:Key="CardWidth">320</x:Double>
         <x:Double x:Key="StripWidth">240</x:Double>
+        <!-- Camera preview content used by the mixer's small video window (floating on wide windows, docked on phones) -->
+        <DataTemplate x:Key="MixerPreviewContent" x:DataType="vm:MainViewModel">
+                    <Grid>
+                        <c:CameraPreview Surface="{Binding Preview}" IsVisible="{Binding HasPreview}" />
+                        <StackPanel IsVisible="{Binding !HasPreview}" HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="6" Margin="10">
+                            <c:Icon Data="{StaticResource IconVideoOff}" Size="24" Fill="#8E97AB" />
+                            <TextBlock Text="{Binding CameraMessage}" Foreground="#C5CBD8" FontSize="11" TextWrapping="Wrap"
+                                       TextAlignment="Center" />
+                        </StackPanel>
+                        <Border HorizontalAlignment="Left" VerticalAlignment="Top" Margin="6" Padding="8,3"
+                                Background="#99000000" CornerRadius="10" IsVisible="{Binding IsRecording}">
+                            <StackPanel Orientation="Horizontal" Spacing="6">
+                                <Ellipse Classes="blink" Width="8" Height="8" Fill="{DynamicResource RecordBrush}" VerticalAlignment="Center" />
+                                <TextBlock Text="REC" Foreground="White" FontSize="11" FontWeight="Bold" VerticalAlignment="Center" />
+                            </StackPanel>
+                        </Border>
+                        <Button Classes="icon" HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="2"
+                                Command="{Binding NextCameraCommand}" ToolTip.Tip="Switch camera"
+                                IsVisible="{Binding HasMultipleCameras}" IsEnabled="{Binding IsNotRecording}" Foreground="White">
+                            <c:Icon Data="{StaticResource IconFlipCamera}" Size="18" />
+                        </Button>
+                    </Grid>
+        </DataTemplate>
     </UserControl.Resources>
 
     <UserControl.Styles>
@@ -44,6 +67,12 @@
             <Setter Property="CornerRadius" Value="16" />
             <Setter Property="Padding" Value="4" />
         </Style>
+        <Style Selector="Button.menuitem">
+            <Setter Property="HorizontalAlignment" Value="Stretch" />
+            <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+            <Setter Property="MinHeight" Value="60" />
+            <Setter Property="Padding" Value="12,8" />
+        </Style>
         <Style Selector="Border.strip">
             <Setter Property="Background" Value="{DynamicResource SurfaceBrush}" />
         </Style>
@@ -68,12 +97,12 @@
             <Setter Property="Background" Value="#99000000" />
         </Style>
 
-        <Style Selector="Border#SettingsSheet, Border#TakesSheet, Border#AddMicSheet, Border#DevicesSheet, Border#AboutSheet">
+        <Style Selector="Border#SettingsSheet, Border#TakesSheet, Border#AddMicSheet, Border#DevicesSheet, Border#AboutSheet, Border#MenuSheet">
             <Setter Property="Width" Value="440" />
             <Setter Property="HorizontalAlignment" Value="Right" />
             <Setter Property="CornerRadius" Value="20,0,0,20" />
         </Style>
-        <Style Selector="Grid#Root.compact Border#SettingsSheet, Grid#Root.compact Border#TakesSheet, Grid#Root.compact Border#AddMicSheet, Grid#Root.compact Border#DevicesSheet, Grid#Root.compact Border#AboutSheet">
+        <Style Selector="Grid#Root.compact Border#SettingsSheet, Grid#Root.compact Border#TakesSheet, Grid#Root.compact Border#AddMicSheet, Grid#Root.compact Border#DevicesSheet, Grid#Root.compact Border#AboutSheet, Grid#Root.compact Border#MenuSheet">
             <Setter Property="Width" Value="NaN" />
             <Setter Property="HorizontalAlignment" Value="Stretch" />
             <Setter Property="CornerRadius" Value="0" />
@@ -143,6 +172,30 @@
             <Setter Property="BorderThickness" Value="1" />
             <Setter Property="CornerRadius" Value="{DynamicResource RadiusCard}" />
             <Setter Property="ClipToBounds" Value="True" />
+        </Style>
+        <Style Selector="Border.pip">
+            <Setter Property="CornerRadius" Value="12" />
+            <Setter Property="ClipToBounds" Value="True" />
+            <Setter Property="Background" Value="#000000" />
+            <Setter Property="BorderBrush" Value="{DynamicResource StrokeBrush}" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="BoxShadow" Value="0 6 24 0 #66000000" />
+        </Style>
+        <Style Selector="Border.pipfloat">
+            <Setter Property="Width" Value="320" />
+            <Setter Property="Height" Value="180" />
+            <Setter Property="Margin" Value="12" />
+        </Style>
+        <Style Selector="Border.pipdock">
+            <Setter Property="Width" Value="208" />
+            <Setter Property="Height" Value="117" />
+            <Setter Property="Margin" Value="0,0,0,8" />
+        </Style>
+        <Style Selector="Grid#Root.compact Border.pipfloat, Grid#Root:not(.compact) Border.pipdock">
+            <Setter Property="Opacity" Value="0" />
+            <Setter Property="Height" Value="0" />
+            <Setter Property="Margin" Value="0" />
+            <Setter Property="IsHitTestVisible" Value="False" />
         </Style>
         <Style Selector="Border.chstrip">
             <Setter Property="Width" Value="108" />
@@ -302,31 +355,8 @@
                 </StackPanel>
                 <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center"
                             IsVisible="{Binding ShowControls}">
-                    <Button Classes="tool" ToolTip.Tip="Menu">
+                    <Button Classes="tool" ToolTip.Tip="Menu" Command="{Binding OpenMenuCommand}">
                         <c:Icon Data="{StaticResource IconMore}" />
-                        <Button.Flyout>
-                            <MenuFlyout Placement="BottomEdgeAlignedRight">
-                                <MenuItem Header="Connect all mics" Command="{Binding ConnectAllCommand}">
-                                    <MenuItem.Icon><c:Icon Data="{StaticResource IconLink}" /></MenuItem.Icon>
-                                </MenuItem>
-                                <MenuItem Header="Scan for paired mics" Command="{Binding ScanCommand}" IsEnabled="{Binding !IsScanning}">
-                                    <MenuItem.Icon><c:Icon Data="{StaticResource IconRefresh}" /></MenuItem.Icon>
-                                </MenuItem>
-                                <MenuItem Header="Add a microphone…" Command="{Binding OpenAddMicCommand}" IsVisible="{Binding CanAddMics}">
-                                    <MenuItem.Icon><c:Icon Data="{StaticResource IconAdd}" /></MenuItem.Icon>
-                                </MenuItem>
-                                <MenuItem Header="Record with other devices…" Command="{Binding OpenDevicesCommand}" IsVisible="{Binding CanUseRemote}">
-                                    <MenuItem.Icon><c:Icon Data="{StaticResource IconDevices}" /></MenuItem.Icon>
-                                </MenuItem>
-                                <Separator />
-                                <MenuItem Header="Recording settings…" Command="{Binding OpenSettingsCommand}">
-                                    <MenuItem.Icon><c:Icon Data="{StaticResource IconTune}" /></MenuItem.Icon>
-                                </MenuItem>
-                                <MenuItem Header="About Plural" Command="{Binding OpenAboutCommand}">
-                                    <MenuItem.Icon><c:Icon Data="{StaticResource IconInfo}" /></MenuItem.Icon>
-                                </MenuItem>
-                            </MenuFlyout>
-                        </Button.Flyout>
                     </Button>
                 </StackPanel>
                 <Border Grid.Column="1" IsVisible="{Binding IsRecordingUi}" VerticalAlignment="Center" Padding="12,6"
@@ -591,7 +621,12 @@
 
             <!-- Mixer: one channel strip per mic, and a master strip that plays the mix of all mics to one output.
                  Faders and mutes act on the recording and the outputs immediately, also while recording. -->
-            <Border Name="Mixer" Classes="console" IsVisible="{Binding IsMixerMode}" Margin="12,6,12,12">
+            <Grid IsVisible="{Binding IsMixerMode}" RowDefinitions="Auto,*" Margin="12,6,12,12">
+            <!-- Video in mixer mode (phones): docked above the console so it never covers a strip -->
+            <Border Classes="pip pipdock" IsVisible="{Binding ShowMixerPreview}" HorizontalAlignment="Center">
+                <ContentControl Content="{Binding}" ContentTemplate="{StaticResource MixerPreviewContent}" />
+            </Border>
+            <Border Name="Mixer" Grid.Row="1" Classes="console">
                 <Grid ColumnDefinitions="*,Auto">
                     <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled">
                         <Grid>
@@ -683,6 +718,11 @@
                         </Grid>
                     </ScrollViewer>
 
+                    <!-- Video in mixer mode (wide windows): the camera as a small floating window over the console -->
+                    <Border Classes="pip pipfloat" IsVisible="{Binding ShowMixerPreview}" HorizontalAlignment="Right" VerticalAlignment="Top">
+                        <ContentControl Content="{Binding}" ContentTemplate="{StaticResource MixerPreviewContent}" />
+                    </Border>
+
                     <!-- Master: the mix of all mics (after their faders) to one live output -->
                     <Border Grid.Column="1" Classes="chstrip master">
                         <Grid RowDefinitions="Auto,Auto,*,Auto,Auto,Auto" RowSpacing="8">
@@ -719,6 +759,7 @@
                     </Border>
                 </Grid>
             </Border>
+            </Grid>
 
             <!-- Big timer in the middle while recording audio -->
             <StackPanel IsVisible="{Binding ShowRecordingCenter}" IsHitTestVisible="False" Spacing="6"
@@ -826,7 +867,7 @@
                             </StackPanel>
                         </Button>
                         <Button Classes="chip" Classes.on="{Binding IsMixerMode}" Command="{Binding ToggleMixerCommand}"
-                                IsVisible="{Binding ShowMixerChip}" ToolTip.Tip="Mixer: adjust every mic, also while recording">
+                                ToolTip.Tip="Mixer: adjust every mic, also while recording">
                             <StackPanel Orientation="Horizontal" Spacing="8">
                                 <c:Icon Data="{StaticResource IconFaders}" />
                                 <TextBlock Classes="wideonly" Text="Mixer" VerticalAlignment="Center" />
@@ -1103,6 +1144,101 @@
                             <TextBlock Classes="muted" FontSize="12" TextWrapping="Wrap"
                                        Text="Plural is not affiliated with Sabinetek. SmartMike is a trademark of its owner." />
                             <TextBlock Classes="muted" FontSize="12" Text="{Binding CopyrightText}" />
+                        </StackPanel>
+                    </ScrollViewer>
+                </Grid>
+            </Border>
+        </Grid>
+
+        <!-- Menu sheet (from the header's ⋮ button), laid out like the Takes sheet -->
+        <Grid Grid.RowSpan="4" IsVisible="{Binding IsMenuOpen}">
+            <Border Background="{DynamicResource ScrimBrush}" Tapped="OnMenuScrimTapped" />
+            <Border Name="MenuSheet" Background="{DynamicResource SurfaceBrush}"
+                    BorderBrush="{DynamicResource StrokeBrush}" BorderThickness="1,0,0,0">
+                <Grid RowDefinitions="Auto,*">
+                    <Grid ColumnDefinitions="*,Auto" Margin="20,12,12,4">
+                        <TextBlock Text="Menu" FontSize="20" FontWeight="Bold" VerticalAlignment="Center" />
+                        <Button Grid.Column="1" Classes="icon" Command="{Binding CloseMenuCommand}" ToolTip.Tip="Close">
+                            <c:Icon Data="{StaticResource IconClose}" />
+                        </Button>
+                    </Grid>
+                    <ScrollViewer Grid.Row="1">
+                        <StackPanel Margin="20,8,20,28" Spacing="20">
+                            <StackPanel Spacing="6">
+                                <TextBlock Classes="section" Text="MICS" Margin="0" />
+                                <Button Classes="tool menuitem" Command="{Binding RunMenuItemCommand}" CommandParameter="{Binding ConnectAllCommand}">
+                                    <Grid ColumnDefinitions="Auto,*" ColumnSpacing="14">
+                                        <Border Classes="avatar" Width="40" Height="40" CornerRadius="12">
+                                            <c:Icon Data="{StaticResource IconLink}" />
+                                        </Border>
+                                        <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="2">
+                                            <TextBlock Text="Connect all mics" FontWeight="SemiBold" TextWrapping="Wrap" />
+                                            <TextBlock Classes="muted" Text="Connect every SmartMike and microphone in the list" TextWrapping="Wrap" />
+                                        </StackPanel>
+                                    </Grid>
+                                </Button>
+                                <Button Classes="tool menuitem" Command="{Binding RunMenuItemCommand}" CommandParameter="{Binding ScanCommand}" IsEnabled="{Binding !IsScanning}">
+                                    <Grid ColumnDefinitions="Auto,*" ColumnSpacing="14">
+                                        <Border Classes="avatar" Width="40" Height="40" CornerRadius="12">
+                                            <c:Icon Data="{StaticResource IconRefresh}" />
+                                        </Border>
+                                        <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="2">
+                                            <TextBlock Text="Scan for paired mics" FontWeight="SemiBold" TextWrapping="Wrap" />
+                                            <TextBlock Classes="muted" Text="Find SmartMikes paired in your system's Bluetooth settings" TextWrapping="Wrap" />
+                                        </StackPanel>
+                                    </Grid>
+                                </Button>
+                                <Button Classes="tool menuitem" Command="{Binding RunMenuItemCommand}" CommandParameter="{Binding OpenAddMicCommand}" IsVisible="{Binding CanAddMics}">
+                                    <Grid ColumnDefinitions="Auto,*" ColumnSpacing="14">
+                                        <Border Classes="avatar" Width="40" Height="40" CornerRadius="12">
+                                            <c:Icon Data="{StaticResource IconAdd}" />
+                                        </Border>
+                                        <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="2">
+                                            <TextBlock Text="Add a microphone" FontWeight="SemiBold" TextWrapping="Wrap" />
+                                            <TextBlock Classes="muted" Text="Use a microphone of this device as its own track" TextWrapping="Wrap" />
+                                        </StackPanel>
+                                    </Grid>
+                                </Button>
+                            </StackPanel>
+                            <StackPanel Spacing="6">
+                                <TextBlock Classes="section" Text="RECORDING" Margin="0" />
+                                <Button Classes="tool menuitem" Command="{Binding RunMenuItemCommand}" CommandParameter="{Binding OpenDevicesCommand}" IsVisible="{Binding CanUseRemote}">
+                                    <Grid ColumnDefinitions="Auto,*" ColumnSpacing="14">
+                                        <Border Classes="avatar" Width="40" Height="40" CornerRadius="12">
+                                            <c:Icon Data="{StaticResource IconDevices}" />
+                                        </Border>
+                                        <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="2">
+                                            <TextBlock Text="Record with other devices" FontWeight="SemiBold" TextWrapping="Wrap" />
+                                            <TextBlock Classes="muted" Text="Control Plural on other phones and computers" TextWrapping="Wrap" />
+                                        </StackPanel>
+                                    </Grid>
+                                </Button>
+                                <Button Classes="tool menuitem" Command="{Binding RunMenuItemCommand}" CommandParameter="{Binding OpenSettingsCommand}">
+                                    <Grid ColumnDefinitions="Auto,*" ColumnSpacing="14">
+                                        <Border Classes="avatar" Width="40" Height="40" CornerRadius="12">
+                                            <c:Icon Data="{StaticResource IconTune}" />
+                                        </Border>
+                                        <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="2">
+                                            <TextBlock Text="Recording settings" FontWeight="SemiBold" TextWrapping="Wrap" />
+                                            <TextBlock Classes="muted" Text="Format, quality, video and folder" TextWrapping="Wrap" />
+                                        </StackPanel>
+                                    </Grid>
+                                </Button>
+                            </StackPanel>
+                            <StackPanel Spacing="6">
+                                <TextBlock Classes="section" Text="PLURAL" Margin="0" />
+                                <Button Classes="tool menuitem" Command="{Binding RunMenuItemCommand}" CommandParameter="{Binding OpenAboutCommand}">
+                                    <Grid ColumnDefinitions="Auto,*" ColumnSpacing="14">
+                                        <Border Classes="avatar" Width="40" Height="40" CornerRadius="12">
+                                            <c:Icon Data="{StaticResource IconInfo}" />
+                                        </Border>
+                                        <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="2">
+                                            <TextBlock Text="About Plural" FontWeight="SemiBold" TextWrapping="Wrap" />
+                                            <TextBlock Classes="muted" Text="Version, this device and open-source credits" TextWrapping="Wrap" />
+                                        </StackPanel>
+                                    </Grid>
+                                </Button>
+                            </StackPanel>
                         </StackPanel>
                     </ScrollViewer>
                 </Grid>

@@ -403,10 +403,6 @@ public partial class MainViewModel : ViewModelBase, IAsyncDisposable
     partial void OnIsVideoModeChanged(bool value)
     {
         OnPropertyChanged(nameof(IsAudioMode));
-        if (value && IsMixerMode)
-        {
-            IsMixerMode = false;
-        }
         UpdateLayoutState();
         if (_loading)
         {
@@ -448,13 +444,14 @@ public partial class MainViewModel : ViewModelBase, IAsyncDisposable
     private void UpdateLayoutState()
     {
         var rec = IsRecordingUi;
-        ImmersiveActive = IsVideoMode && IsImmersive;
-        ShowPreviewPanel = IsVideoMode && !IsImmersive;
+        // The mixer is a layout, not a recording mode: with video on it shows the camera in a small window instead.
+        ImmersiveActive = IsVideoMode && IsImmersive && !IsMixerMode;
+        ShowPreviewPanel = IsVideoMode && !IsImmersive && !IsMixerMode;
+        ShowMixerPreview = IsVideoMode && IsMixerMode;
         ShowControls = !rec;
-        ShowModeSeg = HasVideo && !rec && !IsMixerMode;
-        ShowVideoTools = IsVideoMode && !rec;
+        ShowModeSeg = HasVideo && !rec;
+        ShowVideoTools = IsVideoMode && !rec && !IsMixerMode;
         ShowRecordingCenter = rec && !IsVideoMode && !IsMixerMode;
-        ShowMixerChip = !(rec && IsVideoMode);
         ModeLabel = IsVideoMode ? "Video" : "Audio";
         OnPropertyChanged(nameof(IsRecordingUi));
         if (rec != _lastRecUi)

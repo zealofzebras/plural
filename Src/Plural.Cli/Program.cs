@@ -7,29 +7,32 @@ using Plural.Platform.Apple;
 using Plural.Platform.MacOS;
 using Plural.Platform.Windows;
 
-// Headless SmartMike runner.
-//   smartmike list                         paired SmartMikes
-//   smartmike outputs                      audio outputs (virtual cables first)
-//   smartmike inputs                       local microphones
-//   smartmike run [MAC...] [--input NAME]... [--output NAME] [--record SECONDS] [--format F] [--quality high|medium|low] [--set NAME=VALUE] [--verbose]
-//     no MAC and no --input = all paired SmartMikes; each --input adds the local mics whose name contains NAME;
-//     --output routes every mic to outputs whose name contains NAME (e.g. "CABLE"), assigned in order.
-//   smartmike serve [--input NAME]... [--name NAME]   be a remote: findable, accepts any controller, records local mics
+// Headless Plural (same capabilities as the app, minus the UI).
+//   plural list                            paired Bluetooth devices (SmartMikes marked)
+//   plural outputs                         audio outputs (virtual cables first)
+//   plural inputs                          local microphones
+//   plural cameras                         cameras (for mkv/mp4)
+//   plural formats                         recording formats available on this device
+//   plural run [MAC...] [options]          connect mics, direct outputs, mixer (faders, mutes, mix output), record; while it
+//                                          runs, typed commands change it (see RunCommand.Usage / "plural run --help")
+//   plural serve [--input NAME]... [--name NAME]   be a remote: findable, accepts any controller, records local mics
 //   smartmike control [--record SECONDS] [--peer NAME] [--video] search, control the first (or named) remote, record, collect files
 //   smartmike search                                   list Plural apps reachable over Wi-Fi and Bluetooth
 
+Console.OutputEncoding = System.Text.Encoding.UTF8;
 MikeHub hub;
 string platform;
 if (OperatingSystem.IsWindows())
 {
     var audio = new WasapiAudio();
-    hub = new MikeHub(new WindowsBluetooth(), audio, inputs: audio);
+    hub = new MikeHub(new WindowsBluetooth(), audio, new MfAacEncoderFactory(), new MfVideoPlatform(), audio);
     platform = "Windows";
 }
 else if (OperatingSystem.IsMacOS())
 {
     var audio = new MacAudio();
-    hub = new MikeHub(new MacBluetooth(), audio, new AppleAacEncoderFactory(), inputs: audio);
+    // No camera layer on macOS yet.
+    hub = new MikeHub(new MacBluetooth(), audio, new AppleAacEncoderFactory(), null, audio);
     platform = "macOS";
 }
 else
@@ -59,8 +62,20 @@ switch (cmd)
             Console.WriteLine(i.Name);
         }
         return 0;
+    case "cameras":
+        foreach (var c in hub.Video?.GetCameras() ?? [])
+        {
+            Console.WriteLine($"{c.Name}{(c.IsFrontFacing ? " (front)" : "")}");
+        }
+        return 0;
+    case "formats":
+        foreach (var f in hub.AvailableFormats)
+        {
+            Console.WriteLine($"{f.ToString().ToLowerInvariant(),-4}  {f.DisplayName()}");
+        }
+        return 0;
     case "run":
-        return await Run(args.Skip(1).ToArray());
+        return await new RunCommand(hub, args.Skip(1).ToArray()).RunAsync();
     case "serve":
         return await Serve(args.Skip(1).ToArray());
     case "control":
@@ -74,140 +89,12 @@ switch (cmd)
         }
         return 0;
     default:
-        Console.WriteLine("usage: smartmike list | outputs | inputs | run [MAC...] [--input NAME]... [--output NAME] [--record SECONDS] [--format F] [--quality Q] [--set NAME=VALUE] [--verbose]");
-        return 1;
-}
-
-async Task<int> Run(string[] a)
-{
-    var macs = a.TakeWhile(x => !x.StartsWith("--", StringComparison.Ordinal)).ToList();
-    string? Opt(string name) => a.SkipWhile(x => x != name).Skip(1).FirstOrDefault();
-    List<string> Opts(string name) => a.Select((x, i) => (x, i)).Where(t => t.x == name && t.i + 1 < a.Length).Select(t => a[t.i + 1]).ToList();
-    var inputFilters = Opts("--input");
-    var outputFilter = Opt("--output");
-    var recordSeconds = Opt("--record") is { } r ? double.Parse(r, System.Globalization.CultureInfo.InvariantCulture) : 0;
-    var quality = Enum.Parse<AudioQuality>(Opt("--quality") ?? "High", ignoreCase: true);
-    var verbose = a.Contains("--verbose");
-    var settings = Opts("--set");
-
-    var devices = macs.Count == 0
-        ? inputFilters.Count == 0 ? hub.FindSmartMikes() : []
-        : macs.Select(m => new PairedDevice(BluetoothAddress.Parse(m), m)).ToList();
-    var inputs = hub.FindInputs().Where(i => inputFilters.Any(f => i.Name.Contains(f, StringComparison.OrdinalIgnoreCase))).ToList();
-    if (devices.Count == 0 && inputs.Count == 0)
-    {
-        Console.Error.WriteLine(inputFilters.Count == 0 ? "no SmartMikes paired" : "no matching mics");
-        return 1;
-    }
-
-    using var cts = new CancellationTokenSource();
-    Console.CancelKeyPress += (_, e) => { e.Cancel = true; cts.Cancel(); };
-
-    var outputs = outputFilter is null
-        ? []
-        : hub.Audio.GetOutputDevices().Where(o => o.Name.Contains(outputFilter, StringComparison.OrdinalIgnoreCase)).ToList();
-
-    var channels = devices.Select(hub.Add).ToList();
-    var locals = inputs.Select(hub.Add).ToList();
-    foreach (var ch in channels)
-    {
-        ch.Session!.StateChanged += s => Console.WriteLine($"[{s.Device.Name}] {s.State}{(s.LastError is { } e ? $" ({e})" : "")}");
-        if (verbose)
-        {
-            ch.Session!.Log += (s, m) => Console.WriteLine($"[{s.Device.Name}] {m}");
-        }
-    }
-
-    await Task.WhenAll(locals.Select(async (ch, i) =>
-    {
-        var m = ch.LocalMic!;
-        try
-        {
-            await m.ConnectAsync(cts.Token);
-            Console.WriteLine($"[{m.DisplayName}] {m.State}, {m.SampleRate} Hz");
-        }
-        catch (Exception ex) when (ex is not OperationCanceledException)
-        {
-            Console.WriteLine($"[{m.DisplayName}] open failed: {ex.Message}");
-            return;
-        }
-        if (channels.Count + i < outputs.Count)
-        {
-            ch.SetOutput(outputs[channels.Count + i]);
-            Console.WriteLine($"[{m.DisplayName}] live output → {outputs[channels.Count + i].Name}");
-        }
-    }).Concat(channels.Select(async (ch, i) =>
-    {
-        var s = ch.Session!;
-        try
-        {
-            await s.ConnectAsync(cts.Token);
-        }
-        catch (Exception ex) when (ex is not OperationCanceledException)
-        {
-            Console.WriteLine($"[{s.Device.Name}] connect failed: {ex.Message}");
-            return;
-        }
-        Console.WriteLine($"[{s.Device.Name}] {s.Version?.DeviceName} FW {s.Version?.Firmware} HW {s.Version?.Hardware}, serial {s.SerialNumber}");
-        foreach (var kv in settings.Select(x => x.Split('=')))
-        {
-            s.Set(Enum.Parse<MikeSetting>(kv[0], ignoreCase: true), int.Parse(kv[1], System.Globalization.CultureInfo.InvariantCulture));
-        }
-        if (i < outputs.Count)
-        {
-            ch.SetOutput(outputs[i]);
-            Console.WriteLine($"[{s.Device.Name}] live output → {outputs[i].Name}");
-        }
-        s.StartAudio(quality);
-    })));
-
-    if (recordSeconds > 0)
-    {
-        await Task.Delay(1000, cts.Token).ContinueWith(_ => { });
-        if (Opt("--format") is { } fmt)
-        {
-            hub.RecordingSettings = hub.RecordingSettings with { Format = Enum.Parse<Plural.Core.Recording.RecordingFormat>(fmt, ignoreCase: true) };
-        }
-        var folder = hub.StartRecordingAll(Path.Combine(AppContext.BaseDirectory, "Recordings"));
-        Console.WriteLine($"recording to {folder}");
-        await Task.Delay(TimeSpan.FromSeconds(recordSeconds), cts.Token).ContinueWith(_ => { });
-        var take = await hub.StopRecordingAllAsync();
-        foreach (var f in take.Files)
-        {
-            Console.WriteLine($"saved {f}");
-        }
-        foreach (var e in take.Errors)
-        {
-            Console.WriteLine($"recording error: {e}");
-        }
-    }
-    else
-    {
-        Console.WriteLine("streaming — Ctrl+C to stop");
-        while (!cts.IsCancellationRequested)
-        {
-            await Task.Delay(2000, cts.Token).ContinueWith(_ => { });
-            foreach (var ch in locals)
-            {
-                var m = ch.Source;
-                Console.WriteLine($"[{m.DisplayName}] {m.State} peak {m.PeakLevel:P0}{(m.LastError is { } e ? $" ({e})" : "")}");
-            }
-            foreach (var ch in channels)
-            {
-                var s = ch.Session!;
-                var buf = ch.OutputBuffer is { } b ? $", buffer {b.Level * 1000 / Math.Max(1, s.StreamFormat?.SampleRate ?? 44100)} ms, underruns {b.Underruns}" : "";
-                Console.WriteLine($"[{s.Device.Name}] {s.State} frames {s.AudioFrames} errors {s.DecodeErrors} peak {s.PeakLevel:P0} battery {s.BatteryPercent}%{buf}");
-            }
-        }
-    }
-
-    foreach (var ch in channels)
-    {
-        var s = ch.Session!;
-        Console.WriteLine($"[{s.Device.Name}] frames {s.AudioFrames}, decode errors {s.DecodeErrors}");
-    }
-    await hub.DisposeAsync();
-    return 0;
+        Console.WriteLine("usage: plural list | outputs | inputs | cameras | formats | search");
+        Console.WriteLine("       plural serve [--input NAME]... [--name NAME]");
+        Console.WriteLine("       plural control [--record SECONDS] [--peer NAME] [--video]");
+        Console.WriteLine("       plural " + RunCommand.Usage.TrimStart());
+        Console.WriteLine(RunCommand.ConsoleHelp);
+        return cmd == "help" ? 0 : 1;
 }
 
 List<IRemoteTransport> Transports() => hub.Bluetooth is IBluetoothServicePlatform bt

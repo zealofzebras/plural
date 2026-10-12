@@ -35,7 +35,7 @@ internal static class Program
     ];
 
     /// <summary>--mixer: render only the mixer-mode preview (for development; the store set is unchanged).</summary>
-    private static bool MixerOnly;
+    internal static bool MixerOnly;
 
     public static int Main(string[] args)
     {
@@ -142,6 +142,18 @@ internal static class Program
             Require(PumpUntil(() => vm.IsRecording, 10), "recording did not start");
             Pump(TimeSpan.FromSeconds(3));
             Shot("mixer recording");
+            vm.ToggleRecordingCommand.Execute(null);
+            PumpUntil(() => !vm.IsRecording && !vm.IsStopping, 20);
+            vm.DismissToastCommand.Execute(null);
+            if (vm.HasVideo)
+            {
+                vm.SetVideoModeCommand.Execute(null);
+                PumpUntil(() => vm.HasPreview, 10);
+                vm.ToggleRecordingCommand.Execute(null);
+                PumpUntil(() => vm.IsRecording, 10);
+                Pump(TimeSpan.FromSeconds(2));
+                Shot("mixer video recording");
+            }
             Console.Out.Flush();
             Environment.Exit(0);
         }
@@ -276,7 +288,7 @@ internal sealed class ScreenshotHost : IAppHost
         var audio = _mobile
             ? new SimulatedAudio("Phone speaker", "Wired headphones")
             : new SimulatedAudio("Speakers (Realtek Audio)", "Headphones (USB Audio)", "CABLE Input (VB-Audio Virtual Cable)");
-        return new MikeHub(new SimulatedBluetooth(capture), audio, new SimulatedAac(), null, new SimulatedInputs(Inputs));
+        return new MikeHub(new SimulatedBluetooth(capture), audio, new SimulatedAac(), Program.MixerOnly ? new SimulatedVideo() : null, new SimulatedInputs(Inputs));
     }
 
     public string RecordingRoot { get; }

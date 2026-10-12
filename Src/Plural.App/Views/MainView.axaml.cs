@@ -106,6 +106,14 @@ public partial class MainView : UserControl
         }
     }
 
+    private void OnMenuScrimTapped(object? sender, TappedEventArgs e)
+    {
+        if (DataContext is MainViewModel vm)
+        {
+            vm.CloseMenuCommand.Execute(null);
+        }
+    }
+
     private void OnTakesScrimTapped(object? sender, TappedEventArgs e)
     {
         if (DataContext is MainViewModel vm)

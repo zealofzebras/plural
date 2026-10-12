@@ -72,7 +72,9 @@ macOS: AudioServerPlugIn (BlackHole-style). Linux: PipeWire virtual source per m
 - min Android 8.0 (API 26); 16 KB-page-aligned native lib for Android 15+.
 
 ## Mixer mode
-- A third view next to Audio/Video cards (bottom-bar **Mixer** chip; stays available while recording audio, hidden while recording video).
+- A layout next to the cards (bottom-bar **Mixer** chip, switchable at any time, also mid-take), independent of Audio/Video: the
+  Audio/Video button stays, and in video mode the camera shows as a small window (floating top-right on wide windows, docked above
+  the console on phones) with REC badge and camera switch; the video take records as usual.
   One console-style channel strip per mic: power (connect), state/battery, SmartMike gain knob + AGC/NS buttons + phones knob
   (device settings, as on the cards), direct output picker, fader with dB scale, post-fader LED meter, MUTE, name strip.
 - **Channel fader and mute** live in `MikeChannel` (`FaderDb` −60 = −∞ … +12 dB, `Muted`): applied once in the channel, so the
@@ -158,6 +160,7 @@ Native/lame/                    per-RID LAME 3.100 binaries (same four scripts)
 | Local mics | `IMicSource`/`LocalMic` in Core with unit tests (fake platform: lifecycle, errors, WAV take at 44.1 and 48 kHz). Windows WASAPI capture verified on Surface arm64 (CLI `run --input Microphone --record 3`: 3.02 s, 44.1 kHz mono). UI: "Add mic" sheet, local cards (output picker only; no SmartMike settings). Android AudioRecord path builds; **not yet run on a phone** (multiple inputs, Bluetooth headset) |
 | Remote mode | Protocol, Wi‑Fi + Bluetooth transports, controller/remote, take manifest and zip, UI (Devices sheet, remote cards, approval, banner) built; 6 tests. CLI serve ↔ control verified over Wi‑Fi on one PC. **Two-device, Bluetooth, Android and UI not yet tested** — see [Remote.md](Remote.md) |
 | `Plural.Cli` | `search`, `serve`, `control`, `list`, `outputs`, `inputs`, `run [--input X] [--output X] [--record N] [--format F]` — verified on hardware: connect, stream, record (440 frames, 0 errors), live output (0 errors). `--format` (WAV default) not yet tested on hardware |
+| CLI mixer/record (2026-10-12) | `run` has the app's capabilities: SmartMikes by MAC or `--mic NAME`, local mics `--input`, `--set`, direct outputs `--output`, `--fader MIC=DB`, `--mute MIC`, `--mix OUTPUT`, `--master DB`, `--master-mute`, recording `--record N --format F --folder --matroska --aac --mp3`, video `--camera --resolution --fps --video-mbps`; commands on stdin (keyboard or pipe) while it runs: status, record [N], stop, fader, mute/unmute, out, mix, master, set, connect/disconnect, format, wait, quit. Windows hub now has AAC + camera. Verified on Surface arm64 with the built-in mic: fader/mute changes land in the WAV, mix to speakers, WAV/M4A/MKV/MP4 takes. SmartMike run not retested (mic was off) |
 | `Plural.App` | UI redesign built: design system (dark/light, coral Record, blue accent), Audio/Video mode with camera preview, mic cards with status pill, battery, gradient level meter with peak hold, round Record button with format chip, settings sheet (format, Matroska codec, AAC/MP3 bitrate, video res/fps/bitrate, folder), persisted JSON settings, recent takes, save toast. Not yet hardware-tested |
 | `Plural.App.Desktop` | Runs on Windows with the shared UI (hosted as `MainView`); `OpenFolder` via `IAppHost`. Redesigned UI not yet tested on the desktop head |
 | `Plural.App.Android` | Builds; Debug and Release APKs (arm64 + x64) with CELT and LAME included. Installed on a Pixel 8 (Android 17) and launches; the previous version recorded WAV on the phone. The new formats, AAC and the camera are **not yet run on the phone** |
