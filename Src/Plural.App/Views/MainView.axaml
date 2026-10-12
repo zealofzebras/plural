@@ -30,8 +30,8 @@
                         <Border HorizontalAlignment="Left" VerticalAlignment="Top" Margin="6" Padding="8,3"
                                 Background="#99000000" CornerRadius="10" IsVisible="{Binding IsRecording}">
                             <StackPanel Orientation="Horizontal" Spacing="6">
-                                <Ellipse Classes="blink" Width="8" Height="8" Fill="{DynamicResource RecordBrush}" VerticalAlignment="Center" />
-                                <TextBlock Text="REC" Foreground="White" FontSize="11" FontWeight="Bold" VerticalAlignment="Center" />
+                                <views:RecDot />
+                                <TextBlock Classes.blink="{Binding IsPaused}" Text="{Binding RecordStateText}" Foreground="White" FontSize="11" FontWeight="Bold" VerticalAlignment="Center" />
                             </StackPanel>
                         </Border>
                         <Button Classes="icon" HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="2"
@@ -167,6 +167,10 @@
             <Setter Property="Padding" Value="12,0" />
         </Style>
         <!-- Short windows (phone landscape): smaller record button -->
+        <!-- Phone width while recording: room for Pause and Takes only -->
+        <Style Selector="Grid#Root.compact.recui Button.mixchip">
+            <Setter Property="IsVisible" Value="False" />
+        </Style>
         <Style Selector="Grid#Root.short Button.rec">
             <Setter Property="RenderTransform" Value="scale(0.72)" />
             <Setter Property="Width" Value="84" />
@@ -366,6 +370,12 @@
         <Style Selector="Border.scribble.rec">
             <Setter Property="BorderBrush" Value="{DynamicResource RecordBrush}" />
         </Style>
+        <Style Selector="Border.scribble.warn">
+            <Setter Property="BorderBrush" Value="{DynamicResource WarnBrush}" />
+        </Style>
+        <Style Selector="TextBlock.chstate.warn">
+            <Setter Property="Foreground" Value="{DynamicResource WarnBrush}" />
+        </Style>
     </UserControl.Styles>
 
     <ThemeVariantScope Name="Scope">
@@ -403,8 +413,8 @@
                 <Border Grid.Column="1" IsVisible="{Binding IsRecordingUi}" VerticalAlignment="Center" Padding="12,6"
                         Background="#33FF4D5E" CornerRadius="16">
                     <StackPanel Orientation="Horizontal" Spacing="8">
-                        <Ellipse Classes="blink" Width="10" Height="10" Fill="{DynamicResource RecordBrush}" VerticalAlignment="Center" />
-                        <TextBlock Text="REC" FontWeight="Bold" Foreground="{DynamicResource RecordBrush}" VerticalAlignment="Center" />
+                        <views:RecDot />
+                        <TextBlock Classes="reclabel" Classes.paused="{Binding IsPaused}" Text="{Binding RecordStateText}" VerticalAlignment="Center" />
                         <TextBlock Classes="mono" Text="{Binding RecordingTime}" VerticalAlignment="Center" />
                     </StackPanel>
                 </Border>
@@ -467,8 +477,8 @@
                             <Border HorizontalAlignment="Right" VerticalAlignment="Top" Margin="10" Padding="12,6"
                                     Background="#99000000" CornerRadius="16" IsVisible="{Binding IsRecording}">
                                 <StackPanel Orientation="Horizontal" Spacing="8">
-                                    <Ellipse Classes="blink" Width="10" Height="10" Fill="{DynamicResource RecordBrush}" VerticalAlignment="Center" />
-                                    <TextBlock Text="REC" Foreground="White" FontWeight="Bold" VerticalAlignment="Center" />
+                                    <views:RecDot />
+                                    <TextBlock Classes.blink="{Binding IsPaused}" Text="{Binding RecordStateText}" Foreground="White" FontWeight="Bold" VerticalAlignment="Center" />
                                     <TextBlock Classes="mono" Text="{Binding RecordingTime}" Foreground="White" VerticalAlignment="Center" />
                                 </StackPanel>
                             </Border>
@@ -589,6 +599,8 @@
                                                             </Panel>
                                                             <TextBlock Classes="muted" Text="{Binding BatteryText}" VerticalAlignment="Center" />
                                                         </StackPanel>
+                                                        <TextBlock Classes="muted" Foreground="{DynamicResource WarnBrush}" FontWeight="SemiBold"
+                                                                   Text="{Binding ReconnectText}" IsVisible="{Binding IsReconnecting}" />
                                                         <c:Icon Data="{StaticResource IconHeadphones}" Size="16" Fill="{DynamicResource MutedBrush}" IsVisible="{Binding HasHeadphones}" />
                                                         <TextBlock Classes="muted" Text="Local mic" IsVisible="{Binding IsLocal}" />
                                                         <TextBlock Classes="muted" Text="{Binding MissingText}" Foreground="{DynamicResource WarnBrush}"
@@ -692,7 +704,7 @@
                                                         <c:Icon Data="{StaticResource IconPower}" Size="16" />
                                                     </Button>
                                                     <StackPanel Grid.Column="1" Margin="6,0,0,0" VerticalAlignment="Center" Spacing="1">
-                                                        <TextBlock Classes="chstate" Text="{Binding StateText}" />
+                                                        <TextBlock Classes="chstate" Classes.warn="{Binding IsConnecting}" Text="{Binding StripStateText}" />
                                                         <TextBlock Classes="chsmall" Text="{Binding BatteryText}" IsVisible="{Binding HasBattery}" />
                                                         <TextBlock Classes="chsmall" Text="Local mic" IsVisible="{Binding IsLocal}" />
                                                     </StackPanel>
@@ -724,6 +736,19 @@
                                                         <c:Icon Data="{StaticResource IconMic}" Size="28" Fill="{DynamicResource MutedBrush}" HorizontalAlignment="Center" />
                                                         <TextBlock Classes="chsmall" Text="Device mic" HorizontalAlignment="Center" />
                                                     </StackPanel>
+                                                    <!-- SmartMike link lost: amber banner over the mic section; a running take keeps recording -->
+                                                    <Border IsVisible="{Binding IsReconnecting}" Background="{DynamicResource Surface2Brush}" CornerRadius="8"
+                                                            BorderBrush="{DynamicResource WarnBrush}" BorderThickness="1" Padding="4">
+                                                        <StackPanel VerticalAlignment="Center" Spacing="6">
+                                                            <c:Icon Classes="spinner spin" Data="{StaticResource IconRefresh}" Size="22" Fill="{DynamicResource WarnBrush}" />
+                                                            <StackPanel Spacing="1">
+                                                                <TextBlock Classes="chstate warn" FontSize="10" TextAlignment="Center" HorizontalAlignment="Center" Text="Reconnecting…" />
+                                                                <TextBlock Classes="chstate warn mono" TextAlignment="Center" HorizontalAlignment="Center" Text="{Binding ReconnectClock}" />
+                                                            </StackPanel>
+                                                            <TextBlock Classes="chsmall" TextWrapping="Wrap" TextAlignment="Center" HorizontalAlignment="Center"
+                                                                       Text="Recording continues" IsVisible="{Binding IsRecording}" />
+                                                        </StackPanel>
+                                                    </Border>
                                                 </Panel>
 
                                                 <!-- Direct output of this mic -->
@@ -747,7 +772,7 @@
                                                 <TextBlock Grid.Row="4" Classes="chvalue mono" Text="{Binding FaderText}" />
                                                 <ToggleButton Grid.Row="5" Classes="mute" Content="MUTE" IsChecked="{Binding Muted}"
                                                               ToolTip.Tip="Mute this mic in the recording and outputs" />
-                                                <Border Grid.Row="6" Classes="scribble" Classes.live="{Binding IsStreaming}" Classes.rec="{Binding IsRecording}"
+                                                <Border Grid.Row="6" Classes="scribble" Classes.live="{Binding IsStreaming}" Classes.rec="{Binding IsRecording}" Classes.warn="{Binding IsReconnecting}"
                                                         ToolTip.Tip="{Binding Error}">
                                                     <TextBlock Text="{Binding Name}" TextTrimming="CharacterEllipsis" HorizontalAlignment="Center" />
                                                 </Border>
@@ -806,7 +831,7 @@
             <StackPanel IsVisible="{Binding ShowRecordingCenter}" IsHitTestVisible="False" Spacing="6"
                         HorizontalAlignment="Center" VerticalAlignment="Center">
                 <TextBlock Classes="mono" Text="{Binding RecordingTime}" FontSize="56" FontWeight="SemiBold" HorizontalAlignment="Center" />
-                <TextBlock Classes="muted" Text="Recording" HorizontalAlignment="Center" />
+                <TextBlock Classes="muted" Classes.blink="{Binding IsPaused}" Text="{Binding RecordingCaption}" HorizontalAlignment="Center" />
             </StackPanel>
 
             <StackPanel VerticalAlignment="Bottom">
@@ -827,7 +852,11 @@
                         <ItemsControl.ItemTemplate>
                             <DataTemplate x:DataType="vm:RemoteDeviceViewModel">
                                 <StackPanel Width="{DynamicResource StripWidth}" IsVisible="{Binding IsRecording}" Margin="6,4" Spacing="4">
-                                    <TextBlock Classes="muted" FontSize="11" Text="{Binding Name}" TextTrimming="CharacterEllipsis" />
+                                    <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+                                        <TextBlock Classes="muted" FontSize="11" Text="{Binding Name}" TextTrimming="CharacterEllipsis" />
+                                        <TextBlock Grid.Column="1" Classes="muted" FontSize="11" Foreground="{DynamicResource WarnBrush}"
+                                                   Text="{Binding RecordingNote}" IsVisible="{Binding RecordingNote, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+                                    </Grid>
                                     <c:LevelMeter Height="6" Level="{Binding Level}" Peak="{Binding PeakHold}" />
                                 </StackPanel>
                             </DataTemplate>
@@ -842,7 +871,11 @@
                         <ItemsControl.ItemTemplate>
                             <DataTemplate x:DataType="vm:MikeViewModel">
                                 <StackPanel Width="{DynamicResource StripWidth}" IsVisible="{Binding IsRecording}" Margin="6,4" Spacing="4">
-                                    <TextBlock Classes="muted" FontSize="11" Text="{Binding Name}" TextTrimming="CharacterEllipsis" />
+                                    <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+                                        <TextBlock Classes="muted" FontSize="11" Text="{Binding Name}" TextTrimming="CharacterEllipsis" />
+                                        <TextBlock Grid.Column="1" Classes="chstate warn" FontSize="11"
+                                                   Text="{Binding ReconnectText}" IsVisible="{Binding IsReconnecting}" />
+                                    </Grid>
                                     <c:LevelMeter Height="6" Level="{Binding Level}" Peak="{Binding PeakHold}" />
                                 </StackPanel>
                             </DataTemplate>
@@ -858,6 +891,14 @@
             <StackPanel>
                 <TextBlock Classes="muted" Text="{Binding RecordHint}" IsVisible="{Binding HasRecordHint}"
                            HorizontalAlignment="Center" Margin="0,4,0,0" />
+                <TextBlock Classes="muted" Foreground="{DynamicResource WarnBrush}" Text="{Binding PreflightText}"
+                           IsVisible="{Binding HasPreflight}" TextWrapping="Wrap" TextAlignment="Center"
+                           HorizontalAlignment="Center" Margin="0,4,0,0" />
+                <StackPanel Orientation="Horizontal" Spacing="6" HorizontalAlignment="Center" Margin="0,4,0,0"
+                            IsVisible="{Binding HasSpaceHint}">
+                    <c:Icon Data="{StaticResource IconWarning}" Size="14" Fill="{DynamicResource WarnBrush}" />
+                    <TextBlock Classes="muted" Foreground="{DynamicResource WarnBrush}" Text="{Binding SpaceHint}" />
+                </StackPanel>
                 <Panel>
                     <StackPanel Orientation="Horizontal" Spacing="8" HorizontalAlignment="Left" VerticalAlignment="Center">
                         <Button Classes="chip" Command="{Binding OpenSettingsCommand}" ToolTip.Tip="Recording settings"
@@ -876,11 +917,28 @@
                                 <TextBlock Classes="wideonly" Text="{Binding ModeLabel}" VerticalAlignment="Center" />
                             </StackPanel>
                         </Button>
-                        <Button Classes="chip" Classes.on="{Binding IsMixerMode}" Command="{Binding ToggleMixerCommand}"
+                        <Button Classes="chip mixchip" Classes.on="{Binding IsMixerMode}" Command="{Binding ToggleMixerCommand}"
                                 ToolTip.Tip="Mixer: adjust every mic, also while recording">
                             <StackPanel Orientation="Horizontal" Spacing="8">
                                 <c:Icon Data="{StaticResource IconFaders}" />
                                 <TextBlock Classes="wideonly" Text="Mixer" VerticalAlignment="Center" />
+                            </StackPanel>
+                        </Button>
+                        <!-- While recording: Pause/Resume and the Takes page (the settings, mode and mixer chips are hidden) -->
+                        <Button Classes="chip" Classes.on="{Binding IsPaused}" Command="{Binding TogglePauseCommand}"
+                                IsVisible="{Binding IsRecording}" IsEnabled="{Binding CanPause}"
+                                ToolTip.Tip="Pause or resume the recording">
+                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                <c:Icon Data="{StaticResource IconPause}" IsVisible="{Binding !IsPaused}" />
+                                <c:Icon Data="{StaticResource IconPlay}" IsVisible="{Binding IsPaused}" />
+                                <TextBlock Classes="wideonly" Text="{Binding PauseButtonText}" VerticalAlignment="Center" />
+                            </StackPanel>
+                        </Button>
+                        <Button Classes="chip" Command="{Binding OpenTakesCommand}" IsVisible="{Binding IsRecordingUi}"
+                                ToolTip.Tip="Recorded takes (recording continues)">
+                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                <c:Icon Data="{StaticResource IconFolder}" />
+                                <TextBlock Classes="wideonly" Text="Takes" VerticalAlignment="Center" />
                             </StackPanel>
                         </Button>
                     </StackPanel>
@@ -898,8 +956,8 @@
                         <TextBlock Classes="mono" Text="{Binding RecordingTime}" FontSize="24" FontWeight="SemiBold"
                                    HorizontalAlignment="Right" />
                         <StackPanel Orientation="Horizontal" Spacing="6" HorizontalAlignment="Right">
-                            <Ellipse Classes="blink" Width="8" Height="8" Fill="{DynamicResource RecordBrush}" VerticalAlignment="Center" />
-                            <TextBlock Classes="muted" Text="REC" FontWeight="Bold" />
+                            <views:RecDot />
+                            <TextBlock Classes="reclabel" Classes.paused="{Binding IsPaused}" FontSize="12" Text="{Binding RecordStateText}" />
                         </StackPanel>
                     </StackPanel>
                 </Panel>
@@ -981,6 +1039,16 @@
                                 </StackPanel>
                             </StackPanel>
 
+                            <StackPanel Spacing="6">
+                                <TextBlock Classes="section" Text="MIC BUTTONS" Margin="0" />
+                                <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
+                                    <TextBlock Text="Mic buttons start and stop recording" VerticalAlignment="Center" TextWrapping="Wrap" />
+                                    <ToggleSwitch Grid.Column="1" IsChecked="{Binding MicButtonsControlRecording}" OnContent="" OffContent="" MinWidth="0" />
+                                </Grid>
+                                <TextBlock Classes="muted" TextWrapping="Wrap"
+                                           Text="One press of the button on a SmartMike records all mics; press again to stop." />
+                            </StackPanel>
+
                             <StackPanel IsVisible="{Binding CanChangeRecordingRoot}" Spacing="8">
                                 <TextBlock Classes="section" Text="RECORDING FOLDER" Margin="0" />
                                 <TextBox Text="{Binding RecordingRoot}" MinHeight="44" VerticalContentAlignment="Center" />
@@ -991,6 +1059,13 @@
                                         <TextBlock Text="Open folder" VerticalAlignment="Center" />
                                     </StackPanel>
                                 </Button>
+                            </StackPanel>
+
+                            <StackPanel Spacing="4">
+                                <TextBlock Classes="section" Text="FREE SPACE" Margin="0,0,0,4" />
+                                <TextBlock Text="{Binding FreeSpaceText}" FontWeight="SemiBold" TextWrapping="Wrap" />
+                                <TextBlock Classes="muted" TextWrapping="Wrap"
+                                           Text="Estimated for the current format, video settings and number of mics." />
                             </StackPanel>
                         </StackPanel>
                     </ScrollViewer>

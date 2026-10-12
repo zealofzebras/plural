@@ -86,6 +86,36 @@
             <Setter Property="VerticalAlignment" Value="Center" />
             <Setter Property="BoxShadow" Value="0 10 40 0 #66000000" />
         </Style>
+        <!-- Transport bar: normal, and compact in phone landscape (more height for the video) -->
+        <Style Selector="Border.transport">
+            <Setter Property="Padding" Value="8,4" />
+        </Style>
+        <Style Selector="Border.transport Button.skip">
+            <Setter Property="Width" Value="48" />
+        </Style>
+        <Style Selector="Border.transport Button.play">
+            <Setter Property="Width" Value="56" />
+            <Setter Property="Height" Value="56" />
+            <Setter Property="CornerRadius" Value="28" />
+            <Setter Property="Padding" Value="0" />
+        </Style>
+        <Style Selector="Border.transport.compact">
+            <Setter Property="Padding" Value="8,0" />
+        </Style>
+        <Style Selector="Border.transport.compact Button.skip">
+            <Setter Property="Width" Value="44" />
+            <Setter Property="Height" Value="44" />
+        </Style>
+        <Style Selector="Border.transport.compact Button.play">
+            <Setter Property="Width" Value="44" />
+            <Setter Property="Height" Value="44" />
+            <Setter Property="MinHeight" Value="44" />
+            <Setter Property="CornerRadius" Value="22" />
+        </Style>
+        <Style Selector="Border.transport.compact Button.tgl">
+            <Setter Property="Width" Value="44" />
+            <Setter Property="Height" Value="44" />
+        </Style>
         <Style Selector="Button.zoom">
             <Setter Property="MinWidth" Value="30" />
             <Setter Property="MinHeight" Value="24" />
@@ -203,7 +233,7 @@
         <Grid Name="StageHost" Grid.Row="2" ClipToBounds="True" IsVisible="{Binding HasVideo}" Margin="8,2,8,4" ColumnDefinitions="*,Auto" ColumnSpacing="6">
             <c:VideoStage Name="Stage" Tiles="{Binding Videos}" Spotlight="{Binding SpotlightIndex}" Fullscreen="{Binding FullscreenIndex}"
                           Form="{Binding Form}" Animate="{Binding AnimateVideo}" Accent="{DynamicResource AccentBrush}" />
-            <StackPanel Grid.Column="1" Spacing="6" VerticalAlignment="Top">
+            <StackPanel Grid.Column="1" Spacing="6" VerticalAlignment="Top" IsVisible="{Binding ShowStageToggles}">
                 <Button Classes="chip" Classes.on="{Binding AutoSpotlight}" Command="{Binding ToggleAutoSpotlightCommand}"
                         IsVisible="{Binding ShowAutoSpotlight}" ToolTip.Tip="Auto-spotlight: follow whoever is talking" Padding="0">
                     <c:Icon Data="{StaticResource IconMic}" Size="20" />
@@ -228,23 +258,23 @@
         </Border>
 
         <!-- Transport -->
-        <Border Name="TransportBar" Grid.Row="4" Background="{DynamicResource SurfaceBrush}" BorderBrush="{DynamicResource StrokeBrush}"
-                BorderThickness="0,1" Padding="8,4">
-            <Grid ColumnDefinitions="Auto,Auto,Auto,*" ColumnSpacing="2">
-                <Button Classes="icon" Command="{Binding SkipBackCommand}" ToolTip.Tip="Back 15 s" Width="48">
+        <Border Name="TransportBar" Grid.Row="4" Classes="transport" Classes.compact="{Binding IsPhoneLandscape}"
+                Background="{DynamicResource SurfaceBrush}" BorderBrush="{DynamicResource StrokeBrush}" BorderThickness="0,1">
+            <Grid ColumnDefinitions="Auto,Auto,Auto,*,Auto" ColumnSpacing="2">
+                <Button Classes="icon skip" Command="{Binding SkipBackCommand}" ToolTip.Tip="Back 15 s">
                     <Panel Width="30" Height="30">
                         <c:Icon Data="{StaticResource IconUndo}" Size="30" />
                         <TextBlock Text="15" FontSize="9" FontWeight="Bold" HorizontalAlignment="Center" VerticalAlignment="Center" Margin="2,5,0,0" />
                     </Panel>
                 </Button>
-                <Button Grid.Column="1" Classes="primary" Command="{Binding TogglePlayCommand}" Width="56" Height="56" CornerRadius="28" Padding="0"
+                <Button Grid.Column="1" Classes="primary play" Command="{Binding TogglePlayCommand}"
                         ToolTip.Tip="Play / pause (Space)">
                     <Panel>
                         <c:Icon Data="{StaticResource IconPlay}" Size="30" IsVisible="{Binding !IsPlaying}" />
                         <c:Icon Data="{StaticResource IconPause}" Size="30" IsVisible="{Binding IsPlaying}" />
                     </Panel>
                 </Button>
-                <Button Grid.Column="2" Classes="icon" Command="{Binding SkipForwardCommand}" ToolTip.Tip="Forward 15 s" Width="48">
+                <Button Grid.Column="2" Classes="icon skip" Command="{Binding SkipForwardCommand}" ToolTip.Tip="Forward 15 s">
                     <Panel Width="30" Height="30">
                         <c:Icon Data="{StaticResource IconRedo}" Size="30" />
                         <TextBlock Text="15" FontSize="9" FontWeight="Bold" HorizontalAlignment="Center" VerticalAlignment="Center" Margin="0,5,2,0" />
@@ -262,6 +292,23 @@
                     </StackPanel>
                     <TextBlock Classes="muted" Text="{Binding OutputProblem}" Foreground="{DynamicResource WarnBrush}" TextTrimming="CharacterEllipsis"
                                IsVisible="{Binding HasOutputProblem}" />
+                </StackPanel>
+                <!-- phone landscape: the video toggles move here from beside the (short) stage -->
+                <StackPanel Grid.Column="4" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center" IsVisible="{Binding ShowTransportToggles}">
+                    <Button Classes="chip tgl" Classes.on="{Binding AutoSpotlight}" Command="{Binding ToggleAutoSpotlightCommand}"
+                            IsVisible="{Binding ShowAutoSpotlight}" ToolTip.Tip="Auto-spotlight: follow whoever is talking" Padding="0">
+                        <c:Icon Data="{StaticResource IconMic}" Size="20" />
+                    </Button>
+                    <Button Classes="chip tgl" Classes.on="{Binding FocusVideo}" Command="{Binding ToggleFocusVideoCommand}"
+                            IsVisible="{Binding ShowFocusToggle}" ToolTip.Tip="Focus video (hide the tracks)" Padding="0">
+                        <c:Icon Data="{StaticResource IconVideo}" Size="20" />
+                    </Button>
+                    <Button Classes="chip tgl" Command="{Binding ToggleFullscreenCommand}" ToolTip.Tip="Full screen (F)" Padding="0">
+                        <Panel>
+                            <c:Icon Data="{StaticResource IconExpand}" Size="20" IsVisible="{Binding NotFullscreen}" />
+                            <c:Icon Data="{StaticResource IconCompress}" Size="20" IsVisible="{Binding IsFullscreen}" />
+                        </Panel>
+                    </Button>
                 </StackPanel>
             </Grid>
         </Border>

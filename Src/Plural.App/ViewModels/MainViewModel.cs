@@ -151,6 +151,7 @@ public partial class MainViewModel : ViewModelBase, IAsyncDisposable
         CreatePages();
         LoadSettings();
         CreateRemote(host, _hub);
+        WireRecordingEvents(host, _hub);
         UpdateLayoutState();
         _timer = new DispatcherTimer(TimeSpan.FromMilliseconds(100), DispatcherPriority.Background, (_, _) => Tick());
         _timer.Start();
@@ -181,6 +182,7 @@ public partial class MainViewModel : ViewModelBase, IAsyncDisposable
         }
         _appVisible = visible;
         if (!visible) { Player.Pause(); }
+        UpdateKeepAwake();
         RequestCameraSync();
     }
 
@@ -222,6 +224,7 @@ public partial class MainViewModel : ViewModelBase, IAsyncDisposable
         _trustedControllers = [.. s.TrustedControllers];
         LoadMixSettings(s);
         PlayerSplitter = Math.Clamp(s.PlayerSplitter, 0.15, 0.5);
+        MicButtonsControlRecording = s.MicButtonsControlRecording;
         if (CanChangeRecordingRoot && !string.IsNullOrWhiteSpace(s.RecordingRoot))
         {
             RecordingRoot = s.RecordingRoot;
@@ -257,6 +260,7 @@ public partial class MainViewModel : ViewModelBase, IAsyncDisposable
             AllowRemoteControl = AllowRemoteControl,
             TrustedControllers = _trustedControllers,
             PlayerSplitter = PlayerSplitter,
+            MicButtonsControlRecording = MicButtonsControlRecording,
         };
         SaveMixSettings(s);
         try
@@ -270,18 +274,11 @@ public partial class MainViewModel : ViewModelBase, IAsyncDisposable
         }
     }
 
-    private static int AutoBitRateFor(int height, int fps)
-    {
-        var baseRate = height >= 2160 ? 35_000_000 : height >= 1080 ? 12_000_000 : 6_000_000;
-        var factor = fps >= 50 ? 1.5 : fps < 30 ? 0.8 : 1.0;
-        return (int)(baseRate * factor);
-    }
-
     private VideoSettings BuildVideoSettings()
     {
         var height = SelectedResolution?.Value ?? 1080;
         var fps = SelectedFps?.Value ?? 30;
-        var bitRate = AutoBitRate ? AutoBitRateFor(height, fps) : (int)(BitRateMbps * 1_000_000);
+        var bitRate = AutoBitRate ? RecordingEstimate.AutoVideoBitRate(height, fps) : (int)(BitRateMbps * 1_000_000);
         return new VideoSettings
         {
             CameraId = SelectedCamera?.Id ?? _savedCameraId,
@@ -326,6 +323,7 @@ public partial class MainViewModel : ViewModelBase, IAsyncDisposable
         FormatChip = format == RecordingFormat.Wav ? "WAV" : $"{format.ShortName()} · {detail}";
         BitRateText = AutoBitRate ? $"Auto · {video.BitRate / 1_000_000.0:0.#} Mbps" : $"{BitRateMbps:0.#} Mbps";
         RefreshRecordState();
+        UpdateSpaceText();
     }
 
     private void RebuildFormats()
@@ -397,6 +395,8 @@ public partial class MainViewModel : ViewModelBase, IAsyncDisposable
         {
             _ = LoadTakesAsync();
         }
+        _freeBytes = null;
+        RequestEnvironmentPoll();
     }
 
     partial void OnSelectedCameraChanged(CameraInfo? value)
@@ -413,6 +413,7 @@ public partial class MainViewModel : ViewModelBase, IAsyncDisposable
     {
         OnPropertyChanged(nameof(IsAudioMode));
         UpdateLayoutState();
+        UpdateKeepAwake();
         if (_loading)
         {
             return;
@@ -426,14 +427,19 @@ public partial class MainViewModel : ViewModelBase, IAsyncDisposable
     partial void OnIsRecordingChanged(bool value)
     {
         OnPropertyChanged(nameof(IsNotRecording));
+        if (!value) { ResetRecordingSafety(); }
         UpdateLayoutState();
         _host?.OnRecordingChanged(value || IsControlled);
+        UpdateKeepAwake();
         RefreshRecordState();
+        UpdatePauseState();
+        OnPropertyChanged(nameof(HasPreflight));
     }
 
     partial void OnIsStoppingChanged(bool value)
     {
         RefreshRecordState();
+        UpdatePauseState();
         UpdateLayoutState();
     }
 
@@ -458,6 +464,7 @@ public partial class MainViewModel : ViewModelBase, IAsyncDisposable
         ShowControls = !rec;
         ShowModeSeg = HasVideo && !rec;
         ShowVideoTools = IsVideoMode && !rec && !IsMixerMode;
+        OnPropertyChanged(nameof(HasPreflight));
         ShowRecordingCenter = rec && !IsVideoMode && !IsMixerMode;
         ModeLabel = IsVideoMode ? "Video" : "Audio";
         OnPropertyChanged(nameof(IsRecordingUi));
@@ -519,7 +526,11 @@ public partial class MainViewModel : ViewModelBase, IAsyncDisposable
         var i = SelectedCamera is null ? -1 : Cameras.IndexOf(SelectedCamera);
         SelectedCamera = Cameras[(i + 1) % Cameras.Count];
     }
-    partial void OnIsCameraReadyChanged(bool value) => RefreshRecordState();
+    partial void OnIsCameraReadyChanged(bool value)
+    {
+        RefreshRecordState();
+        UpdateKeepAwake();
+    }
     partial void OnHasLiveMicChanged(bool value) => RefreshRecordState();
 
     partial void OnRecordHintChanged(string value) => OnPropertyChanged(nameof(HasRecordHint));
@@ -566,7 +577,12 @@ public partial class MainViewModel : ViewModelBase, IAsyncDisposable
     }
 
     [RelayCommand]
-    private void OpenSettings() => IsSettingsOpen = true;
+    private void OpenSettings()
+    {
+        RequestEnvironmentPoll();
+        UpdateSpaceText();
+        IsSettingsOpen = true;
+    }
 
     [RelayCommand]
     private void CloseSettings()
@@ -1002,13 +1018,21 @@ public partial class MainViewModel : ViewModelBase, IAsyncDisposable
                 await StopRecordingAsync(_hub);
             }
         }
-        else if (ConnectedRemotes() is { Count: > 0 } remotes)
-        {
-            await StartWithRemotesAsync(_hub, remotes);
-        }
         else
         {
-            StartRecording(_hub);
+            var note = PreflightText;
+            if (ConnectedRemotes() is { Count: > 0 } remotes)
+            {
+                await StartWithRemotesAsync(_hub, remotes);
+            }
+            else
+            {
+                StartRecording(_hub);
+            }
+            if (IsRecording && note.Length > 0)
+            {
+                ShowToast("Low battery", note.Replace("Low battery: ", ""), false, null);
+            }
         }
     }
 
@@ -1030,6 +1054,8 @@ public partial class MainViewModel : ViewModelBase, IAsyncDisposable
 
     private void EnterRecordingUi()
     {
+        ResetRecordingSafety();
+        _stopReason = null;
         _recordClock.Restart();
         RecordingTime = "00:00";
         IsToastVisible = false;
@@ -1071,6 +1097,11 @@ public partial class MainViewModel : ViewModelBase, IAsyncDisposable
         var unit = multi ? "track" : "file";
         var text = $"Saved {take.Format.ShortName()} · {count} {unit}{(count == 1 ? "" : "s")} · {TakeViewModel.FormatDuration(take.Duration)}";
         var details = take.Errors.ToList();
+        if (_stopReason is { } why)
+        {
+            details.Insert(0, why);
+            _stopReason = null;
+        }
         if (take.DroppedItems > 0)
         {
             details.Add($"{take.DroppedItems} items were dropped because the disk was too slow.");
@@ -1090,9 +1121,10 @@ public partial class MainViewModel : ViewModelBase, IAsyncDisposable
         UpdateSummary();
         RefreshRemote();
         TickMixer();
+        TickSafety();
         if (IsRecording)
         {
-            var e = _recordClock.Elapsed;
+            var e = RecordedElapsed();
             RecordingTime = e.TotalHours >= 1 ? e.ToString(@"h\:mm\:ss") : e.ToString(@"mm\:ss");
         }
     }
@@ -1178,6 +1210,7 @@ public partial class MainViewModel : ViewModelBase, IAsyncDisposable
     public async ValueTask DisposeAsync()
     {
         _timer.Stop();
+        UnwireRecordingEvents();
         _toastCts?.Cancel();
         _appVisible = false;
         await CloseCameraAsync().ConfigureAwait(false);

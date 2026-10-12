@@ -376,6 +376,7 @@ internal sealed class TakeRecorder
 {
     private const int AudioCapacity = 4096;
     private const int VideoCapacity = 240;
+    internal static TimeSpan FlushInterval = TimeSpan.FromSeconds(4); // sidecar pauses/dropouts; tests shorten it
 
     private readonly struct Work
     {
@@ -409,6 +410,15 @@ internal sealed class TakeRecorder
     private bool _sidecarWritten;
     private PosterCapture? _poster;
     private Thread? _writer;
+    private readonly PauseTimeline _timeline;
+    private readonly object _pauseLock = new();
+    private bool _keyWait;
+    private long _keyWaitFrom;
+    private long? _stoppedAt;
+    private readonly List<Timer> _timers = [];
+    private Timer? _flushTimer;
+    private int _flushedCount = -1;
+    private readonly object _flushLock = new();
 
     public string Folder { get; }
     public RecordingFormat Format { get; }
@@ -416,6 +426,29 @@ internal sealed class TakeRecorder
     /// <summary>Host-clock time (MediaClock ticks) that sample 0 of every track belongs to.</summary>
     public long StartTime => _t0;
     public IReadOnlyList<string> Files => _output.Files;
+
+    /// <summary>Raised when pausing or resuming takes effect: on the calling thread for an instant that has passed, on a timer thread for a scheduled one.</summary>
+    public event Action? PauseStateChanged;
+
+    /// <summary>True while the host clock is inside a pause.</summary>
+    public bool IsPaused => _stoppedAt is null && _timeline.IsPausedAt(MediaClock.Now);
+
+    /// <summary>Recorded time so far (host time since the start without paused time); frozen at the stop.</summary>
+    public TimeSpan RecordedTime => TimeSpan.FromTicks(_timeline.Effective(_stoppedAt ?? MediaClock.Now));
+
+    /// <summary>Sum of the sizes of the take's media files as written so far (data still buffered is not included).</summary>
+    public long BytesWritten
+    {
+        get
+        {
+            var sum = 0L;
+            foreach (var f in _output.Files)
+            {
+                try { sum += new FileInfo(f).Length; } catch (IOException) { } catch (UnauthorizedAccessException) { }
+            }
+            return sum;
+        }
+    }
     public IReadOnlyList<(MikeChannel Channel, string? Path, ClockLockedTrack Track)> Mics { get; }
 
     private TakeRecorder(string folder, RecordingFormat format, TakeOutput output, IReadOnlyList<MikeChannel> channels, IVideoCapture? camera)
@@ -426,6 +459,7 @@ internal sealed class TakeRecorder
         _camera = camera;
         _failed = new bool[channels.Count];
         _t0 = MediaClock.Now;
+        _timeline = new PauseTimeline(_t0);
         _tracks = new ClockLockedTrack[channels.Count];
         var mics = new List<(MikeChannel, string?, ClockLockedTrack)>();
         for (var i = 0; i < channels.Count; i++)
@@ -438,7 +472,7 @@ internal sealed class TakeRecorder
         Mics = mics;
         if (camera is not null)
         {
-            _videoHandler = s => EnqueueVideo(s.Data.ToArray(), s.Timestamp - _t0, s.IsKeyFrame);
+            _videoHandler = OnVideoSample;
         }
     }
 
@@ -559,6 +593,97 @@ internal sealed class TakeRecorder
         }
     }
 
+    private void OnVideoSample(EncodedSample s)
+    {
+        var ts = s.Timestamp;
+        if (_timeline.IsPausedAt(ts) || ts > (_stoppedAt ?? long.MaxValue)) { return; } // paused, or captured after the stop (during the audio latency wait)
+        lock (_pauseLock)
+        {
+            if (_keyWait && ts >= _keyWaitFrom)
+            {
+                // after a resume the picture continues from a key frame: delta frames refer to frames inside the pause
+                if (!s.IsKeyFrame) { return; }
+                _keyWait = false;
+            }
+        }
+        EnqueueVideo(s.Data.ToArray(), _timeline.Effective(ts), s.IsKeyFrame);
+    }
+
+    /// <summary>
+    /// Pauses at host time <paramref name="at"/> (<see cref="MediaClock"/> ticks; may be in the future or just in the past). Paused time is
+    /// removed from every track and from the video timeline. Ignored when stopped or already paused.
+    /// </summary>
+    public void Pause(long at)
+    {
+        lock (_pauseLock)
+        {
+            if (_stoppedAt is not null || !_timeline.Pause(at)) { return; }
+            at = _timeline.Spans[^1].Start;
+            foreach (var t in _tracks) { t.Pause(at); }
+        }
+        RunAt(at, () => PauseStateChanged?.Invoke());
+    }
+
+    /// <summary>Resumes at host time <paramref name="at"/>; asks the camera for a key frame then and drops video until it arrives. Ignored when not paused.</summary>
+    public void Resume(long at)
+    {
+        long r;
+        lock (_pauseLock)
+        {
+            if (_stoppedAt is not null || _timeline.Resume(at) is not { } span) { return; }
+            r = span.End;
+            foreach (var t in _tracks) { t.Resume(r); }
+            if (_camera is not null)
+            {
+                _keyWait = true;
+                _keyWaitFrom = r;
+            }
+        }
+        RunAt(r, () =>
+        {
+            if (_camera is not null && _stoppedAt is null)
+            {
+                try { _camera.RequestKeyFrame(); } catch (Exception ex) when (ex is not OutOfMemoryException) { Error("camera: " + ex.Message); }
+            }
+            PauseStateChanged?.Invoke();
+        });
+    }
+
+    /// <summary>Runs <paramref name="action"/> now if <paramref name="at"/> has passed, else on a timer thread at that host time.</summary>
+    private void RunAt(long at, Action action)
+    {
+        var delay = at - MediaClock.Now;
+        void Run()
+        {
+            try
+            {
+                if (_stoppedAt is null) { action(); }
+            }
+            catch (Exception ex) when (ex is not OutOfMemoryException) { Error("scheduled: " + ex.Message); }
+        }
+        if (delay < 20_000) // under 2 ms: not worth a timer (and a timer could fire before it is registered)
+        {
+            while (MediaClock.Now < at) { Thread.SpinWait(50); }
+            Run();
+            return;
+        }
+        Timer? timer = null;
+        lock (_timers)
+        {
+            if (_stoppedAt is not null) { return; }
+            timer = new Timer(_ =>
+            {
+                Timer? self;
+                lock (_timers) { self = timer; if (self is not null) { _timers.Remove(self); } }
+                try { self?.Dispose(); } catch (ObjectDisposedException) { }
+                while (MediaClock.Now < at) { Thread.SpinWait(50); } // timers may fire a millisecond early; the instant must have passed
+                Run();
+            }, null, Timeout.Infinite, Timeout.Infinite);
+            _timers.Add(timer);
+        }
+        try { timer.Change(TimeSpan.FromTicks(delay), Timeout.InfiniteTimeSpan); } catch (ObjectDisposedException) { } // the take stopped meanwhile
+    }
+
     private string RelativeFile(string path) => Path.GetRelativePath(Folder, path).Replace('\\', '/');
 
     private static TakeOutput CreateOutput(string folder, string stamp, RecordingSettings s, IReadOnlyList<MikeChannel> channels,
@@ -635,6 +760,10 @@ internal sealed class TakeRecorder
             _camera.SampleEncoded += _videoHandler;
             _camera.StartEncoding();
         }
+        if (_sidecarWritten)
+        {
+            _flushTimer = new Timer(_ => FlushSidecarExtras(complete: false), null, FlushInterval, FlushInterval);
+        }
     }
 
     public async Task<RecordedTake> StopAsync()
@@ -642,7 +771,8 @@ internal sealed class TakeRecorder
         var tStop = MediaClock.Now;
         if (!_stopped)
         {
-            _stopped = true;
+            lock (_pauseLock) { _stopped = true; _stoppedAt = tStop; }
+            lock (_timers) { foreach (var t in _timers) { t.Dispose(); } _timers.Clear(); }
             // Audio for [t0, tStop] is still in flight (bluetooth latency): keep receiving for that long, capped at tStop.
             foreach (var t in _tracks) { t.SetEnd(tStop); }
             var wait = _tracks.Max(t => t.Latency) + TimeSpan.FromMilliseconds(50);
@@ -668,8 +798,9 @@ internal sealed class TakeRecorder
             }
         }
         await _done.Task.ConfigureAwait(false);
-        var duration = TimeSpan.FromTicks(tStop - _t0);
-        CompleteSidecar(duration);
+        _flushTimer?.Dispose();
+        var duration = TimeSpan.FromTicks(_timeline.Effective(_stoppedAt ?? tStop));
+        CompleteSidecar(duration, _stoppedAt ?? tStop);
         List<string> errors;
         lock (_errors) { errors = [.. _errors]; }
         return new RecordedTake(Folder, Format, _output.Files.ToArray(), duration)
@@ -793,7 +924,7 @@ internal sealed class TakeRecorder
     }
 
     /// <summary>Sidecar at the end of the take: status complete and the durations. Failures are reported, not thrown.</summary>
-    private void CompleteSidecar(TimeSpan duration)
+    private void CompleteSidecar(TimeSpan duration, long tStop)
     {
         if (!_sidecarWritten) { return; }
         for (var i = 0; i < _tracks.Length; i++)
@@ -807,17 +938,56 @@ internal sealed class TakeRecorder
             _sidecarTracks.RemoveAll(x => x.IsVideo);
             foreach (var t in _micTracks.Where(x => x.TrackIndex > 0)) { t.TrackIndex--; }
         }
-        try
+        FlushSidecarExtras(complete: true, tStop);
+    }
+
+    /// <summary>
+    /// Writes <c>pauses[]</c> (<c>atMs</c> on the take's output timeline) and <c>dropouts[]</c> (track-local recorded ms) to the sidecar;
+    /// called by a timer every few seconds (only when something changed) and at the stop. Runs on a timer or the stopping thread, never on a receive thread.
+    /// </summary>
+    private void FlushSidecarExtras(bool complete, long? tStop = null)
+    {
+        if (!_sidecarWritten) { return; }
+        lock (_flushLock)
         {
-            TakeSidecar.Update(Folder, s =>
+            try
             {
-                s.Status = TakeStatus.Complete;
-                s.Tracks = _sidecarTracks;
-            });
-        }
-        catch (Exception ex) when (ex is not OutOfMemoryException)
-        {
-            Error("sidecar: " + ex.Message);
+                var now = tStop ?? MediaClock.Now;
+                var pauses = _timeline.Spans.Where(sp => sp.Start <= now)
+                    .Select(sp => new PauseInfo { AtMs = Math.Round(_timeline.Effective(sp.Start) / 10_000.0, 1) }).ToList();
+                var dropouts = new List<DropoutInfo>();
+                for (var i = 0; i < _tracks.Length && i < _micTracks.Count; i++)
+                {
+                    foreach (var (a, b) in _tracks[i].Dropouts)
+                    {
+                        dropouts.Add(new DropoutInfo
+                        {
+                            Track = _micTracks[i].Id,
+                            StartMs = Math.Round(a * 1000.0 / ClockLockedTrack.OutputRate, 1),
+                            EndMs = Math.Round(b * 1000.0 / ClockLockedTrack.OutputRate, 1),
+                        });
+                    }
+                }
+                var count = pauses.Count * 4096 + dropouts.Count;
+                if (!complete && count == _flushedCount) { return; }
+                _flushedCount = count;
+                var ids = _micTracks.Select(t => t.Id).ToHashSet();
+                TakeSidecar.Update(Folder, s =>
+                {
+                    if (complete)
+                    {
+                        s.Status = TakeStatus.Complete;
+                        s.Tracks = _sidecarTracks;
+                    }
+                    s.Pauses = pauses;
+                    s.Dropouts.RemoveAll(d => ids.Contains(d.Track));
+                    s.Dropouts.AddRange(dropouts);
+                }, durable: complete);
+            }
+            catch (Exception ex) when (ex is not OutOfMemoryException)
+            {
+                Error("sidecar: " + ex.Message);
+            }
         }
     }
 }

@@ -488,6 +488,22 @@ public sealed class AndroidVideoCapture : IVideoCapture
         Log.Info(Tag, $"StartEncoding size={size.W}x{size.H} rotation={rotation} mediaNow={_startMediaTicks}");
     }
 
+    /// <summary>Asks the encoder for a sync frame now (a remote viewer joined).</summary>
+    public void RequestKeyFrame()
+    {
+        if (_disposed || _enc is not { } enc)
+        {
+            return;
+        }
+        try
+        {
+            using var p = new Bundle();
+            p.PutInt(MediaCodec.ParameterKeyRequestSyncFrame, 0);
+            enc.Codec.SetParameters(p);
+        }
+        catch (Java.Lang.IllegalStateException) { }
+    }
+
     public void StopEncoding()
     {
         if (_encoding)

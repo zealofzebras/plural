@@ -170,6 +170,9 @@ public partial class MainView : UserControl
             case nameof(MainViewModel.ImmersiveActive):
                 ApplyChrome();
                 break;
+            case nameof(MainViewModel.IsRecordingUi):
+                Root.Classes.Set("recui", _vm?.IsRecordingUi == true);
+                break;
             case nameof(MainViewModel.ShowPreviewPanel):
                 Relayout();
                 break;

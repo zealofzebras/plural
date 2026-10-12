@@ -55,7 +55,7 @@ internal static class Program
         if (profileName == "all")
         {
             // One process per profile: the app keeps one view model per process.
-            foreach (var p in Page == "player" ? [.. Profiles, PhoneLandscape] : Profiles)
+            foreach (var p in Page == "player" ? [.. Profiles, PhoneLandscape] : Page == "recorder" ? [Profiles[0], Profiles[2]] : Profiles)
             {
                 var psi = new ProcessStartInfo(Environment.ProcessPath!) { UseShellExecute = false };
                 foreach (var a in new[] { "--profile", p.Name, "--out", outRoot, "--theme", theme }.Concat(MixerOnly ? ["--mixer"] : Array.Empty<string>()).Concat(Page is null ? [] : ["--page", Page]))
@@ -157,6 +157,14 @@ internal static class Program
         PumpUntil(() => vm.Mikes.Average(m => m.Level) > 0.3, 5);
         Shot("all mics live");
 
+        if (Page == "recorder")
+        {
+            RecorderPage(vm, window, Shot);
+            try { Directory.Delete(work, true); } catch (IOException) { } catch (UnauthorizedAccessException) { }
+            Console.Out.Flush();
+            Environment.Exit(0);
+        }
+
         if (MixerOnly)
         {
             // Opt-in preview of mixer mode (--mixer): not part of the store screenshots.
@@ -232,6 +240,69 @@ internal static class Program
         try { Directory.Delete(work, true); } catch (IOException) { } catch (UnauthorizedAccessException) { }
         Console.Out.Flush();
         Environment.Exit(0);
+    }
+
+    /// <summary>Recorder reliability scenes (development; not part of the store set): warnings, pause, reconnecting, low space.</summary>
+    private static void RecorderPage(MainViewModel vm, Window window, Action<string> shot)
+    {
+        // Warnings before recording: a SmartMike at 18 %, this device at 12 % and not charging, about 50 minutes of space.
+        SimulatedBluetooth.BatteryOverride[2] = 3170;
+        ScreenshotHost.Battery = new HostBattery(12, false);
+        ScreenshotHost.FreeBytes = 1200L * 1024 * 1024;
+        Require(PumpUntil(() => vm.PreflightText.Length > 0 && vm.SpaceHint.Length > 0, 15), "preflight warnings did not appear: " + vm.PreflightText + "|" + vm.SpaceHint);
+        shot("low battery and low space before recording");
+        vm.OpenSettingsCommand.Execute(null);
+        shot("settings: mic buttons and free space");
+        vm.CloseSettingsCommand.Execute(null);
+
+        // A SmartMike drops out while idle: the card turns amber and counts the gap.
+        SimulatedBluetooth.DroppedMask = 1 << 0;
+        Require(PumpUntil(() => vm.Mikes[0].IsReconnecting, 20), "mic did not enter Reconnecting");
+        Pump(TimeSpan.FromSeconds(3));
+        shot("reconnecting card");
+        SimulatedBluetooth.DroppedMask = 0;
+        Require(PumpUntil(() => vm.Mikes[0].IsStreaming, 30), "mic did not come back");
+        ScreenshotHost.Battery = new HostBattery(80, true);
+        ScreenshotHost.FreeBytes = 600L * 1024 * 1024 * 1024;
+        SimulatedBluetooth.BatteryOverride[2] = 0;
+
+        // Record, then pause.
+        vm.ToggleRecordingCommand.Execute(null);
+        Require(PumpUntil(() => vm.IsRecording, 10), "recording did not start");
+        Pump(TimeSpan.FromSeconds(4));
+        shot("recording");
+        vm.TogglePauseCommand.Execute(null);
+        Require(PumpUntil(() => vm.IsPaused, 10), "recording did not pause");
+        Pump(TimeSpan.FromSeconds(1));
+        shot("paused (PAUSED blinks)");
+        vm.TogglePauseCommand.Execute(null);
+        Require(PumpUntil(() => !vm.IsPaused, 10), "recording did not resume");
+
+        // A SmartMike drops mid-take: strip shows it, recording continues.
+        SimulatedBluetooth.DroppedMask = 1 << 0;
+        Require(PumpUntil(() => vm.Mikes[0].IsReconnecting, 20), "mic did not enter Reconnecting");
+        Pump(TimeSpan.FromSeconds(4));
+        shot("recording, one mic reconnecting (strip)");
+        vm.ToggleMixerCommand.Execute(null);
+        Pump(TimeSpan.FromSeconds(1.5));
+        shot("mixer: channel strip reconnecting");
+        vm.TogglePauseCommand.Execute(null);
+        Require(PumpUntil(() => vm.IsPaused, 10), "recording did not pause");
+        Pump(TimeSpan.FromSeconds(1));
+        shot("mixer: paused");
+        vm.TogglePauseCommand.Execute(null);
+        PumpUntil(() => !vm.IsPaused, 10);
+        vm.ToggleMixerCommand.Execute(null);
+        SimulatedBluetooth.DroppedMask = 0;
+
+        // Battery toast during the take, then the disk fills up and the take stops by itself.
+        SimulatedBluetooth.BatteryOverride[1] = 3120;
+        Require(PumpUntil(() => vm.ToastText.Contains("battery"), 30), "no battery toast");
+        shot("battery toast during a take");
+        ScreenshotHost.FreeBytes = 150L * 1024 * 1024;
+        Require(PumpUntil(() => !vm.IsRecording && !vm.IsStopping && vm.IsToastVisible, 30), "recording did not stop for low space");
+        Pump(TimeSpan.FromSeconds(1));
+        shot("stopped: disk almost full");
     }
 
     /// <summary>The Takes page: list, item menu, multi-select, trash, empty state.</summary>
@@ -436,6 +507,10 @@ internal sealed class ScreenshotHost : IAppHost
     public Task<bool> EnsureMicrophonePermissionAsync() => Task.FromResult(true);
     public string SettingsPath { get; }
     public void OnRecordingChanged(bool recording) { }
+    public static long? FreeBytes { get; set; } = 120L * 1024 * 1024 * 1024;
+    public static HostBattery? Battery { get; set; }
+    long? IAppHost.GetFreeSpace(string folder) => FreeBytes;
+    HostBattery? IAppHost.GetBattery() => Battery;
     public string DeviceName => _mobile ? "Pixel 9" : "Studio PC";
     public string PlatformName => _mobile ? "Android" : "Windows";
     public IReadOnlyList<IRemoteTransport> CreateRemoteTransports(MikeHub hub) => [new LoopTransport(_registry)];

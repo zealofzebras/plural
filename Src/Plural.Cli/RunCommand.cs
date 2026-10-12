@@ -39,6 +39,7 @@ sealed partial class RunCommand(MikeHub hub, string[] a, Stream? mcpOut = null)
           devices                      paired SmartMikes, local mics, outputs, cameras, formats
           add MAC|NAME                 add and connect a paired SmartMike or local mic
           record [SECONDS]             start a take (stops by itself after SECONDS)
+          pause | resume               pause the take (paused time is cut from every track) / continue it
           stop                         finish the take
           fader MIC DB                 channel level (-60/off … +12)
           mute MIC | unmute MIC        mute in recording and outputs
@@ -668,8 +669,27 @@ sealed partial class RunCommand(MikeHub hub, string[] a, Stream? mcpOut = null)
         }
         if (hub.IsRecording)
         {
-            Say($"REC {hub.RecordingFolder}");
+            Say($"{(hub.IsRecordingPaused ? "PAUSED" : "REC")} {hub.RecordingFolder}  recorded {FormatTime(hub.RecordedTime)}");
         }
+    }
+
+    private static string FormatTime(TimeSpan t) => $"{(int)t.TotalMinutes}:{t.Seconds:00}.{t.Milliseconds / 100}";
+
+    /// <summary>Pauses or resumes the take in progress and says what happened.</summary>
+    private void PauseRecording(bool pause)
+    {
+        if (!hub.IsRecording)
+        {
+            Say("not recording");
+            return;
+        }
+        if (pause == hub.IsRecordingPaused)
+        {
+            Say(pause ? "already paused" : "not paused");
+            return;
+        }
+        if (pause) { hub.PauseRecording(); } else { hub.ResumeRecording(); }
+        Say(pause ? $"paused at {FormatTime(hub.RecordedTime)}" : $"resumed at {FormatTime(hub.RecordedTime)}");
     }
 
     private void PrintDevices()
@@ -759,6 +779,12 @@ sealed partial class RunCommand(MikeHub hub, string[] a, Stream? mcpOut = null)
                 break;
             case "stop":
                 await StopRecordingAsync();
+                break;
+            case "pause":
+                PauseRecording(true);
+                break;
+            case "resume":
+                PauseRecording(false);
                 break;
             case "fader" or "f" when args.Length == 2 && TryDb(args[1], out var db):
                 Fader(args[0], db);

@@ -72,6 +72,7 @@ public partial class MainViewModel
         };
         OnPropertyChanged(nameof(IsRecorderPage));
         OnPropertyChanged(nameof(IsNotRecorderPage));
+        UpdateKeepAwake();
     }
 
     /// <summary>The library of the current recording root; one instance per root (the root can be changed in the settings).</summary>

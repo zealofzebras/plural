@@ -1,3 +1,4 @@
+using System.Text.Json;
 using System.Net;
 using System.Net.Sockets;
 using Plural.Core.Platform;
@@ -59,7 +60,35 @@ public class RemoteTests
         public List<RemoteControllerInfo?> Controllers { get; } = [];
         public byte[] Content { get; } = Enumerable.Range(0, 300_000).Select(i => (byte)(i * 7)).ToArray();
 
-        public StatusMsg GetStatus() => new([new RemoteMicStatus("Mic", true, 0.5f)], Recording, TakeId, 0, true, Mode == true, true, "WAV");
+        public StatusMsg GetStatus() => new([new RemoteMicStatus("Mic", true, 0.5f)], Recording, TakeId, 0, true, Mode == true, true, "WAV", IsPaused);
+
+        public bool IsPaused { get; private set; }
+        public int PauseCalls { get; private set; }
+        public int ResumeCalls { get; private set; }
+        public long RequestedPause { get; private set; }
+        public long PausedAt { get; private set; }
+        public long RequestedResume { get; private set; }
+        public long ResumedAt { get; private set; }
+
+        public async Task<long> PauseAsync(string takeId, long pauseAt)
+        {
+            PauseCalls++;
+            RequestedPause = pauseAt;
+            while (MediaClock.Now < pauseAt) { await Task.Delay(1); }
+            PausedAt = MediaClock.Now;
+            IsPaused = true;
+            return pauseAt;
+        }
+
+        public async Task<long> ResumeAsync(string takeId, long resumeAt)
+        {
+            ResumeCalls++;
+            RequestedResume = resumeAt;
+            while (MediaClock.Now < resumeAt) { await Task.Delay(1); }
+            ResumedAt = MediaClock.Now;
+            IsPaused = false;
+            return resumeAt;
+        }
 
         public Task<bool> ApproveAsync(HelloMsg controller)
         {
@@ -186,6 +215,164 @@ public class RemoteTests
         await ctrl.DisconnectAsync(dev);
         await Until(() => remote.Responder.Controller is null);
         Directory.Delete(tmp, true);
+    }
+
+    /// <summary>A controller connected to a remote that is recording take "t".</summary>
+    private sealed class Pair : IAsyncDisposable
+    {
+        public required RemoteNetwork Remote;
+        public required RemoteNetwork Ctrl;
+        public required FakeRecorder RemoteRec;
+        public required RemoteDevice Dev;
+        public required string Folder;
+        public required long StartAt;
+
+        public async ValueTask DisposeAsync()
+        {
+            await Ctrl.DisposeAsync();
+            await Remote.DisposeAsync();
+            try { Directory.Delete(Path.GetDirectoryName(Folder)!, true); } catch (IOException) { }
+        }
+    }
+
+    private static async Task<Pair> RecordingPairAsync(string tag, int remoteProtocol)
+    {
+        var tmp = Path.Combine(Path.GetTempPath(), "plural_remote_" + Guid.NewGuid().ToString("N"));
+        var registry = new Dictionary<string, (RemoteIdentity, Func<Stream, Task>)>();
+        var remoteRec = new FakeRecorder(Path.Combine(tmp, "remote"));
+        var remote = new RemoteNetwork(new RemoteIdentity("r-" + tag, "Phone", "Android"), [new LoopTransport(registry)], remoteRec) { ProtocolVersion = remoteProtocol };
+        var ctrl = new RemoteNetwork(new RemoteIdentity("c-" + tag, "PC", "Windows"), [new LoopTransport(registry)], new FakeRecorder(tmp));
+        remoteRec.Net = remote;
+        remote.StartListening();
+        await Until(() => registry.Count == 1);
+        var dev = ctrl.Connect(new DiscoveredPeer(remote.Identity.Id, "Phone", "Android", [new RemoteEndpoint("Loop", remote.Identity.Id, remote.Identity.Id, "Phone", "Android")]));
+        await Until(() => dev.State == RemoteDeviceState.Connected && dev.ClockOffset is not null);
+        var folder = Path.Combine(tmp, "take");
+        Directory.CreateDirectory(folder);
+        var startAt = MediaClock.Now + TimeSpan.FromMilliseconds(100).Ticks;
+        ctrl.RegisterTake("t", folder, startAt);
+        ctrl.ActiveTakeId = "t";
+        await dev.StartAsync("t", startAt, false);
+        return new Pair { Remote = remote, Ctrl = ctrl, RemoteRec = remoteRec, Dev = dev, Folder = folder, StartAt = startAt };
+    }
+
+    [Fact]
+    public async Task PauseAndResumeReachTheRemoteAtTheScheduledInstant()
+    {
+        await using var p = await RecordingPairAsync("p1", RemoteProtocol.Version);
+        Assert.True(p.Dev.SupportsPause);
+
+        var pauseAt = MediaClock.Now + TimeSpan.FromMilliseconds(300).Ticks;
+        var lateMs = await p.Dev.PauseAsync("t", pauseAt);
+        Assert.Equal(1, p.RemoteRec.PauseCalls);
+        Assert.True(p.RemoteRec.IsPaused);
+        // The remote clock is ours (same process), so the scheduled instant arrives unchanged and is honoured, not early.
+        Assert.InRange((p.RemoteRec.RequestedPause - pauseAt) / 10_000.0, -20, 20);
+        Assert.True(p.RemoteRec.PausedAt >= pauseAt - 10_000, "paused before the scheduled instant");
+        Assert.InRange(lateMs, -20, 20);
+        await Until(() => p.Dev.Status?.Paused == true);
+
+        var resumeAt = MediaClock.Now + TimeSpan.FromMilliseconds(300).Ticks;
+        await p.Dev.ResumeAsync("t", resumeAt);
+        Assert.Equal(1, p.RemoteRec.ResumeCalls);
+        Assert.False(p.RemoteRec.IsPaused);
+        Assert.True(p.RemoteRec.ResumedAt >= resumeAt - 10_000);
+        await Until(() => p.Dev.Status?.Paused == false);
+
+        // Per-device pause list in take.json: wall-clock ms since the scheduled start.
+        var pause = Assert.Single(TakeManifest.Load(p.Folder)!.Devices.Single().Pauses);
+        Assert.InRange(pause.StartMs, (pauseAt - p.StartAt) / 10_000.0 - 1, (pauseAt - p.StartAt) / 10_000.0 + 1);
+        Assert.InRange(pause.EndMs!.Value, (resumeAt - p.StartAt) / 10_000.0 - 1, (resumeAt - p.StartAt) / 10_000.0 + 1);
+    }
+
+    [Fact]
+    public async Task PauseForAnotherTakeIsAnsweredWithAnError()
+    {
+        await using var p = await RecordingPairAsync("p2", RemoteProtocol.Version);
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => p.Dev.PauseAsync("other", MediaClock.Now + 1_000_000));
+        Assert.Contains("Not recording this take", ex.Message);
+        Assert.Equal(0, p.RemoteRec.PauseCalls);
+    }
+
+    [Fact]
+    public async Task SecondPauseWhileOneIsPending_IsRejected_AndTheFirstStillCompletes()
+    {
+        await using var p = await RecordingPairAsync("p4", RemoteProtocol.Version);
+        var first = p.Dev.PauseAsync("t", MediaClock.Now + TimeSpan.FromMilliseconds(400).Ticks);
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => p.Dev.PauseAsync("t", MediaClock.Now + TimeSpan.FromMilliseconds(500).Ticks));
+        Assert.Contains("already pending", ex.Message);
+        await first.WaitAsync(TimeSpan.FromSeconds(3)); // answered by the remote, not by the 6 s timeout
+        Assert.Equal(1, p.RemoteRec.PauseCalls);
+        var pending = (System.Collections.IDictionary)typeof(RemoteDevice).GetField("_pausing", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!.GetValue(p.Dev)!;
+        Assert.Empty(pending);
+        await p.Dev.ResumeAsync("t", MediaClock.Now + TimeSpan.FromMilliseconds(100).Ticks);
+        Assert.Empty(pending);
+    }
+
+    [Fact]
+    public async Task OlderRemoteIsFlaggedAndNeverSentPause()
+    {
+        await using var p = await RecordingPairAsync("p3", remoteProtocol: 1);
+        Assert.Equal(1, p.Dev.Protocol);
+        Assert.False(p.Dev.SupportsPause);
+        await Assert.ThrowsAsync<NotSupportedException>(() => p.Dev.PauseAsync("t", MediaClock.Now + 1_000_000));
+        await Assert.ThrowsAsync<NotSupportedException>(() => p.Dev.ResumeAsync("t", MediaClock.Now + 1_000_000));
+        await Task.Delay(200);
+        Assert.Equal(0, p.RemoteRec.PauseCalls);
+        Assert.Equal(0, p.RemoteRec.ResumeCalls);
+        Assert.Empty(TakeManifest.Load(p.Folder)?.Devices.SelectMany(d => d.Pauses) ?? []);
+    }
+
+    [Fact]
+    public async Task RemoteRecordButtonIsForwardedToTheController()
+    {
+        await using var p = await RecordingPairAsync("p4", RemoteProtocol.Version);
+        var fromNetwork = new TaskCompletionSource<RemoteDevice>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var fromDevice = new TaskCompletionSource<RemoteDevice>(TaskCreationOptions.RunContinuationsAsynchronously);
+        p.Ctrl.RecordRequested += d => fromNetwork.TrySetResult(d);
+        p.Dev.RecordRequested += d => fromDevice.TrySetResult(d);
+
+        // The remote does not record by itself: the press goes to the controller.
+        Assert.True(p.Remote.Responder.ForwardRecordButton("Mic 1"));
+        Assert.Same(p.Dev, await fromNetwork.Task.WaitAsync(TimeSpan.FromSeconds(5)));
+        Assert.Same(p.Dev, await fromDevice.Task.WaitAsync(TimeSpan.FromSeconds(5)));
+    }
+
+    [Fact]
+    public async Task RecordButtonIsNotForwardedWhenNobodyControlsThisDevice()
+    {
+        var registry = new Dictionary<string, (RemoteIdentity, Func<Stream, Task>)>();
+        await using var alone = new RemoteNetwork(new RemoteIdentity("a-1", "Solo", "Windows"), [new LoopTransport(registry)], new FakeRecorder(Path.GetTempPath()));
+        Assert.False(alone.Responder.ForwardRecordButton());
+    }
+
+    [Fact]
+    public async Task NewerFeatureLevelIsAcceptedAtOurLevel()
+    {
+        var registry = new Dictionary<string, (RemoteIdentity, Func<Stream, Task>)>();
+        var remoteRec = new FakeRecorder(Path.GetTempPath());
+        await using var remote = new RemoteNetwork(new RemoteIdentity("r-n", "Phone", "Android"), [new LoopTransport(registry)], remoteRec) { ProtocolVersion = RemoteProtocol.Version + 1 };
+        await using var ctrl = new RemoteNetwork(new RemoteIdentity("c-n", "PC", "Windows"), [new LoopTransport(registry)], new FakeRecorder(Path.GetTempPath()));
+        remote.StartListening();
+        await Until(() => registry.Count == 1);
+        var dev = ctrl.Connect(new DiscoveredPeer("r-n", "Phone", "Android", [new RemoteEndpoint("Loop", "r-n", "r-n", "Phone", "Android")]));
+        await Until(() => dev.State == RemoteDeviceState.Connected);
+        Assert.Equal(RemoteProtocol.Version, dev.Protocol);
+        Assert.True(dev.SupportsPause);
+    }
+
+    [Fact]
+    public void HelloStaysReadableForReleaseOneApps()
+    {
+        // Release-1 builds refuse Hello.Protocol != 1 and ignore unknown fields; they send no "level".
+        var json = JsonSerializer.Serialize(new HelloMsg(RemoteProtocol.WireVersion, "id", "PC", "Windows", false, true, RemoteProtocol.Version), RemoteJson.Default.HelloMsg);
+        using (var doc = JsonDocument.Parse(json))
+        {
+            Assert.Equal(1, doc.RootElement.GetProperty(doc.RootElement.EnumerateObject().First(p => p.Name.Equals("protocol", StringComparison.OrdinalIgnoreCase)).Name).GetInt32());
+        }
+        var old = JsonSerializer.Deserialize(json.Replace("\"level\"", "\"x\"").Replace("\"Level\"", "\"x\""), RemoteJson.Default.HelloMsg)!;
+        Assert.Equal(1, old.EffectiveLevel);
+        Assert.Equal(RemoteProtocol.Version, JsonSerializer.Deserialize(json, RemoteJson.Default.HelloMsg)!.EffectiveLevel);
     }
 
     [Fact]

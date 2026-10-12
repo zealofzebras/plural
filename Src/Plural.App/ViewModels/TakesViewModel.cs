@@ -168,23 +168,56 @@ public partial class TakesViewModel : ViewModelBase
     public async Task<bool> EnsurePeaksAsync(TakeInfo info)
     {
         var decoders = Main.Hub?.AudioDecoders;
-        await _peakGate.WaitAsync();
+        using var cts = new System.Threading.CancellationTokenSource();
+        lock (_peakJobs) { _peakJobs.Add((info.Folder, cts)); }
+        var gated = false;
         try
         {
-            if (!await Task.Run(() => info.Tracks.Any(t => PeakService.NeedsPeaks(info, t)))) { return false; }
+            await _peakGate.WaitAsync(cts.Token);
+            gated = true;
+            if (IsOpenInPlayer(info.Folder)) { return false; } // the Player makes the peaks of the take it shows
+            if (!await Task.Run(() => info.Tracks.Any(t => PeakService.NeedsPeaks(info, t)), cts.Token)) { return false; }
             var counter = new Counter();
-            await PeakService.EnsurePeaksAsync(info, decoders, counter);
+            await PeakService.EnsurePeaksAsync(info, decoders, counter, cts.Token);
             return counter.Count > 0;
         }
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {
-            return false;
+            return false; // includes cancelled
         }
         finally
         {
-            _peakGate.Release();
+            if (gated) { _peakGate.Release(); }
+            lock (_peakJobs) { _peakJobs.RemoveAll(j => j.Cts == cts); }
         }
     }
+
+    private readonly List<(string Folder, System.Threading.CancellationTokenSource Cts)> _peakJobs = [];
+
+    private bool IsOpenInPlayer(string folder) =>
+        Main.CurrentPage == AppPage.Player && Main.Player.Take is { } t && SameFolder(t.Folder, folder);
+
+    private static bool SameFolder(string a, string b) =>
+        string.Equals(a.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar),
+            b.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar), StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>Stops the list's peak job for a take (the Player opens it and generates the peaks itself).</summary>
+    public void CancelPeaks(string folder)
+    {
+        List<System.Threading.CancellationTokenSource> hit;
+        lock (_peakJobs) { hit = _peakJobs.Where(j => SameFolder(j.Folder, folder)).Select(j => j.Cts).ToList(); }
+        foreach (var cts in hit)
+        {
+            try { cts.Cancel(); }
+            catch (ObjectDisposedException) { /* finished */ }
+        }
+    }
+
+    /// <summary>The take is being recorded right now (status, or the folder the hub writes to).</summary>
+    public bool IsActive(TakeViewModel t) => IsActive(t.Info);
+
+    public bool IsActive(TakeInfo info) =>
+        info.Status == TakeStatus.Recording || (Main.Hub?.RecordingFolder is { Length: > 0 } f && SameFolder(f, info.Folder));
 
     public TakeViewModel? Find(string folder) =>
         _byFolder.TryGetValue(folder.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar), out var vm) ? vm : null;
@@ -258,6 +291,12 @@ public partial class TakesViewModel : ViewModelBase
             foreach (var t in result) { Items.Add(t); }
         }
         CountText = IsFiltering ? $"{result.Count} of {_all.Count} takes" : _all.Count == 1 ? "1 take" : $"{_all.Count} takes";
+        // only visible takes can stay checked: delete / share must not touch what the filter hides
+        var visible = new HashSet<TakeViewModel>(result);
+        foreach (var t in _all)
+        {
+            if (t.IsChecked && !visible.Contains(t)) { t.IsChecked = false; }
+        }
         UpdateChecked();
         OnPropertyChanged(nameof(IsFiltering));
         RaiseState();
@@ -330,7 +369,9 @@ public partial class TakesViewModel : ViewModelBase
         UpdateChecked();
     }
 
-    public void UpdateChecked() => CheckedCount = _all.Count(t => t.IsChecked);
+    public void UpdateChecked() => CheckedCount = Items.Count(t => t.IsChecked);
+
+    private List<TakeViewModel> CheckedItems() => Items.Where(t => t.IsChecked).ToList();
 
     // ------------------------------------------------------------------ item menu and dialogs
 
@@ -345,7 +386,7 @@ public partial class TakesViewModel : ViewModelBase
 
     private bool Busy(TakeViewModel take)
     {
-        if (!take.IsRecording) { return false; }
+        if (!IsActive(take)) { return false; }
         Main.ShowToast("Still recording", "Stop the recording first.", false, null);
         return true;
     }
@@ -442,6 +483,8 @@ public partial class TakesViewModel : ViewModelBase
 
     private async Task EditAsync(TakeViewModel t, Func<TakeLibrary, TakeInfo?> edit, string what)
     {
+        if (Busy(t)) { return; }
+        _refreshVersion++; // a scan that started before the edit would bring back the old record
         var lib = Main.Library;
         try
         {
@@ -456,6 +499,7 @@ public partial class TakesViewModel : ViewModelBase
         {
             Main.ShowToast($"Cannot {what} this take", ex.Message, true, null);
         }
+        _ = RefreshAsync();
     }
 
     // ------------------------------------------------------------------ share and open folder
@@ -490,7 +534,7 @@ public partial class TakesViewModel : ViewModelBase
     [RelayCommand]
     private async Task ShareCheckedAsync()
     {
-        await ShareAsync(_all.Where(t => t.IsChecked).ToList());
+        await ShareAsync(CheckedItems());
         ExitSelecting();
     }
 
@@ -543,28 +587,31 @@ public partial class TakesViewModel : ViewModelBase
     [RelayCommand]
     private async Task DeleteCheckedAsync()
     {
-        await DeleteAsync(_all.Where(t => t.IsChecked).ToList());
+        await DeleteAsync(CheckedItems());
         ExitSelecting();
     }
 
     /// <summary>Moves the takes to the trash and offers Undo in a toast.</summary>
     public async Task DeleteAsync(IReadOnlyList<TakeViewModel> takes)
     {
-        takes = takes.Where(t => !t.IsRecording).ToList();
+        var requested = takes.Count;
+        takes = takes.Where(t => !IsActive(t)).ToList();
         if (takes.Count == 0)
         {
-            if (_all.Any(t => t.IsChecked && t.IsRecording)) { Main.ShowToast("Still recording", "Stop the recording first.", false, null); }
+            if (requested > 0) { Main.ShowToast("Still recording", "Stop the recording first.", false, null); }
             return;
         }
+        _refreshVersion++; // a scan running while the folders move would list the deleted takes again
         var lib = Main.Library;
+        var active = Main.Hub?.RecordingFolder;
         var moved = new List<(TakeViewModel Take, string Trashed)>();
         string? error = null;
         await Task.Run(() =>
         {
             foreach (var t in takes)
             {
-                try { moved.Add((t, lib.Delete(t.Folder))); }
-                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException) { error = ex.Message; }
+                try { moved.Add((t, lib.Delete(t.Folder, active))); }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or InvalidOperationException) { error = ex.Message; }
             }
         });
         foreach (var (t, _) in moved)
@@ -576,6 +623,7 @@ public partial class TakesViewModel : ViewModelBase
         HasAnyTakes = _all.Count > 0;
         TrashCount += moved.Count;
         ApplyFilter();
+        _ = RefreshAsync();
         if (moved.Count == 0)
         {
             Main.ShowToast("Cannot delete", error ?? "", true, null);
@@ -620,6 +668,7 @@ public partial class TakesViewModel : ViewModelBase
 
     public async Task RestoreAsync(TakeViewModel take)
     {
+        _refreshVersion++;
         var lib = Main.Library;
         try
         {

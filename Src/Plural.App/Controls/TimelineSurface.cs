@@ -29,7 +29,14 @@ public class TimelineSurface : Control
     private static readonly double[] Steps = [0.1, 0.2, 0.5, 1, 2, 5, 10, 15, 30, 60, 120, 300, 600, 900, 1800, 3600, 7200];
     private static readonly Typeface TickFont = new(FontFamily.Default, FontStyle.Normal, FontWeight.Medium);
 
+    private static readonly StreamGeometry PlayheadMarker = CreateMarker();
+
     private enum Mode { None, Pending, Pan, Scrub, Vertical, Pinch }
+
+    private readonly Dictionary<string, FormattedText> _labels = [];
+    private IBrush? _penBrush, _playBrush;
+    private Pen? _tickPen, _playPen;
+    private bool _scrubOpen; // a non-final seek was sent and the final one is still owed
 
     private readonly Dictionary<int, Point> _pointers = [];
     private Mode _mode;
@@ -77,7 +84,14 @@ public class TimelineSurface : Control
 
         var rh = RulerHeight;
         context.DrawRectangle(RulerBrush, null, new Rect(0, 0, w, rh));
-        var pen = new Pen(TickBrush, 1);
+        var tick = TickBrush;
+        if (_tickPen is null || !ReferenceEquals(tick, _penBrush))
+        {
+            _penBrush = tick;
+            _tickPen = new Pen(tick, 1);
+            _labels.Clear();
+        }
+        var pen = _tickPen!;
         var span = Span;
         var pxPerSec = w / span;
         var step = Steps[^1];
@@ -91,30 +105,54 @@ public class TimelineSurface : Control
             var x = X(t);
             if (x < -40 || x > w + 40) { continue; }
             context.DrawLine(pen, new Point(x, rh - 9), new Point(x, rh));
-            var label = new FormattedText(Format(t, step), CultureInfo.InvariantCulture, FlowDirection.LeftToRight, TickFont, 11, TickBrush);
-            context.DrawText(label, new Point(x + 4, 3));
+            context.DrawText(Label(Format(t, step)), new Point(x + 4, 3));
             // half-step minor tick
             var xm = X(t + step / 2);
             if (xm >= 0 && xm <= w) { context.DrawLine(pen, new Point(xm, rh - 5), new Point(xm, rh)); }
         }
-        context.DrawLine(new Pen(TickBrush, 1), new Point(0, rh - 0.5), new Point(w, rh - 0.5));
+        context.DrawLine(pen, new Point(0, rh - 0.5), new Point(w, rh - 0.5));
 
         // playhead
         var px = X(Position);
         if (px >= -2 && px <= w + 2)
         {
             var brush = PlayheadBrush ?? Brushes.White;
-            context.DrawLine(new Pen(brush, 2), new Point(px, 0), new Point(px, h));
-            var tri = new StreamGeometry();
-            using (var g = tri.Open())
+            if (_playPen is null || !ReferenceEquals(brush, _playBrush))
             {
-                g.BeginFigure(new Point(px - 7, 0), true);
-                g.LineTo(new Point(px + 7, 0));
-                g.LineTo(new Point(px, 11));
-                g.EndFigure(true);
+                _playBrush = brush;
+                _playPen = new Pen(brush, 2);
             }
-            context.DrawGeometry(brush, null, tri);
+            context.DrawLine(_playPen!, new Point(px, 0), new Point(px, h));
+            using (context.PushTransform(Matrix.CreateTranslation(px, 0)))
+            {
+                context.DrawGeometry(brush, null, PlayheadMarker);
+            }
         }
+    }
+
+    /// <summary>Ruler label, cached by text (a pan only changes the position, a zoom a handful of strings).</summary>
+    private FormattedText Label(string text)
+    {
+        if (!_labels.TryGetValue(text, out var label))
+        {
+            if (_labels.Count > 256) { _labels.Clear(); }
+            label = new FormattedText(text, CultureInfo.InvariantCulture, FlowDirection.LeftToRight, TickFont, 11, _penBrush);
+            _labels[text] = label;
+        }
+        return label;
+    }
+
+    private static StreamGeometry CreateMarker()
+    {
+        var tri = new StreamGeometry();
+        using (var g = tri.Open())
+        {
+            g.BeginFigure(new Point(-7, 0), true);
+            g.LineTo(new Point(7, 0));
+            g.LineTo(new Point(0, 11));
+            g.EndFigure(true);
+        }
+        return tri;
     }
 
     private static string Format(double t, double step)
@@ -145,7 +183,7 @@ public class TimelineSurface : Control
         if (pos.Y < RulerHeight || nearPlayhead)
         {
             _mode = Mode.Scrub;
-            SeekRequested?.Invoke(TimeAt(pos.X), false);
+            RaiseSeek(TimeAt(pos.X), false);
         }
         else
         {
@@ -213,11 +251,17 @@ public class TimelineSurface : Control
                     _last = pos;
                     break;
                 case Mode.Scrub:
-                    SeekRequested?.Invoke(TimeAt(pos.X), false);
+                    RaiseSeek(TimeAt(pos.X), false);
                     break;
             }
         }
         e.Handled = true;
+    }
+
+    private void RaiseSeek(double seconds, bool final)
+    {
+        _scrubOpen = !final;
+        SeekRequested?.Invoke(seconds, final);
     }
 
     protected override void OnPointerReleased(PointerReleasedEventArgs e)
@@ -229,10 +273,14 @@ public class TimelineSurface : Control
         switch (_mode)
         {
             case Mode.Pending:
-                SeekRequested?.Invoke(TimeAt(pos.X), true); // a tap
+                RaiseSeek(TimeAt(pos.X), true); // a tap
                 break;
             case Mode.Scrub:
-                SeekRequested?.Invoke(TimeAt(pos.X), true);
+                RaiseSeek(TimeAt(pos.X), true);
+                break;
+            case Mode.Pinch:
+                // a pinch that began as a scrub (second finger down) still owes the final seek, or the player stays in scrub state
+                if (_scrubOpen) { RaiseSeek(Position, true); }
                 break;
         }
         _mode = Mode.None;
@@ -244,7 +292,7 @@ public class TimelineSurface : Control
         base.OnPointerCaptureLost(e);
         if (_pointers.Remove(e.Pointer.Id) && _pointers.Count == 0)
         {
-            if (_mode == Mode.Scrub) { SeekRequested?.Invoke(Position, true); }
+            if (_mode == Mode.Scrub || _scrubOpen) { RaiseSeek(Position, true); }
             _mode = Mode.None;
         }
     }

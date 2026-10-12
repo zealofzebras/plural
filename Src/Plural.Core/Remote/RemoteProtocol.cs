@@ -28,17 +28,53 @@ public enum RemoteMsg : byte
     FileData = 14,
     FileEnd = 15,
     TakeAck = 16,
+
+    // Protocol 2
+    /// <summary>Controller → remote: pause the take at an instant on the remote's clock.</summary>
+    Pause = 17,
+    /// <summary>Controller → remote: resume the take at an instant on the remote's clock.</summary>
+    Resume = 18,
+    /// <summary>Remote → controller: reply to Pause (Paused = true) and Resume (Paused = false).</summary>
+    Paused = 19,
+    /// <summary>Remote → controller: the user pressed the record button on a mic of this device; the controller decides.</summary>
+    RecordRequest = 20,
 }
 
 public static class RemoteProtocol
 {
-    public const int Version = 1;
+    /// <summary>
+    /// Feature level: 1 = first release. 2 = Pause / Resume / Paused, RecordRequest, <c>StatusMsg.Paused</c>. Announced in
+    /// <see cref="HelloMsg.Level"/>; peers with a lower level are still accepted (down to <see cref="MinVersion"/>) but are never
+    /// sent newer messages.
+    /// </summary>
+    public const int Version = 2;
+
+    /// <summary>
+    /// Wire format version sent in <see cref="HelloMsg.Protocol"/>. It stays 1 while new features are only additions: release-1 builds
+    /// refuse any other value, but ignore unknown JSON fields such as <see cref="HelloMsg.Level"/>, so they keep working with newer apps.
+    /// </summary>
+    public const int WireVersion = 1;
+
+    /// <summary>Oldest protocol this build still talks to.</summary>
+    public const int MinVersion = 1;
+
+    /// <summary>First protocol with Pause / Resume.</summary>
+    public const int PauseVersion = 2;
+
+    /// <summary>First protocol with RecordRequest.</summary>
+    public const int RecordRequestVersion = 2;
     public const int MaxPayload = 1 << 20;
     public const int FileChunk = 64 * 1024;
 }
 
 /// <summary>Who is on the other end. <see cref="Id"/> is a stable per-install GUID.</summary>
-public sealed record HelloMsg(int Protocol, string Id, string Name, string Platform, bool HasVideo, bool WantsControl);
+/// <param name="Protocol">Wire format (<see cref="RemoteProtocol.WireVersion"/>).</param>
+/// <param name="Level">Feature level (<see cref="RemoteProtocol.Version"/>); absent (1) from release-1 builds.</param>
+public sealed record HelloMsg(int Protocol, string Id, string Name, string Platform, bool HasVideo, bool WantsControl, int Level = 1)
+{
+    /// <summary>The features both sides can use with this peer.</summary>
+    public int EffectiveLevel => Math.Clamp(Math.Max(Level, Protocol), 1, RemoteProtocol.Version);
+}
 
 public sealed record RejectMsg(string Reason);
 
@@ -53,7 +89,7 @@ public sealed record RemoteMicStatus(string Name, bool Live, float Level);
 /// <summary>Remote → controller, about twice a second.</summary>
 public sealed record StatusMsg(
     IReadOnlyList<RemoteMicStatus> Mics, bool Recording, string? TakeId, double Seconds,
-    bool HasVideo, bool VideoMode, bool CameraReady, string? Format);
+    bool HasVideo, bool VideoMode, bool CameraReady, string? Format, bool Paused = false);
 
 public sealed record SetModeMsg(bool Video);
 
@@ -64,6 +100,20 @@ public sealed record StartMsg(string TakeId, long StartAt, bool Video);
 public sealed record StartedMsg(string TakeId, long T0, string? Format, string? Error);
 
 public sealed record StopMsg(string TakeId);
+
+/// <summary>Pause take <see cref="TakeId"/> at <see cref="At"/> on the <em>remote's</em> clock (like <see cref="StartMsg"/>).</summary>
+public sealed record PauseMsg(string TakeId, long At);
+
+/// <summary>Resume take <see cref="TakeId"/> at <see cref="At"/> on the <em>remote's</em> clock.</summary>
+public sealed record ResumeMsg(string TakeId, long At);
+
+/// <summary>
+/// Reply to Pause (<see cref="Paused"/> true) or Resume (false): the instant applied on the remote clock, or why it failed.
+/// </summary>
+public sealed record PausedMsg(string TakeId, bool Paused, long At, string? Error);
+
+/// <summary>A mic button on the remote asked to toggle recording; <see cref="Source"/> names the mic (diagnostics).</summary>
+public sealed record RecordRequestMsg(string? Source);
 
 public sealed record RemoteFile(string Name, long Size);
 
@@ -87,6 +137,10 @@ public sealed record TakeAckMsg(string TakeId);
 [JsonSerializable(typeof(StartMsg))]
 [JsonSerializable(typeof(StartedMsg))]
 [JsonSerializable(typeof(StopMsg))]
+[JsonSerializable(typeof(PauseMsg))]
+[JsonSerializable(typeof(ResumeMsg))]
+[JsonSerializable(typeof(PausedMsg))]
+[JsonSerializable(typeof(RecordRequestMsg))]
 [JsonSerializable(typeof(TakeReadyMsg))]
 [JsonSerializable(typeof(FileBeginMsg))]
 [JsonSerializable(typeof(FileEndMsg))]
@@ -264,7 +318,7 @@ public sealed class RemoteLink : IAsyncDisposable
             link.Start();
             await link.SendAsync(RemoteMsg.Hello, mine).ConfigureAwait(false);
             var hello = await tcs.Task.WaitAsync(timeout).ConfigureAwait(false);
-            if (hello.Protocol != RemoteProtocol.Version)
+            if (hello.Protocol != RemoteProtocol.WireVersion || hello.EffectiveLevel < RemoteProtocol.MinVersion)
             {
                 throw new InvalidDataException($"{hello.Name} runs a different version of Plural. Update both apps.");
             }

@@ -40,6 +40,9 @@ public partial class RemoteDeviceViewModel(RemoteDevice device, MainViewModel ow
     [ObservableProperty] public partial bool IsConnecting { get; set; } = true;
     [ObservableProperty] public partial bool IsLost { get; set; }
     [ObservableProperty] public partial bool IsRecording { get; set; }
+    [ObservableProperty] public partial bool IsPaused { get; set; }
+    /// <summary>"Paused" or "Doesn't support pause" while a take runs on this device (amber); empty otherwise.</summary>
+    [ObservableProperty] public partial string RecordingNote { get; set; } = "";
     [ObservableProperty] public partial bool IsVideo { get; set; }
     [ObservableProperty] public partial bool HasVideo { get; set; }
     [ObservableProperty] public partial double Level { get; set; }
@@ -72,6 +75,8 @@ public partial class RemoteDeviceViewModel(RemoteDevice device, MainViewModel ow
         IsConnecting = d.State is RemoteDeviceState.Connecting or RemoteDeviceState.AwaitingApproval;
         IsLost = d.State is RemoteDeviceState.Reconnecting or RemoteDeviceState.Rejected;
         IsRecording = IsLive && st?.Recording == true;
+        IsPaused = IsRecording && st?.Paused == true;
+        RecordingNote = !IsRecording ? "" : IsPaused ? "Paused" : !d.SupportsPause ? "Doesn't support pause" : "";
         HasVideo = st?.HasVideo ?? d.HasVideo;
         IsVideo = st?.VideoMode == true;
         CanChange = IsLive && !recordingUi && st?.Recording != true;
@@ -88,6 +93,7 @@ public partial class RemoteDeviceViewModel(RemoteDevice device, MainViewModel ow
             RemoteDeviceState.Rejected => "Declined",
             RemoteDeviceState.Disconnected => "Off",
             _ when IsSyncing => "Syncing",
+            _ when IsPaused => "Paused",
             _ when IsRecording => "REC",
             _ => "Live",
         };

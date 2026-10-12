@@ -40,6 +40,14 @@ public sealed class RemoteNetwork : IAsyncDisposable
 
     public event Action? DevicesChanged;
 
+    /// <summary>
+    /// A remote's mic button asked to toggle recording. The app handles it like its own Record button (and starts or stops
+    /// everyone, remotes included). Raised on a background thread.
+    /// </summary>
+    public event Action<RemoteDevice>? RecordRequested;
+
+    internal void RaiseRecordRequested(RemoteDevice device) => RecordRequested?.Invoke(device);
+
     public RemoteNetwork(RemoteIdentity identity, IEnumerable<IRemoteTransport> transports, IRemoteRecorder recorder)
     {
         Identity = identity;
@@ -48,7 +56,10 @@ public sealed class RemoteNetwork : IAsyncDisposable
     }
 
     internal HelloMsg Hello(bool wantsControl) =>
-        new(RemoteProtocol.Version, Identity.Id, Identity.Name, Identity.Platform, HasVideo, wantsControl);
+        new(RemoteProtocol.WireVersion, Identity.Id, Identity.Name, Identity.Platform, HasVideo, wantsControl, ProtocolVersion);
+
+    /// <summary>Feature level announced in Hello; tests lower it to play an older app.</summary>
+    internal int ProtocolVersion { get; set; } = RemoteProtocol.Version;
 
     // ------------------------------------------------------------------ being found / controlled
 

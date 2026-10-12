@@ -1,25 +1,37 @@
 <UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:vm="using:Plural.App.ViewModels"
+             xmlns:c="using:Plural.App.Controls"
+             xmlns:views="using:Plural.App.Views"
              x:Class="Plural.App.Views.RecordingBar"
              x:DataType="vm:MainViewModel">
-    <!-- Slim bar at the top of the Takes and Player pages while a take is recording: "● REC 12:34 · Stop" -->
+    <!-- Slim bar at the top of the Takes and Player pages while a take is recording: "● REC 12:34 · Pause · Stop" -->
     <Border Background="#33FF4D5E" BorderBrush="{DynamicResource RecordBrush}" BorderThickness="0,0,0,1"
             IsVisible="{Binding IsRecordingUi}" Padding="16,4,8,4">
         <Grid ColumnDefinitions="*,Auto" MinHeight="44">
             <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
-                <Ellipse Classes="blink" Width="10" Height="10" Fill="{DynamicResource RecordBrush}" VerticalAlignment="Center" />
-                <TextBlock Text="REC" FontWeight="Bold" Foreground="{DynamicResource RecordBrush}" VerticalAlignment="Center" />
+                <views:RecDot />
+                <TextBlock Classes="reclabel" Classes.paused="{Binding IsPaused}" Text="{Binding RecordStateText}" VerticalAlignment="Center" />
                 <TextBlock Classes="mono" Text="{Binding RecordingTime}" VerticalAlignment="Center" />
-                <TextBlock Classes="muted" Text="Recording continues" VerticalAlignment="Center" />
+                <TextBlock Classes="muted" Text="Recording continues" VerticalAlignment="Center" IsVisible="{Binding !IsPaused}" />
             </StackPanel>
-            <Button Grid.Column="1" Classes="tool" Command="{Binding ToggleRecordingCommand}" IsEnabled="{Binding CanRecord}"
-                    ToolTip.Tip="Stop recording">
-                <StackPanel Orientation="Horizontal" Spacing="8">
-                    <Border Width="12" Height="12" CornerRadius="3" Background="{DynamicResource RecordBrush}" VerticalAlignment="Center" />
-                    <TextBlock Text="Stop" VerticalAlignment="Center" />
-                </StackPanel>
-            </Button>
+            <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="6">
+                <Button Classes="tool" Command="{Binding TogglePauseCommand}" IsEnabled="{Binding CanPause}"
+                        ToolTip.Tip="Pause or resume the recording">
+                    <StackPanel Orientation="Horizontal" Spacing="8">
+                        <c:Icon Data="{StaticResource IconPause}" Size="18" IsVisible="{Binding !IsPaused}" />
+                        <c:Icon Data="{StaticResource IconPlay}" Size="18" IsVisible="{Binding IsPaused}" />
+                        <TextBlock Text="{Binding PauseButtonText}" VerticalAlignment="Center" />
+                    </StackPanel>
+                </Button>
+                <Button Classes="tool" Command="{Binding ToggleRecordingCommand}" IsEnabled="{Binding CanRecord}"
+                        ToolTip.Tip="Stop recording">
+                    <StackPanel Orientation="Horizontal" Spacing="8">
+                        <Border Width="12" Height="12" CornerRadius="3" Background="{DynamicResource RecordBrush}" VerticalAlignment="Center" />
+                        <TextBlock Text="Stop" VerticalAlignment="Center" />
+                    </StackPanel>
+                </Button>
+            </StackPanel>
         </Grid>
     </Border>
 </UserControl>

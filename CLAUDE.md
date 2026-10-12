@@ -13,7 +13,7 @@ Docs/ is the source of truth — read `Docs/Plural/Design.md` (app) or `Docs/Pro
 ## Layout
 ```
 Src/Plural.slnx
-  Plural.Core/               protocol (Swiss SPP frames), MikeSession, LocalMic, MikeHub, QCELT/CELT decode, JitterBuffer, WavWriter, Recording/ (FLAC, Matroska, MP4, LAME, TakeRecorder), Remote/ (remote mode: Docs/Plural/Remote.md)
+  Plural.Core/               protocol (Swiss SPP frames), MikeSession, LocalMic, MikeHub, QCELT/CELT decode, JitterBuffer, WavWriter, Recording/ (FLAC, Matroska, fragmented MP4, LAME, TakeRecorder), Library/ (takes, plural.json sidecar, peaks, trash), Media/ (managed WAV/MKV/MP4/MP3 readers, FLAC decoder), Playback/ (TakePlayer, video layout), Remote/ (remote mode: Docs/Plural/Remote.md)
   Plural.Core.Tests/         xUnit, incl. decoding a real capture (TestData/)
   Plural.Platform.Windows/   AF_BTH RFCOMM socket, paired devices from registry, WASAPI sink (NAudio 3.1)
   Plural.Platform.Android/   BluetoothSocket RFCOMM, bonded devices, AudioTrack sink
@@ -22,7 +22,7 @@ Src/Plural.slnx
   Plural.Platform.iOS/       External Accessory (MFi only; no RFCOMM on iOS), AVAudioSession routes
   Plural.App/                shared UI: Views/MainView.axaml, ViewModels/, Services/IAppHost.cs
   Plural.App.Desktop/        desktop head → Plural.exe / Plural.app (DesktopHost: Windows + macOS)
-  Plural.App.Android/        Android head → net.getplural.app (AndroidHost, MainActivity)
+  Plural.App.Android/        Android head → net.getplural.app (AndroidHost, MainActivity, RecordingService foreground service)
   Plural.App.iOS/            iOS head → net.getplural.app (IosHost, AppDelegate); compiles on Windows, link/sign need a Mac
   Plural.Screenshots/        headless UI + simulated mics/peers → Marketing/screenshots (Tools/store/screenshots.ps1)
   Plural.Cli/                headless app: list | outputs | inputs | cameras | formats | search | serve | control | run (mics, direct outs,

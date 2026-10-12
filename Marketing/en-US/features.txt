@@ -7,3 +7,12 @@ Optional camera video with every mic as its own audio track
 Link devices over Wi-Fi or Bluetooth and record together
 Live level meters, battery status and mic settings
 Send each mic to a virtual input for other apps
+Take library with search, titles, notes and a Recently deleted folder
+Multitrack player with a waveform per mic, mute and solo, and synced video
+Several videos side by side, with a spotlight for the one that matters
+Pause and resume a take; the paused time is cut from every track
+Background recording on Android with a notification and Pause and Stop buttons
+Crash-safe MP4 and M4A: recorded audio and video up to the last piece are kept
+SmartMike+ mics reconnect by themselves after a dropout
+The Record button on a SmartMike+ mic starts and stops recording
+Warnings for low mic and phone battery and for a nearly full disk

@@ -38,7 +38,7 @@ public class WaveformView : Control
         AvaloniaProperty.Register<WaveformView, IBrush?>(nameof(PauseBrush), new SolidColorBrush(Color.Parse("#F5B53D")));
 
     private Geometry? _geometry;
-    private bool _pending, _running;
+    private bool _pending, _running, _posted;
     private string? _loadingPath;
 
     static WaveformView()
@@ -115,9 +115,17 @@ public class WaveformView : Control
     private void Schedule()
     {
         _pending = true;
-        if (_running) { return; }
-        _running = true;
-        _ = RunAsync();
+        if (_running || _posted) { return; }
+        // Start on the next dispatcher turn: the bindings of one pan / zoom step set StartSample and SamplesPerPixel one after the other,
+        // and one read of the peaks is enough for both.
+        _posted = true;
+        Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+        {
+            _posted = false;
+            if (_running) { return; }
+            _running = true;
+            _ = RunAsync();
+        }, Avalonia.Threading.DispatcherPriority.Render);
     }
 
     private async Task RunAsync()

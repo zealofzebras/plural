@@ -19,6 +19,7 @@ public sealed class VideoTileViewModel
     private byte[] _buffer = [];
     private int _width, _height, _stride;
     private bool _pending;
+    private bool _disposed;
 
     public VideoTileViewModel(PlayerTrack track, int index)
     {
@@ -81,11 +82,26 @@ public sealed class VideoTileViewModel
     /// <summary>Copies the frame (valid only during the call) and presents it on the UI thread. Any thread.</summary>
     public void Push(PreviewFrame frame) => Push(frame.Bgra.Span, frame.Width, frame.Height, frame.Stride);
 
+    /// <summary>Releases the frame and poster bitmaps (page left); later pushes are ignored. UI thread.</summary>
+    public void Dispose()
+    {
+        lock (_lock)
+        {
+            _disposed = true;
+            _buffer = [];
+            Frame?.Dispose();
+            Frame = null;
+        }
+        Poster?.Dispose();
+        Poster = null;
+    }
+
     public void Push(ReadOnlySpan<byte> bgra, int width, int height, int stride)
     {
         lock (_lock)
         {
             var need = stride * height;
+            if (_disposed) { return; }
             if (width <= 0 || height <= 0 || bgra.Length < need) { return; }
             if (_buffer.Length < need) { _buffer = new byte[need]; }
             bgra[..need].CopyTo(_buffer);
@@ -103,7 +119,7 @@ public sealed class VideoTileViewModel
         lock (_lock)
         {
             _pending = false;
-            if (_width == 0) { return; }
+            if (_width == 0 || _disposed) { return; }
             if (Frame is null || Frame.PixelSize.Width != _width || Frame.PixelSize.Height != _height)
             {
                 Frame = new WriteableBitmap(new PixelSize(_width, _height), new Vector(96, 96), PixelFormat.Bgra8888, AlphaFormat.Opaque);

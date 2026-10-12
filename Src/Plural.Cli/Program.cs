@@ -97,7 +97,7 @@ switch (cmd)
     default:
         Console.WriteLine("usage: plural list | outputs | inputs | cameras | formats | search");
         Console.WriteLine("       plural serve [--input NAME]... [--name NAME]");
-        Console.WriteLine("       plural control [--record SECONDS] [--peer NAME] [--video]");
+        Console.WriteLine("       plural control [--record SECONDS] [--peer NAME] [--video] [--connect-mics] [--pause AT:SECONDS]...");
         Console.WriteLine("       plural " + RunCommand.Usage.TrimStart());
         Console.WriteLine("       plural mcp [MAC...] [run options]   MCP server on stdin/stdout (logs on stderr) for AI clients");
         Console.WriteLine(RunCommand.ConsoleHelp);
@@ -161,6 +161,16 @@ async Task<int> Control(string[] a)
         await Task.Delay(50);
     }
     Console.WriteLine($"connected over {dev.Transport}; clock offset {dev.ClockOffset / 10_000.0:F1} ms, rtt {dev.ClockRtt.TotalMilliseconds:F1} ms; mics {string.Join(", ", dev.Status.Mics.Select(m => $"{m.Name} {(m.Live ? "live" : "off")}"))}");
+    if (a.Contains("--connect-mics"))
+    {
+        await dev.ConnectMicsAsync();
+        for (var i = 0; i < 300 && !dev.Status!.Mics.Any(m => m.Live); i++) { await Task.Delay(100); }
+        Console.WriteLine($"mics {string.Join(", ", dev.Status!.Mics.Select(m => $"{m.Name} {(m.Live ? "live" : "off")}"))}");
+    }
+    // --pause AT:SECONDS (repeatable): pause the remote AT seconds into the take for SECONDS.
+    var pauses = a.Select((x, i) => (x, i)).Where(t => t.x == "--pause" && t.i + 1 < a.Length)
+        .Select(t => a[t.i + 1].Split(':')).Select(p => (At: double.Parse(p[0], System.Globalization.CultureInfo.InvariantCulture),
+            Len: double.Parse(p[1], System.Globalization.CultureInfo.InvariantCulture))).OrderBy(p => p.At).ToList();
 
     var root = Path.Combine(AppContext.BaseDirectory, "Recordings", "controller");
     var (folder, stamp) = MikeHub.NewTakeFolder(root);
@@ -182,7 +192,18 @@ async Task<int> Control(string[] a)
         return 1;
     }
     Console.WriteLine($"remote started {offset:F1} ms after the scheduled start");
-    await Task.Delay(TimeSpan.FromSeconds(seconds));
+    var t0 = System.Diagnostics.Stopwatch.StartNew();
+    foreach (var (at, len) in pauses)
+    {
+        if (!dev.SupportsPause) { Console.WriteLine("remote doesn't support pause"); break; }
+        await Task.Delay(TimeSpan.FromSeconds(Math.Max(0, at - t0.Elapsed.TotalSeconds)));
+        var p = await dev.PauseAsync(takeId, MediaClock.Now + TimeSpan.FromMilliseconds(300).Ticks);
+        Console.WriteLine($"paused at {t0.Elapsed.TotalSeconds:F1} s ({p:F1} ms off schedule)");
+        await Task.Delay(TimeSpan.FromSeconds(len));
+        var q = await dev.ResumeAsync(takeId, MediaClock.Now + TimeSpan.FromMilliseconds(300).Ticks);
+        Console.WriteLine($"resumed at {t0.Elapsed.TotalSeconds:F1} s ({q:F1} ms off schedule)");
+    }
+    await Task.Delay(TimeSpan.FromSeconds(Math.Max(0, seconds + pauses.Sum(p => p.Len) - t0.Elapsed.TotalSeconds)));
     net.ActiveTakeId = null;
     var wait = dev.WaitForTakeAsync(takeId);
     sw.Restart();

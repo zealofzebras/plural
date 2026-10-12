@@ -248,8 +248,8 @@ public partial class MainViewModel
         // What a controller sees of this device.
         _remoteStatus = new StatusMsg(
             [.. Mikes.Select(m => new RemoteMicStatus(m.Name, m.IsStreaming, m.IsStreaming ? m.Channel.Source.PeakLevel : 0f))],
-            IsRecording, _remote.Responder.ActiveTakeId, _recordClock.Elapsed.TotalSeconds,
-            HasVideo, IsVideoMode, IsCameraReady, FormatShort);
+            IsRecording, _remote.Responder.ActiveTakeId, RecordedElapsed().TotalSeconds,
+            HasVideo, IsVideoMode, IsCameraReady, FormatShort, IsPaused);
 
         var errors = _remote.ListenErrors.Where(e => e.Value is not null).Select(e => e.Value!).ToList();
         FindableText = !AllowRemoteControl ? "Other devices cannot find this one."
@@ -423,6 +423,11 @@ public partial class MainViewModel
         }
         RequestCameraSync();
         await LoadTakesAsync();
+        if (_stopReason is { } why)
+        {
+            _stopReason = null;
+            ShowToast("Recording stopped", why, true, null);
+        }
     }
 
     /// <summary>Waits for one remote's files (across reconnects) and reports when the whole take is complete.</summary>
@@ -604,6 +609,12 @@ public partial class MainViewModel
                 await vm.StopRecordingAsync(vm._hub);
             }
         });
+
+        public Task<long> PauseAsync(string takeId, long pauseAt) =>
+            Dispatcher.UIThread.InvokeAsync(() => vm.PauseForController(pauseAt, true)).GetTask();
+
+        public Task<long> ResumeAsync(string takeId, long resumeAt) =>
+            Dispatcher.UIThread.InvokeAsync(() => vm.PauseForController(resumeAt, false)).GetTask();
 
         public void ControllerChanged(RemoteControllerInfo? controller) =>
             Dispatcher.UIThread.Post(() => vm.OnControllerChanged(controller));

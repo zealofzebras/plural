@@ -21,6 +21,14 @@ Bluetooth headset), and it can link several phones and computers so they record 
 - **Pick your format**: WAV, M4A or MP3 (one file per mic), MKA (one file with a track per mic), or video with sound (MKV or MP4).
 - **Mix as you go**: a volume slider, mute button and level meter for each mic, plus battery level, mic gain and headphone volume
   for SmartMike+ mics.
+- **Find and play back your takes**: search, rename and add notes in **Takes**; the player shows a waveform for every mic and every
+  video in sync, with mute and solo per track. Deleted takes stay in "Recently deleted" for 30 days.
+- **Pause and resume** a take. The paused time is cut from every track and from the video.
+- **Keep recording in the background** on Android, with a notification that has Pause and Stop buttons.
+- **Start and stop with the mic**: the Record button on a SmartMike+ can start and stop the take (you can turn this off). A SmartMike+
+  that drops out reconnects by itself, and the gap is kept silent.
+- **Warned in time**: Plural tells you when a mic or your phone is running low on battery or the disk is nearly full. It stops cleanly
+  before the disk is full, and MP4 and M4A takes are written in pieces, so what was recorded before a crash is kept.
 - **Use the mics in other apps**: on Windows, send a mic to a virtual audio cable so Zoom, OBS or your editing software sees it as a microphone.
 - **Record on several devices together**: start and stop Plural on other phones and computers over Wi-Fi or Bluetooth, and
   collect all their files into one take.

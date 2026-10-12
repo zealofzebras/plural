@@ -18,7 +18,27 @@ public sealed class AndroidHost(Context context) : IAppHost
     private const string FileProviderAuthority = "net.getplural.app.files";
     private static TaskCompletionSource<bool>? _permission;
 
-    public MikeHub CreateHub() => new(new AndroidBluetooth(context), new AndroidAudio(context), new AndroidAacEncoderFactory(),
+    private readonly object _serviceLock = new();
+    private bool _serviceRunning, _wanted;
+    private long _lastStartTick;
+    private bool _askedNotifications;
+    private MikeHub? _hub;
+
+    private bool _subscribed;
+
+    public MikeHub CreateHub()
+    {
+        if (!_subscribed)
+        {
+            // The host lives as long as the process; the handlers are never removed.
+            _subscribed = true;
+            RecordingService.Stopped += OnServiceStopped;
+            MainActivity.Resumed += RetryServiceIfNeeded;
+        }
+        return CreateHubCore();
+    }
+
+    private MikeHub CreateHubCore() => _hub = new(new AndroidBluetooth(context), new AndroidAudio(context), new AndroidAacEncoderFactory(),
         new AndroidVideoPlatform(context), new AndroidAudioInput(context),
         new AndroidAudioDecoderFactory(), new AndroidVideoDecoderFactory());
 
@@ -60,19 +80,35 @@ public sealed class AndroidHost(Context context) : IAppHost
         activity.StartActivity(Intent.CreateChooser(send, "Share recording"));
     }
 
-    public Task<bool> EnsurePermissionsAsync()
+    public async Task<bool> EnsurePermissionsAsync()
     {
+        await AskNotificationsOnceAsync();
         // BLUETOOTH / BLUETOOTH_ADMIN are install-time permissions before Android 12.
         if (!OperatingSystem.IsAndroidVersionAtLeast(31))
         {
-            return Task.FromResult(true);
+            return true;
         }
-        return RequestAsync(global::Android.Manifest.Permission.BluetoothConnect);
+        return await RequestAsync(global::Android.Manifest.Permission.BluetoothConnect);
     }
 
     public Task<bool> EnsureCameraPermissionAsync() => RequestAsync(global::Android.Manifest.Permission.Camera);
 
-    public Task<bool> EnsureMicrophonePermissionAsync() => RequestAsync(global::Android.Manifest.Permission.RecordAudio);
+    public async Task<bool> EnsureMicrophonePermissionAsync()
+    {
+        await AskNotificationsOnceAsync();
+        return await RequestAsync(global::Android.Manifest.Permission.RecordAudio);
+    }
+
+    /// <summary>Android 13+: the recording notification needs POST_NOTIFICATIONS. Asked once, early; recording works if denied.</summary>
+    private async Task AskNotificationsOnceAsync()
+    {
+        if (_askedNotifications || !OperatingSystem.IsAndroidVersionAtLeast(33))
+        {
+            return;
+        }
+        _askedNotifications = true;
+        await RequestAsync(global::Android.Manifest.Permission.PostNotifications);
+    }
 
     public string SettingsPath => Path.Combine(context.FilesDir!.AbsolutePath, "settings.json");
 
@@ -120,17 +156,121 @@ public sealed class AndroidHost(Context context) : IAppHost
         return list;
     }
 
-    /// <summary>Keeps the screen on while recording so Android doesn't suspend the app mid-take.</summary>
+    /// <summary>Runs the foreground service (notification, wake lock, process priority) while recording or remote-controlled.</summary>
     public void OnRecordingChanged(bool recording)
     {
-        var window = MainActivity.Current?.Window;
-        if (recording)
+        lock (_serviceLock)
         {
-            window?.AddFlags(WindowManagerFlags.KeepScreenOn);
+            _wanted = recording;
+            if (recording == _serviceRunning)
+            {
+                return;
+            }
+            if (recording)
+            {
+                StartService();
+            }
+            else
+            {
+                _serviceRunning = false;
+                RecordingService.Stop(context);
+            }
         }
-        else
+    }
+
+    private void StartService()
+    {
+        _lastStartTick = System.Environment.TickCount64;
+        _serviceRunning = RecordingService.Start(context, _hub);
+    }
+
+    /// <summary>The service ended. If recording is still wanted its start failed (e.g. Android 14 refusing a microphone service from the background); retry later.</summary>
+    private void OnServiceStopped()
+    {
+        lock (_serviceLock)
         {
-            window?.ClearFlags(WindowManagerFlags.KeepScreenOn);
+            if (_wanted && _serviceRunning)
+            {
+                global::Android.Util.Log.Warn("Plural", "Recording service stopped while recording is active (" + (RecordingService.LastError ?? "no error recorded") + "); will retry when the app is visible.");
+            }
+            _serviceRunning = false;
         }
+    }
+
+    /// <summary>Retries a failed service start, only while the app is visible and at most every 5 s.</summary>
+    private void RetryServiceIfNeeded()
+    {
+        lock (_serviceLock)
+        {
+            if (_wanted && !_serviceRunning && MainActivity.IsVisible && System.Environment.TickCount64 - _lastStartTick >= 5000)
+            {
+                StartService();
+            }
+        }
+    }
+
+    public void UpdateRecordingStatus(TimeSpan elapsed, bool paused)
+    {
+        RetryServiceIfNeeded();
+        RecordingService.Update(elapsed, paused);
+    }
+
+    public event Action<HostRecordingCommand>? RecordingCommand
+    {
+        add => RecordingService.ActionRequested += value;
+        remove => RecordingService.ActionRequested -= value;
+    }
+
+    /// <summary>Screen stays on only while the Recorder page is visible; the foreground service covers the screen-off case.</summary>
+    public void SetKeepScreenOn(bool on)
+    {
+        var activity = MainActivity.Current;
+        activity?.RunOnUiThread(() =>
+        {
+            if (on)
+            {
+                activity.Window?.AddFlags(WindowManagerFlags.KeepScreenOn);
+            }
+            else
+            {
+                activity.Window?.ClearFlags(WindowManagerFlags.KeepScreenOn);
+            }
+        });
+    }
+
+    public long? GetFreeSpace(string folder)
+    {
+        try
+        {
+            var path = folder;
+            while (!string.IsNullOrEmpty(path) && !Directory.Exists(path))
+            {
+                path = Path.GetDirectoryName(path);
+            }
+            return string.IsNullOrEmpty(path) ? null : new StatFs(path).AvailableBytes;
+        }
+        catch (Exception)
+        {
+            return null;
+        }
+    }
+
+    public HostBattery? GetBattery()
+    {
+        using var filter = new IntentFilter(Intent.ActionBatteryChanged);
+        using var intent = context.RegisterReceiver(null, filter);
+        if (intent is null)
+        {
+            return null;
+        }
+        var level = intent.GetIntExtra(BatteryManager.ExtraLevel, -1);
+        var scale = intent.GetIntExtra(BatteryManager.ExtraScale, -1);
+        if (level < 0 || scale <= 0 || !intent.GetBooleanExtra(BatteryManager.ExtraPresent, true))
+        {
+            return null;
+        }
+        var status = (BatteryStatus)intent.GetIntExtra(BatteryManager.ExtraStatus, -1);
+        var charging = status is BatteryStatus.Charging or BatteryStatus.Full;
+        return new HostBattery(level * 100 / scale, charging);
     }
 }

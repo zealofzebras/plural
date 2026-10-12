@@ -86,4 +86,17 @@ public sealed class ManifestDevice
     public string Status { get; set; } = "recording";
 
     public List<string> Errors { get; set; } = [];
+
+    /// <summary>
+    /// Pauses the controller sent to this device, in ms of <em>wall-clock time since the scheduled start</em> (controller clock).
+    /// The device's files do not contain the paused time, so a library places a marker in this device's track at
+    /// <c>StartMs - (StartOffsetMs + earlier pauses)</c>. <see cref="ManifestPause.EndMs"/> is null while paused / if the take ended paused.
+    /// </summary>
+    public List<ManifestPause> Pauses { get; set; } = [];
+}
+
+public sealed class ManifestPause
+{
+    public double StartMs { get; set; }
+    public double? EndMs { get; set; }
 }

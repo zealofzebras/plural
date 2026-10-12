@@ -475,6 +475,9 @@ public sealed unsafe class MfVideoCapture : IVideoCapture
 
     public void StopEncoding() => Execute(start: false);
 
+    /// <summary>Next encoded frame is an IDR with SPS/PPS (see <see cref="MfH264Encoder.RequestKeyFrame"/>). No-op when not encoding.</summary>
+    public void RequestKeyFrame() => _encoder?.RequestKeyFrame();
+
     private void Execute(bool start)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);

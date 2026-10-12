@@ -32,6 +32,8 @@ public partial class PlayerViewModel : ViewModelBase
     private long _lastScrubSeek;
     private double _waveWidth = 300;
     private int _generation;
+    private bool _viewBatch;
+    private Task? _starting;
 
     public PlayerViewModel(MainViewModel main)
     {
@@ -96,6 +98,10 @@ public partial class PlayerViewModel : ViewModelBase
     public bool ShowSplitter => HasVideo && !IsFullscreen && !IsPhoneForm;
     public bool ShowFocusToggle => HasVideo && IsPhoneLandscape && !IsFullscreen;
     public bool ShowAutoSpotlight => HasMultipleVideos && !IsFullscreen;
+
+    /// <summary>The video toggles sit in a column beside the stage, except in phone landscape (the stage is short): there they join the transport bar.</summary>
+    public bool ShowStageToggles => !IsPhoneLandscape;
+    public bool ShowTransportToggles => HasVideo && IsPhoneLandscape;
     public bool HasOutputProblem => OutputProblem.Length > 0;
     public bool HasRows => Rows.Count > 0;
     public bool CanShare => Main.CanShare;
@@ -127,17 +133,40 @@ public partial class PlayerViewModel : ViewModelBase
         AutoSpotlight = false;
         FocusVideo = false;
         _follower.Reset();
+        _scrubbing = false;
+        DurationSeconds = take.Duration.TotalSeconds;
+        DurationText = TakeViewModel.FormatDuration(take.Duration);
+        PositionSeconds = 0;
+        PositionText = "0:00";
+        ViewStart = 0;
+        ViewSpan = Math.Max(DurationSeconds, MinSpanSeconds);
+        NotifyVideo();
 
-        var hub = Main.Hub;
+        Main.Takes.CancelPeaks(take.Folder); // this page makes the peaks of the open take
+        _loadCts = new CancellationTokenSource();
+        _starting = StartAsync(take, gen, Main.Hub, Main.Library, _loadCts.Token);
+    }
+
+    /// <summary>Builds the <see cref="TakePlayer"/> off the UI thread (it opens every file), then the rows and tiles; dropped if the page was left meanwhile.</summary>
+    private async Task StartAsync(TakeInfo take, int gen, Plural.Core.Session.MikeHub? hub, TakeLibrary library, CancellationToken ct)
+    {
+        TakePlayer? player = null;
+        string error = "";
         try
         {
-            _player = new TakePlayer(take, hub?.Audio, hub?.AudioDecoders, hub?.VideoDecoders, Main.Library, 1280);
+            player = await Task.Run(() => new TakePlayer(take, hub?.Audio, hub?.AudioDecoders, hub?.VideoDecoders, library, 1280));
         }
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {
-            _player = null;
-            LoadError = "Can't open this take: " + ex.Message;
+            error = "Can't open this take: " + ex.Message;
         }
+        if (gen != _generation)
+        {
+            if (player is not null) { await DisposePlayerAsync(player); }
+            return;
+        }
+        _player = player;
+        LoadError = error;
 
         var tracks = _player?.Tracks ?? [];
         var audio = 0;
@@ -159,58 +188,78 @@ public partial class PlayerViewModel : ViewModelBase
         ApplyForm();
         UpdateMix();
 
-        DurationSeconds = _player?.Duration.TotalSeconds ?? take.Duration.TotalSeconds;
-        DurationText = TakeViewModel.FormatDuration(TimeSpan.FromSeconds(DurationSeconds));
-        PositionSeconds = 0;
-        PositionText = "0:00";
-        ViewStart = 0;
-        ViewSpan = Math.Max(DurationSeconds, MinSpanSeconds);
+        if (_player is { } p)
+        {
+            DurationSeconds = p.Duration.TotalSeconds;
+            DurationText = TakeViewModel.FormatDuration(TimeSpan.FromSeconds(DurationSeconds));
+            ViewSpan = Math.Max(DurationSeconds, MinSpanSeconds);
+        }
         NotifyVideo();
         RefreshRows();
 
-        if (_player is { } p)
+        if (_player is { } pl)
         {
-            p.FrameReady += OnFrame;
-            p.VideoUnavailable += OnVideoUnavailable;
-            p.Ended += OnEnded;
+            pl.FrameReady += OnFrame;
+            pl.VideoUnavailable += OnVideoUnavailable;
+            pl.Ended += OnEnded;
         }
-        _timer.Start();
-        _loadCts = new CancellationTokenSource();
-        _ = LoadAssetsAsync(take, gen, _loadCts.Token);
+        _ = LoadAssetsAsync(take, gen, ct);
     }
 
-    /// <summary>Stops playback and releases the player and its files (leaving the page, opening another take, deleting).</summary>
-    public void Unload()
+    /// <summary>
+    /// Stops playback and releases the player and its files (leaving the page, opening another take, deleting). The player is disposed
+    /// off the UI thread; the returned task completes when the files are closed.
+    /// </summary>
+    public Task Unload()
     {
         _generation++;
         _timer.Stop();
+        _scrubbing = false;
         _loadCts?.Cancel();
         _loadCts = null;
+        var starting = _starting;
+        _starting = null;
         var p = _player;
         _player = null;
+        Task closing = starting ?? Task.CompletedTask;
         if (p is not null)
         {
             p.FrameReady -= OnFrame;
             p.VideoUnavailable -= OnVideoUnavailable;
             p.Ended -= OnEnded;
-            try { p.Dispose(); }
-            catch (Exception ex) when (ex is not OutOfMemoryException) { /* closing */ }
+            closing = Task.WhenAll(closing, DisposePlayerAsync(p));
         }
+        var tiles = Videos.ToList();
         Rows.Clear();
         Videos.Clear();
         _tilesByTrack.Clear();
+        foreach (var t in tiles) { t.Dispose(); }
         IsPlaying = false;
         IsBuffering = false;
         MinimapPeaks = null;
         NotifyVideo();
+        return closing;
     }
+
+    private static Task DisposePlayerAsync(TakePlayer p) =>
+        Task.Run(() =>
+        {
+            try { p.Dispose(); }
+            catch (Exception ex) when (ex is not OutOfMemoryException) { /* closing */ }
+        });
 
     /// <summary>The app went to the background: pause.</summary>
     public void Pause()
     {
+        _scrubbing = false;
         if (_player is { IsPlaying: true } p)
         {
-            p.Pause();
+            try
+            {
+                p.Pause();
+                SetPosition(p.Position.TotalSeconds);
+            }
+            catch (ObjectDisposedException) { /* closing */ }
             IsPlaying = false;
         }
     }
@@ -226,7 +275,30 @@ public partial class PlayerViewModel : ViewModelBase
             if (_tilesByTrack.TryGetValue(trackId, out var tile)) { tile.Refresh(); }
         });
 
-    private void OnEnded() => Dispatcher.UIThread.Post(() => { IsPlaying = false; });
+    private void OnEnded() =>
+        Dispatcher.UIThread.Post(() =>
+        {
+            if (_player is { } p)
+            {
+                try { SetPosition(p.Position.TotalSeconds); }
+                catch (ObjectDisposedException) { /* closing */ }
+            }
+            IsPlaying = false;
+        });
+
+    // The 50 ms poll only runs while playing: a paused or backgrounded player costs nothing.
+    partial void OnIsPlayingChanged(bool value)
+    {
+        if (value)
+        {
+            if (!_timer.IsEnabled) { _timer.Start(); }
+        }
+        else
+        {
+            _timer.Stop();
+            IsBuffering = false;
+        }
+    }
 
     private async Task LoadAssetsAsync(TakeInfo take, int gen, CancellationToken ct)
     {
@@ -239,6 +311,10 @@ public partial class PlayerViewModel : ViewModelBase
                 {
                     Videos[0].Poster = bmp;
                     Videos[0].Refresh();
+                }
+                else
+                {
+                    bmp?.Dispose();
                 }
             }
             foreach (var row in Rows.ToList())
@@ -264,7 +340,30 @@ public partial class PlayerViewModel : ViewModelBase
                 row.IsAnalyzing = false;
                 PickMinimap(gen);
             });
-            try { await PeakService.EnsurePeaksAsync(take, hub?.AudioDecoders, progress, ct); }
+            try
+            {
+                // PeakService skips a track another job is on (the Takes list was just cancelled but may not have let go yet):
+                // look again until the file is there, a few seconds at most
+                for (var attempt = 0; attempt < 20; attempt++)
+                {
+                    await PeakService.EnsurePeaksAsync(take, hub?.AudioDecoders, progress, ct);
+                    var pending = await Task.Run(() => take.Tracks.Where(t => need.Contains(t.Id) && PeakService.NeedsPeaks(take, t)).Select(t => t.Id).ToList(), ct);
+                    foreach (var id in need.Where(i => !pending.Contains(i)))
+                    {
+                        var row = Rows.FirstOrDefault(r => r.Track.Id == id);
+                        if (row is null || row.Peaks is not null || gen != _generation) { continue; }
+                        var peaks = await Task.Run(() => PeakReader.Open(TrackInfo.PeakPath(take.Folder, id)), ct);
+                        if (peaks is not null && gen == _generation && row.Peaks is null)
+                        {
+                            row.Peaks = peaks;
+                            row.IsAnalyzing = false;
+                            PickMinimap(gen);
+                        }
+                    }
+                    if (pending.Count == 0 || gen != _generation) { break; }
+                    await Task.Delay(750, ct);
+                }
+            }
             finally
             {
                 if (gen == _generation) { foreach (var row in Rows) { row.IsAnalyzing = false; } }
@@ -351,9 +450,11 @@ public partial class PlayerViewModel : ViewModelBase
     private void TogglePlay()
     {
         if (_player is not { } p) { return; }
+        _scrubbing = false;
         try
         {
             if (p.IsPlaying) { p.Pause(); } else { p.Play(); }
+            if (!p.IsPlaying) { SetPosition(p.Position.TotalSeconds); }
         }
         catch (ObjectDisposedException)
         {
@@ -414,8 +515,17 @@ public partial class PlayerViewModel : ViewModelBase
         span = Math.Clamp(double.IsFinite(span) ? span : dur, Math.Min(MinSpanSeconds, dur), dur);
         start = Math.Clamp(double.IsFinite(start) ? start : 0, 0, Math.Max(0, dur - span));
         if (start == ViewStart && span == ViewSpan) { return; }
-        ViewSpan = span;
-        ViewStart = start;
+        _viewBatch = true;
+        try
+        {
+            ViewSpan = span;
+            ViewStart = start;
+        }
+        finally
+        {
+            _viewBatch = false;
+        }
+        ViewChanged(); // once per step: the rows (and their waveform reads) see both values
     }
 
     partial void OnViewStartChanged(double value) => ViewChanged();
@@ -423,6 +533,7 @@ public partial class PlayerViewModel : ViewModelBase
 
     private void ViewChanged()
     {
+        if (_viewBatch) { return; }
         OnPropertyChanged(nameof(IsZoomed));
         OnPropertyChanged(nameof(ShowMinimap));
         RefreshRows();
@@ -499,6 +610,8 @@ public partial class PlayerViewModel : ViewModelBase
         }
         OnPropertyChanged(nameof(IsPhoneForm));
         OnPropertyChanged(nameof(IsPhoneLandscape));
+        OnPropertyChanged(nameof(ShowStageToggles));
+        OnPropertyChanged(nameof(ShowTransportToggles));
         OnPropertyChanged(nameof(HeaderWidth));
         OnPropertyChanged(nameof(RowHeight));
         OnPropertyChanged(nameof(AnimateVideo));
@@ -510,6 +623,7 @@ public partial class PlayerViewModel : ViewModelBase
     private void NotifyVideo()
     {
         OnPropertyChanged(nameof(HasVideo));
+        OnPropertyChanged(nameof(ShowTransportToggles));
         OnPropertyChanged(nameof(HasMultipleVideos));
         OnPropertyChanged(nameof(HasRows));
         OnPropertyChanged(nameof(ShowSplitter));
@@ -593,6 +707,7 @@ public partial class PlayerViewModel : ViewModelBase
         IsEditingTitle = false;
         var text = TitleEdit.Trim();
         if (text == (take.Title ?? "")) { return; }
+        if (Main.Takes.IsActive(take)) { Main.ShowToast("Still recording", "Stop the recording first.", false, null); return; }
         var lib = Main.Library;
         try
         {
@@ -629,6 +744,7 @@ public partial class PlayerViewModel : ViewModelBase
     {
         IsNotesOpen = false;
         if (Take is not { } take) { return; }
+        if (Main.Takes.IsActive(take)) { Main.ShowToast("Still recording", "Stop the recording first.", false, null); return; }
         var lib = Main.Library;
         var text = NotesText;
         try
@@ -661,9 +777,9 @@ public partial class PlayerViewModel : ViewModelBase
     {
         IsMenuOpen = false;
         if (Take is not { } take) { return; }
-        Unload(); // release the files
         var vm = Main.Takes.Find(take.Folder) ?? new TakeViewModel(take, Main.Takes);
-        Main.GoBack();
-        await Main.Takes.DeleteAsync([vm]);
+        await Unload(); // release the files before the folder moves
+        if (Main.CurrentPage == AppPage.Player) { Main.GoBack(); }
+        await Main.Takes.DeleteAsync([vm]); // bumps the list's refresh version first, so the scan GoBack started cannot bring the take back
     }
 }

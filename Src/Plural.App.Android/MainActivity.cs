@@ -29,10 +29,24 @@ public class MainActivity : AvaloniaMainActivity
 #endif
     }
 
+    /// <summary>True while the activity is resumed (a microphone/camera foreground service may be started only then on Android 14+).</summary>
+    public static bool IsVisible { get; private set; }
+
+    /// <summary>Raised on the main thread when the app comes to the foreground.</summary>
+    public static event Action? Resumed;
+
     protected override void OnResume()
     {
         Current = this;
+        IsVisible = true;
         base.OnResume();
+        Resumed?.Invoke();
+    }
+
+    protected override void OnPause()
+    {
+        IsVisible = false;
+        base.OnPause();
     }
 
     protected override void OnDestroy()

@@ -42,6 +42,13 @@ public partial class MikeViewModel : ViewModelBase
     [ObservableProperty] public partial string StateText { get; set; } = "Off";
     [ObservableProperty] public partial bool IsConnecting { get; set; }
     [ObservableProperty] public partial bool IsLost { get; set; }
+    /// <summary>The SmartMike link dropped and is being restored (amber); a take keeps recording and fills the gap with silence.</summary>
+    [ObservableProperty] public partial bool IsReconnecting { get; set; }
+    /// <summary>"Reconnecting… 0:12" for the card and the mixer strip's banner.</summary>
+    /// <summary>Short state for the 108 dp mixer strip ("Retry" instead of the long reconnect text).</summary>
+    [ObservableProperty] public partial string StripStateText { get; set; } = "Off";
+    [ObservableProperty] public partial string ReconnectClock { get; set; } = "";
+    [ObservableProperty] public partial string ReconnectText { get; set; } = "";
     [ObservableProperty] public partial string Details { get; set; } = "";
     [ObservableProperty] public partial double Level { get; set; }
     [ObservableProperty] public partial double PeakHold { get; set; }
@@ -76,7 +83,10 @@ public partial class MikeViewModel : ViewModelBase
     public IReadOnlyList<OutputOption> Outputs => _owner.Outputs;
     public string OutputLabel => _owner.OutputLabel;
 
-    public string ConnectButtonText => IsBusy ? "Connecting…" : IsStreaming ? "Disconnect" : "Connect";
+    /// <summary>Battery of a connected SmartMike in percent; null for local mics or before the first report.</summary>
+    public int? BatteryPercent { get; private set; }
+
+    public string ConnectButtonText => IsBusy ? "Connecting…" : IsStreaming || IsReconnecting ? "Disconnect" : "Connect";
 
     public MikeViewModel(MikeChannel channel, MainViewModel owner)
     {
@@ -114,7 +124,7 @@ public partial class MikeViewModel : ViewModelBase
     [RelayCommand]
     private async Task ToggleConnectionAsync()
     {
-        if (IsStreaming || Source.State is MikeState.Ready or MikeState.Streaming)
+        if (IsStreaming || Source.State is MikeState.Ready or MikeState.Streaming or MikeState.Reconnecting)
         {
             await DisconnectAsync();
         }
@@ -126,7 +136,7 @@ public partial class MikeViewModel : ViewModelBase
 
     public async Task ConnectAsync()
     {
-        if (IsBusy || Source.State is MikeState.Connecting or MikeState.Ready or MikeState.Streaming)
+        if (IsBusy || Source.State is MikeState.Connecting or MikeState.Ready or MikeState.Streaming or MikeState.Reconnecting)
         {
             return;
         }
@@ -222,7 +232,7 @@ public partial class MikeViewModel : ViewModelBase
 
     private void Send(MikeSetting setting, int value)
     {
-        if (_applyingDeviceValues || Session is null || Session.State is not (MikeState.Ready or MikeState.Streaming))
+        if (_applyingDeviceValues || Session is null || Session.State is not (MikeState.Ready or MikeState.Streaming or MikeState.Reconnecting))
         {
             return;
         }
@@ -236,14 +246,26 @@ public partial class MikeViewModel : ViewModelBase
         }
     }
 
+    /// <summary>"Reconnecting… 0:12" while a SmartMike link is being restored.</summary>
+    private string ReconnectingText()
+    {
+        var gap = Session?.ReconnectingSince is { } since ? DateTimeOffset.UtcNow - since : TimeSpan.Zero;
+        if (gap < TimeSpan.Zero) { gap = TimeSpan.Zero; }
+        return $"Reconnecting… {(int)gap.TotalMinutes}:{gap.Seconds:00}";
+    }
+
     /// <summary>Polled by the main view model's UI timer.</summary>
     public void Refresh()
     {
         var s = Source;
         IsStreaming = s.State == MikeState.Streaming;
         IsLost = s.State == MikeState.Failed;
-        IsConnecting = !IsStreaming && (IsBusy || s.State is MikeState.Connecting or MikeState.Ready);
-        StateText = IsStreaming ? "Live" : IsConnecting ? (s.State == MikeState.Ready ? "Ready" : "Connecting") : IsLost ? "Lost" : "Off";
+        IsReconnecting = s.State == MikeState.Reconnecting;
+        IsConnecting = !IsStreaming && (IsBusy || s.State is MikeState.Connecting or MikeState.Ready or MikeState.Reconnecting);
+        ReconnectText = IsReconnecting ? ReconnectingText() : "";
+        ReconnectClock = IsReconnecting ? ReconnectText[(ReconnectText.IndexOf(' ') + 1)..] : "";
+        StateText = IsStreaming ? "Live" : IsReconnecting ? "Retrying" : IsConnecting ? (s.State == MikeState.Ready ? "Ready" : "Connecting") : IsLost ? "Lost" : "Off";
+        StripStateText = IsReconnecting ? "Retry" : StateText;
         if (s.State == MikeState.Failed && s.LastError is { } e)
         {
             Error = e;
@@ -253,6 +275,7 @@ public partial class MikeViewModel : ViewModelBase
         CanRemove = !_owner.IsRecordingUi && !IsRecording;
         RecordText = IsRecording ? $"REC {Channel.RecordedDuration:mm\\:ss}" : "";
 
+        BatteryPercent = Session?.BatteryPercent;
         if (Session?.BatteryPercent is { } b)
         {
             HasBattery = true;

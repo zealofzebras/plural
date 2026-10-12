@@ -43,20 +43,42 @@ public partial class PlayerView : UserControl
     protected override void OnDataContextChanged(EventArgs e)
     {
         base.OnDataContextChanged(e);
-        if (_vm is not null) { _vm.PropertyChanged -= OnVmPropertyChanged; }
+        Unsubscribe();
         _vm = DataContext as PlayerViewModel;
         if (_vm is not null)
         {
-            _vm.PropertyChanged += OnVmPropertyChanged;
+            if (_attached) { _vm.PropertyChanged += OnVmPropertyChanged; }
             _splitFraction = _vm.Main.PlayerSplitter;
             Relayout();
         }
     }
 
+    // The view model lives as long as the app but a view only as long as its page: subscribe while attached to the visual tree.
+    private bool _attached;
+
+    private void Unsubscribe()
+    {
+        if (_vm is not null) { _vm.PropertyChanged -= OnVmPropertyChanged; }
+    }
+
     protected override void OnAttachedToVisualTree(VisualTreeAttachmentEventArgs e)
     {
         base.OnAttachedToVisualTree(e);
+        _attached = true;
+        if (_vm is not null)
+        {
+            _vm.PropertyChanged -= OnVmPropertyChanged; // never twice
+            _vm.PropertyChanged += OnVmPropertyChanged;
+            Relayout();
+        }
         Dispatcher.UIThread.Post(() => Focus(), DispatcherPriority.Loaded);
+    }
+
+    protected override void OnDetachedFromVisualTree(VisualTreeAttachmentEventArgs e)
+    {
+        base.OnDetachedFromVisualTree(e);
+        _attached = false;
+        Unsubscribe();
     }
 
     private void OnVmPropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
@@ -95,8 +117,11 @@ public partial class PlayerView : UserControl
         }
         else
         {
-            stage = VideoLayout.VideoAreaHeight(vm.Form, Bounds.Height, top, transport + splitter, vm.HasVideo, vm.FocusVideo, _splitFraction);
-            if (vm.HasVideo) { stage += StageHost.Margin.Top + StageHost.Margin.Bottom; }
+            // The stage row also holds the host's margins: count them in the budget (the rest of the page is video area + transport),
+            // otherwise "Focus video" (video area = everything left) pushes the compact transport bar off the bottom.
+            var margins = vm.HasVideo ? StageHost.Margin.Top + StageHost.Margin.Bottom : 0;
+            stage = VideoLayout.VideoAreaHeight(vm.Form, Bounds.Height, top, transport + splitter + margins, vm.HasVideo, vm.FocusVideo, _splitFraction);
+            if (vm.HasVideo) { stage += margins; }
         }
         var rows = Root.RowDefinitions;
         if (Math.Abs(rows[2].Height.Value - stage) > 0.5 || rows[2].Height.GridUnitType != GridUnitType.Pixel)
@@ -192,7 +217,7 @@ public partial class PlayerView : UserControl
 
     private void OnKeyDownTunnel(object? sender, KeyEventArgs e)
     {
-        if (_vm is not { } vm || e.Source is TextBox or Avalonia.Controls.Slider || vm.IsNotesOpen || vm.IsMenuOpen) { return; }
+        if (_vm is not { } vm || e.Source is TextBox or Avalonia.Controls.Primitives.RangeBase || vm.IsNotesOpen || vm.IsMenuOpen) { return; }
         if (e.KeyModifiers != KeyModifiers.None) { return; }
         switch (e.Key)
         {

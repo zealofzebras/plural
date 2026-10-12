@@ -204,7 +204,7 @@ sealed partial class RunCommand
                 return Task.CompletedTask;
             }),
         new("status", "Each mic's number, name, state, peak level (dBFS), fader, mute, direct output, battery and errors; "
-            + "the mix output and master level; recording format and folder; whether a take is running.",
+            + "the mix output and master level; recording format and folder; whether a take is running or paused, and its recorded time.",
             Schema(), _ =>
             {
                 PrintStatus(brief: false);
@@ -222,6 +222,18 @@ sealed partial class RunCommand
         new("record", "Start a take: every connected mic is recorded to its own track/file in the current format.",
             Schema(("seconds", "number", "Stop by itself after this many seconds; omit to record until stop", false)),
             a => RecordAsync(Num(a, "seconds") ?? 0)),
+        new("pause", "Pause the running take: paused time is cut from every track and the video, which carry on seamlessly after resume.",
+            Schema(), _ =>
+            {
+                PauseRecording(true);
+                return Task.CompletedTask;
+            }),
+        new("resume", "Continue a paused take.",
+            Schema(), _ =>
+            {
+                PauseRecording(false);
+                return Task.CompletedTask;
+            }),
         new("stop", "Finish the take; returns once its files are saved, listing them.",
             Schema(), _ => StopRecordingAsync()),
         new("fader", "Set a channel's level (applies to recording, direct output and mix).",

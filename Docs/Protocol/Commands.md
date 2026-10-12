@@ -138,6 +138,12 @@ Version encoding (`e4.e.c`): `major = v>>12`, `minor = (v>>8)&0xF`, `patch = v&0
 ### BUTTON_PRESSED (`o.d`) — event code at bytes 19–20 (`d4.g`)
 POWER 0, RECORD 1, PLAY_PAUSE 2, VOL_UP 3, VOL_DOWN 4, FORWARD 5, BACKWARD 6, JACK_3PIN_INSERT 7, JACK_CTIA_INSERT 8, JACK_OMTP_INSERT 9, JACK_UNPLUGGED 10, EXT_KMIKE_PLUGGED 11, EXT_KMIKE_UNPLUGGED 12, BUTTON_PRESSED 13, BUTTON_RELEASE 14, MFB_SINGLE 15, MFB_DOUBLE 16, MFB_LONG 17, MFB_VLONG 18, MFB_VVLONG 19, EXT_LINEIN_PLUGGED 64, EXT_LINEIN_UNPLUGGED 65.
 
+**Hardware test (2026-10-12, SmartMike+ FW 0.4.37, `Tools/smartmike_client.py probe`, idle link without AUDIO_BEGIN):** the mic has a
+single button (the multi-function button). A **short single press** always sends `BUTTON_PRESSED` with `MFB_SINGLE` (15); the first
+press after connecting also changed the A2DP status report from `0081` to `0082` (the button doubles as A2DP play/pause towards the
+host). A **double press** and a **~2 s hold** (released before power-off) send **nothing**. A **long hold** (~6 s) powers the mic off;
+no report arrives before the link closes. Plural uses `MFB_SINGLE` as the Record toggle (`MikeHub.RecordButtonEvent`).
+
 Jack events tell the app whether headphones are plugged in for monitoring.
 
 ## Public SDK names (SwissSample v1.4.14) → keys

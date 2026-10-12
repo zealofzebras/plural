@@ -19,6 +19,14 @@
 	<uses-permission android:name="android.permission.CAMERA" />
 	<uses-feature android:name="android.hardware.camera.any" android:required="false" />
 
+	<!-- Recording with the screen off: foreground service (RecordingService) with a notification and a partial wake lock. -->
+	<uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+	<uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
+	<uses-permission android:name="android.permission.FOREGROUND_SERVICE_CAMERA" />
+	<uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE" />
+	<uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+	<uses-permission android:name="android.permission.WAKE_LOCK" />
+
 	<application android:label="Plural" android:icon="@drawable/Icon">
 		<!-- Shares recordings (app-specific storage) with other apps. -->
 		<provider android:name="androidx.core.content.FileProvider"

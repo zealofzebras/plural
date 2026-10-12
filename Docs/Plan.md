@@ -49,11 +49,39 @@
 - [ ] Hardware test of the UI with the user
 - [ ] Install a virtual cable (VB-CABLE has ARM64 since Oct 2024) and verify a mic appears in another app
 - [ ] Test with 2+ SmartMikes simultaneously (Bluetooth bandwidth)
-- [ ] Packaging (self-contained win-arm64 / win-x64 builds), app icon, auto-reconnect
+- [ ] Packaging (self-contained win-arm64 / win-x64 builds), app icon
 - [x] macOS platform layer (IOBluetooth, Core Audio, AAC) and iOS head (External Accessory, audio session): built, compile-checked
 - [ ] Run macOS on a Mac with a SmartMike; find out whether the SmartMike+ is MFi (iOS needs its External Accessory protocol string)
 - [ ] Camera on macOS/iOS (AVFoundation + VideoToolbox); RFCOMM server on macOS for Bluetooth remote mode
 - [ ] Own virtual-mic driver (later), Linux platform layer (later)
+
+## Phase 3c — Tier 1: take library, player, recording reliability → [Plural/Recording.md](Plural/Recording.md)
+Built (2026-10-12); 326 Core tests pass on win-arm64 and win-x64.
+- [x] Take library: scan, `plural.json` sidecar, rename and notes, soft delete with Undo, Recently deleted, purge after 30 days, poster, peaks
+- [x] Managed readers (WAV, Matroska, MP4 progressive and fragmented, MP3) and FLAC decoder; platform decoders (MF, MediaCodec, AudioConverter)
+- [x] `TakePlayer`: audio master clock, per-track gain, mute and solo, remote offsets, video decode with late-frame drop; `VideoLayout` and `SpotlightFollower`
+- [x] Navigation (Recorder, Takes, Player), Takes page, Player page with waveforms and video layout
+- [x] Pause / resume: local, remote (Hello level 2) and CLI `pause`/`resume`
+- [x] Fragmented MP4/M4A writer; Windows AAC priming measured = 0
+- [x] Recovery on launch (`recovered` status, WAV and MKV header repair)
+- [x] Free-space estimate, auto-stop at 200 MB, mic and host battery warnings
+- [x] SmartMike auto-reconnect (backoff 1, 2, 4, 10 s; dropouts in the sidecar)
+- [x] SmartMike button events logged on hardware (single button: short press = `MFB_SINGLE`, used as Record); Record toggle mapped in `MikeHub`
+- [x] Android foreground service (`RecordingService`) with Pause/Stop notification actions, built
+- [ ] Android build of Tier 1 (release APK) — not verified yet
+- [ ] Surface and Pixel 8: take with 2+ mics (one SmartMike) and video, pause and resume, playback with waveforms and synced video, rename, delete, restore
+- [ ] Pixel 8: record 10 min with the screen off, local mic and SmartMike; check the notification and the Pause/Stop actions
+- [ ] Android 17: video in the background only when the service started while visible — check and document
+- [ ] Pixel 8: MediaCodec decoders and player (AAC and H.264 playback); measure AAC priming (1024 assumed)
+- [ ] Forced kill during an MP4 take leaves a playable file
+- [ ] Check fMP4 in VLC, QuickTime, Windows Media Player/Photos, Android Photos/Files, DaVinci Resolve, Premiere; add a Finalize step only if an editor rejects it
+- [ ] SmartMike reconnect: switch a mic off for 10 s mid-take, then on; clap before and after, track stays aligned
+- [ ] SmartMike Record button starts and stops a real take (button tested; the record path not yet)
+- [ ] Pause with real mics and camera: tracks and video stay aligned after resume
+- [ ] Free-space auto-stop at 200 MB (dry run on a small disk)
+- [ ] Remote: 3-video take on phone portrait, phone landscape and desktop shows the expected layout; Pause between two devices; "Doesn't support pause" with a level-1 peer
+- [ ] Tablet and desktop Takes and Player layouts with real takes
+- [ ] macOS and iOS: playback decodes compiled only; video needs VideoToolbox (not started)
 
 ## Phase 4 — Firmware (stretch, risk of bricking)
 - [x] Try to get newer images from the server API — all Sabinetek API servers are offline; device's 0.4.37 is the newest known

@@ -28,10 +28,20 @@ public sealed class ClockLockedTrack
     private double _frac;           // read position within buffer (relative to _start)
     private double _integral;
     private double _baseRatio = 1.0;
+    private double _avgRatio = 1.0;  // smoothed (~2 s) ratio actually used, an estimate of the mic's drift
     private bool _rateKnown, _finished;
     private long _outCount;
     private double _lagSamples;     // output trails host time by this many samples (first-packet delay + margin)
     private long? _endTarget;
+    private readonly PauseTimeline _tl;
+    private int _nextCut;           // next pause span whose cut point has not been reached
+    private int _active = -1;       // pause span whose input is being discarded
+    private double _skipBase, _skipEnd = double.NaN; // absolute input positions of the active pause's start and end (end NaN = until Resume)
+    private double _dropped;        // input samples discarded because they were captured while paused
+    private double _offAvg;         // smoothed (~0.5 s) distance of the read cursor from the output position, in kept input samples
+    private bool _offInit;
+    private long _lastNow = long.MinValue; // host time of the previous Write
+    private readonly List<(long Start, long End)> _dropouts = [];
 
     public long OutputSamples { get { lock (_lock) { return _outCount; } } }
     /// <summary>How far the output trails host time (bluetooth latency + margin); zero until the first packet. The recorder waits this long after Stop.</summary>
@@ -41,9 +51,13 @@ public sealed class ClockLockedTrack
     public int Gaps { get; private set; }
     public long SilenceSamples { get; private set; }
 
+    /// <summary>Gaps the track filled with silence (mic link away), as output-sample ranges [start, end) on the track's own recorded timeline (pauses removed). Snapshot.</summary>
+    public IReadOnlyList<(long StartSample, long EndSample)> Dropouts { get { lock (_lock) { return _dropouts.ToArray(); } } }
+
     public ClockLockedTrack(long t0, Func<long> clock, Action<short[]> output)
     {
         _t0 = t0;
+        _tl = new PauseTimeline(t0);
         _clock = clock;
         _output = output;
     }
@@ -63,9 +77,9 @@ public sealed class ClockLockedTrack
             }
             if (!_rateKnown)
             {
-                _baseRatio = (double)sampleRate / OutputRate;
+                _baseRatio = _avgRatio = (double)sampleRate / OutputRate;
                 _rateKnown = true;
-                var arrival = Math.Max(0, (now - _t0) * OutputRate / 10_000_000.0);
+                var arrival = _tl.Effective(now) * OutputRate / 10_000_000.0;
                 var lead = Math.Max(0, arrival - MaxLead * OutputRate);
                 _lagSamples = arrival - lead + Margin * OutputRate;
                 var n = (long)lead;
@@ -74,6 +88,8 @@ public sealed class ClockLockedTrack
                 SilenceSamples -= n; // leading silence is not a dropout
                 Flush(silence);
             }
+            SkipMissing(mono.Length, now);
+            _lastNow = now;
             Append(mono);
             Produce(now, final: false);
         }
@@ -103,10 +119,103 @@ public sealed class ClockLockedTrack
         }
     }
 
-    private long TargetCount(long now) => Math.Max(0, (now - _t0) * OutputRate / 10_000_000);
+    /// <summary>
+    /// Pauses the track at host time <paramref name="at"/> (may be in the future, or a little in the past): audio captured from
+    /// <paramref name="at"/> on is discarded until <see cref="Resume"/>, and the track's recorded time stops there. Output trails host time by
+    /// <see cref="Latency"/>, so samples that arrive up to Latency after <paramref name="at"/> still belong to before the pause; the cut is made
+    /// in the input stream at the output position of <paramref name="at"/>, which the pause span in the lagged production timeline reaches
+    /// Latency later. Ignored if already paused.
+    /// </summary>
+    public void Pause(long at)
+    {
+        lock (_lock)
+        {
+            if (!_finished) { _tl.Pause(at); }
+        }
+    }
+
+    /// <summary>
+    /// Ends the pause at host time <paramref name="at"/>: the input captured in [pause, resume) is removed from the stream (that many input
+    /// samples at the current clock-locked ratio after the cut point) and the next captured sample is the next output sample. No silence
+    /// is padded and the controller state is kept. Ignored if not paused.
+    /// </summary>
+    public void Resume(long at)
+    {
+        lock (_lock)
+        {
+            if (_finished) { return; }
+            if (_tl.Resume(at) is not { } span) { return; }
+            if (_active >= 0 && _active == _tl.Spans.Count - 1)
+            {
+                _skipEnd = _skipBase + SkipLength(span.Start, span.End);
+                if (_received >= _skipEnd - 0.5) { _active = -1; }
+            }
+        }
+    }
+
+    // Input positions below are absolute input sample indexes (everything received, kept or discarded); "kept" positions exclude _dropped.
+    private double SkipLength(long start, long end) =>
+        (end - start) / 10_000_000.0 * OutputRate * _avgRatio; // long-run input samples per output sample (the mic's drift), not the instantaneous ratio with its backlog correction
+
+    /// <summary>
+    /// Reached the output position of the next pause. The input position of the pause instant is the output position plus the controller's
+    /// smoothed offset (output trails input by a roughly constant amount); everything from there to the resume position is discarded, so after
+    /// the resume the track has the same offset as before the pause.
+    /// </summary>
+    private void TryCut()
+    {
+        if (_active >= 0) { return; }
+        var spans = _tl.Spans;
+        if (_nextCut >= spans.Count) { return; }
+        var (p, r) = spans[_nextCut];
+        var nP = _tl.Effective(p) * OutputRate / 10_000_000;
+        if (_outCount < nP) { return; }
+        var idx = _nextCut++;
+        _skipBase = nP + _offAvg + _dropped;
+        _skipEnd = r == PauseTimeline.Open ? double.NaN : _skipBase + SkipLength(p, r);
+        var cursor = _received - _count + _frac;
+        var target = double.IsNaN(_skipEnd) ? _received : Math.Clamp(_skipEnd, cursor, _received);
+        var d = Math.Max(0, target - cursor);
+        var pos = _frac + d;
+        var whole = Math.Min((int)pos, _count);
+        _start += whole;
+        _count -= whole;
+        _frac = _count == 0 ? 0 : pos - whole;
+        _dropped += d;
+        _active = double.IsNaN(_skipEnd) || _skipEnd > _received + 0.5 ? idx : -1;
+    }
+
+    /// <summary>
+    /// A packet after a long silence while a pause skip is active: the input that never arrived during the gap (link down) is accounted
+    /// as discarded too, so the skip ends by host time, not by counting only received samples. Up to the end of the pause; what the gap
+    /// covers after the resume stays missing and becomes a dropout.
+    /// </summary>
+    private void SkipMissing(int length, long now)
+    {
+        if (_active < 0 || _lastNow == long.MinValue) { return; }
+        var gap = (now - _lastNow) / 10_000_000.0;
+        if (gap <= GapSeconds) { return; }
+        var missing = Math.Floor(gap * OutputRate * _avgRatio - length);
+        if (missing <= 0) { return; }
+        if (!double.IsNaN(_skipEnd)) { missing = Math.Min(missing, Math.Max(0, Math.Floor(_skipEnd - _received))); }
+        _received += (long)missing;
+        _dropped += missing;
+    }
+
+    private long TargetCount(long now) => _tl.Effective(now) * OutputRate / 10_000_000;
 
     private void Append(ReadOnlySpan<short> mono)
     {
+        var abs = _received;
+        _received += mono.Length;
+        if (_active >= 0)
+        {
+            var k = double.IsNaN(_skipEnd) ? mono.Length : (int)Math.Clamp(Math.Round(_skipEnd - abs), 0, mono.Length);
+            _dropped += k;
+            mono = mono[k..];
+            if (!double.IsNaN(_skipEnd) && abs + k >= _skipEnd - 0.5) { _active = -1; }
+            if (mono.IsEmpty) { return; }
+        }
         if (_start + _count + mono.Length > _buf.Length)
         {
             if (_start > 0)
@@ -125,15 +234,24 @@ public sealed class ClockLockedTrack
             dst[i] = mono[i];
         }
         _count += mono.Length;
-        _received += mono.Length;
     }
 
     private void Produce(long now, bool final)
     {
+        ProduceCore(now, final);
+        TryCut();
+    }
+
+    private void ProduceCore(long now, bool final)
+    {
         var target = TargetCount(now);
+        // Production runs Latency behind host time; with pauses that lag applies to the pause instants too (see Pause).
+        var lagged = _tl.HasSpans
+            ? _tl.Effective(now - (long)(_lagSamples * 10_000_000.0 / OutputRate)) * OutputRate / 10_000_000
+            : target - (long)_lagSamples;
         var due = final
             ? (_endTarget ?? target) - _outCount
-            : Math.Min(target - (long)_lagSamples, _endTarget ?? long.MaxValue) - _outCount;
+            : Math.Min(lagged, _endTarget ?? long.MaxValue) - _outCount;
         if (due <= 0)
         {
             return;
@@ -165,7 +283,9 @@ public sealed class ClockLockedTrack
                 return;
             }
             // The new data starts where steady state would have it: its first sample waits Margin in the backlog.
+            var gapStart = _outCount;
             PadSilence(Math.Max(0, silence + produce + (long)(Margin * OutputRate)), chunks);
+            if (_outCount > gapStart) { _dropouts.Add((gapStart, _outCount)); }
             Gaps++;
             _integral = Math.Clamp(_integral, -MaxDeviation / 2, MaxDeviation / 2);
             Flush(chunks);
@@ -221,7 +341,11 @@ public sealed class ClockLockedTrack
         {
             _frac = 0;
         }
+        _avgRatio += (ratio - _avgRatio) * Math.Min(1.0, n / (2.0 * OutputRate));
         _outCount += n;
+        var off = _received - _count + _frac - _dropped - _outCount;
+        _offAvg = _offInit ? _offAvg + (off - _offAvg) * Math.Min(1.0, n / (0.5 * OutputRate)) : off;
+        _offInit = true;
         // integral update: error observed at the start of this block, scaled by block length
         _integral = Math.Clamp(_integral + Wn * Wn * backlogErr * n / _baseRatio, -MaxDeviation, MaxDeviation);
         chunks.Add(outp);

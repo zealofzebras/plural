@@ -41,7 +41,21 @@ Frames over any duplex stream: `kind u8 · length u32 LE · payload` (JSON, or r
 | Stop | controller → remote | takeId |
 | TakeReady, FileBegin, FileData…, FileEnd | remote → controller | file list + remote t0; name, size; bytes; SHA‑256 |
 | TakeAck | controller → remote | takeId (all files intact) |
+| Pause / Resume, Paused (level 2) | controller → remote / back | takeId, `at` **in the remote's clock** (like Start; the controller uses now + 0.3 s so all devices pause together) / takeId, paused flag, applied instant or error |
+| RecordRequest (level 2) | remote → controller | mic name. A mic button on the remote asks to toggle recording; the controller handles it like its own Record button |
 
+- **Versions**: Hello's `protocol` is the wire format and stays **1** (release-1 apps refuse anything else); the feature level goes in
+  a new `level` field (2 = Pause/Resume, RecordRequest, `Status.paused`), which release-1 apps ignore. A peer without `level` is
+  level 1: it is accepted but flagged (`RemoteDevice.SupportsPause == false`, shown as "Doesn't support pause") and never sent
+  Pause/Resume or RecordRequest. A higher level is accepted and used at our level; only a different wire `protocol` is refused
+  ("different version").
+- **Pause**: `RemoteDevice.PauseAsync/ResumeAsync(takeId, at)` → remote `IRemoteRecorder.PauseAsync/ResumeAsync` (app calls
+  `MikeHub.PauseRecording(atMediaClock)`). Pauses are removed from the remote's files; the controller records them per device in
+  `take.json` (`devices[].pauses[] = {startMs, endMs}`, wall-clock ms since the scheduled start on the controller clock; `endMs`
+  null if the take ended paused), so the library can place markers in a remote track at `startMs − (startOffsetMs + earlier pauses)`.
+- **Mic buttons**: the app on a controlled device calls `Responder.ForwardRecordButton()` when `MikeHub.RecordButtonPressed` fires;
+  true = sent to the controller (do not record locally), false = handle as the local Record button. The controller raises
+  `RemoteNetwork.RecordRequested` / `RemoteDevice.RecordRequested`.
 - **Clock sync**: the controller pings (12 quick, then 1/s); offset = T2 − (T1 + T3)/2 from the lowest‑RTT of the last 30.
 - **Start**: `startAt = now + 0.7 s` (1.2 s if any remote is on Bluetooth), converted per remote. Every recorder's `t0` is on its
   host `MediaClock`, and audio is clock-locked to it (`ClockLockedTrack`), so the residual offset in the manifest is what is left.
@@ -66,7 +80,9 @@ in the OS Bluetooth settings first, as with SmartMikes; there is no in-app Bluet
   resend after reconnect) and a real `LanTransport` discovery + TCP test.
 - CLI: `smartmike serve --input Microphone --name X` (auto-allows), `smartmike control --record 3 --peer X`, `smartmike search`.
 
-## Status (2026-10-11)
+## Status (2026-10-12)
+Tier 1 (2026-10-12): Hello `level` = 2, Pause/Resume, RecordRequest and the "Doesn't support pause" flag are built. Not yet run
+between two devices.
 Verified over Wi‑Fi between a Surface (arm64, CLI) and a Pixel 8 (Android 17, app):
 - PC controls phone: found in ~100 ms, approval dialog, start +6…19 ms vs. schedule (±5 ms clock), 5 s WAV synced in 373 ms.
 - Phone controls PC: Devices sheet search, remote card, Record/Stop from the phone, "Take complete · 2 devices"; package holds
@@ -83,6 +99,7 @@ Verified over Wi‑Fi between a Surface (arm64, CLI) and a Pixel 8 (Android 17, 
 - A remote with no live mic now refuses Start at once ("Use Connect mics first") instead of connecting mics, which could take
   longer than the shared start (a SmartMike that is off times out after several seconds).
 
-**Not yet tested**: the desktop app as remote/controller through its UI, two remotes at once, reconnect during a real take.
-Open: Android 17 may need a local-network permission if the target SDK is raised; no foreground service, so an Android remote
-must stay open on screen (kept awake while controlled).
+**Not yet tested**: the desktop app as remote/controller through its UI, two remotes at once, reconnect during a real take,
+Pause/Resume and mic-button RecordRequest between two devices, a level-1 peer ("Doesn't support pause").
+Open: Android 17 may need a local-network permission if the target SDK is raised. An Android remote that is being controlled runs in
+the foreground service (`RecordingService`, untested on a phone); before that it had to stay open on screen.

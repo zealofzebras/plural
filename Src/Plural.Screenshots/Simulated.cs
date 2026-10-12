@@ -21,6 +21,12 @@ internal sealed class SimulatedBluetooth(string capturePath) : IBluetoothPlatfor
         ("28:36:38:52:13:B8", 3420),
     ];
 
+    /// <summary>Bit i set: mic i is out of range (its link ends and reconnect attempts fail until the bit is cleared).</summary>
+    public static volatile int DroppedMask;
+
+    /// <summary>Per mic: battery millivolts to report instead of the default (0 = default); picked up with the next battery report.</summary>
+    public static readonly int[] BatteryOverride = new int[Mics.Length];
+
     private readonly Capture _capture = Capture.Load(capturePath);
 
     public IReadOnlyList<PairedDevice> GetPairedDevices() =>
@@ -29,7 +35,11 @@ internal sealed class SimulatedBluetooth(string capturePath) : IBluetoothPlatfor
     public Task<Stream> ConnectSppAsync(BluetoothAddress address, CancellationToken ct)
     {
         var index = Array.FindIndex(Mics, m => BluetoothAddress.Parse(m.Address) == address);
-        Stream stream = new ReplayStream(_capture, Math.Max(0, index), Mics[Math.Max(0, index)].Millivolts);
+        if (index >= 0 && (DroppedMask & (1 << index)) != 0)
+        {
+            return Task.FromException<Stream>(new IOException("Device not in range"));
+        }
+        Stream stream = new ReplayStream(_capture, Math.Max(0, index), index);
         return Task.FromResult(stream);
     }
 
@@ -89,7 +99,7 @@ internal sealed class SimulatedBluetooth(string capturePath) : IBluetoothPlatfor
     private sealed class ReplayStream : Stream
     {
         private readonly Capture _capture;
-        private readonly byte[] _battery;
+        private readonly int _mic;
         private readonly Queue<byte[]> _pending = new();
         private readonly Stopwatch _clock = Stopwatch.StartNew();
         private readonly CancellationTokenSource _closed = new();
@@ -98,20 +108,26 @@ internal sealed class SimulatedBluetooth(string capturePath) : IBluetoothPlatfor
         private byte[]? _current;
         private int _offset;
 
-        public ReplayStream(Capture capture, int mic, int millivolts)
+        public ReplayStream(Capture capture, int mic, int micIndex)
         {
             _capture = capture;
-            _audioIndex = capture.Audio.Count * mic / 3;
-            var tlv = new byte[6];
-            BinaryPrimitives.WriteUInt16BigEndian(tlv, 6);
-            BinaryPrimitives.WriteUInt16BigEndian(tlv.AsSpan(2), StatusType.BatteryMillivolts);
-            BinaryPrimitives.WriteUInt16BigEndian(tlv.AsSpan(4), (ushort)millivolts);
-            _battery = Frame.BuildCommand(Command.StatusInfo, tlv, 0, 0);
+            _mic = Math.Max(0, micIndex);
+            _audioIndex = capture.Audio.Count * _mic / 3;
             foreach (var r in capture.Reports)
             {
                 _pending.Enqueue(r);
             }
-            _pending.Enqueue(_battery);
+            _pending.Enqueue(Battery());
+        }
+
+        private byte[] Battery()
+        {
+            var millivolts = BatteryOverride[_mic] > 0 ? BatteryOverride[_mic] : Mics[_mic].Millivolts;
+            var tlv = new byte[6];
+            BinaryPrimitives.WriteUInt16BigEndian(tlv, 6);
+            BinaryPrimitives.WriteUInt16BigEndian(tlv.AsSpan(2), StatusType.BatteryMillivolts);
+            BinaryPrimitives.WriteUInt16BigEndian(tlv.AsSpan(4), (ushort)millivolts);
+            return Frame.BuildCommand(Command.StatusInfo, tlv, 0, 0);
         }
 
         public override int Read(byte[] buffer, int offset, int count)
@@ -143,14 +159,14 @@ internal sealed class SimulatedBluetooth(string capturePath) : IBluetoothPlatfor
             {
                 return null;
             }
-            if (_closed.IsCancellationRequested)
+            if (_closed.IsCancellationRequested || (DroppedMask & (1 << _mic)) != 0)
             {
                 return null;
             }
             _sent++;
-            if (_sent % 200 == 0)
+            if (_sent % 50 == 0)
             {
-                _pending.Enqueue(_battery);
+                _pending.Enqueue(Battery());
             }
             var frame = _capture.Audio[_audioIndex];
             _audioIndex = (_audioIndex + 1) % _capture.Audio.Count;

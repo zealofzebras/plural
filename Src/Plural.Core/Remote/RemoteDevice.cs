@@ -31,6 +31,7 @@ public sealed class RemoteDevice : IAsyncDisposable
     private readonly Dictionary<string, (double OffsetMs, double UncertaintyMs)> _startOffsets = [];
     private readonly Dictionary<string, TaskCompletionSource<StartedMsg>> _starting = [];
     private readonly Dictionary<string, TaskCompletionSource<RemoteTakeResult>> _takes = [];
+    private readonly Dictionary<(string TakeId, bool Paused), TaskCompletionSource<PausedMsg>> _pausing = [];
     private List<RemoteEndpoint> _endpoints;
     private RemoteLink? _link;
     private TaskCompletionSource<bool>? _accepted;
@@ -43,6 +44,15 @@ public sealed class RemoteDevice : IAsyncDisposable
     public string? Error { get; private set; }
     public StatusMsg? Status { get; private set; }
     public bool HasVideo { get; private set; }
+
+    /// <summary>Protocol version from the remote's Hello (assumed current until it answers).</summary>
+    public int Protocol { get; private set; } = RemoteProtocol.Version;
+
+    /// <summary>False for a remote running an older Plural: it is never sent Pause and the UI shows "Doesn't support pause".</summary>
+    public bool SupportsPause => Protocol >= RemoteProtocol.PauseVersion;
+
+    /// <summary>The remote's mic button asked to toggle recording (also raised on <see cref="RemoteNetwork.RecordRequested"/>).</summary>
+    public event Action<RemoteDevice>? RecordRequested;
 
     /// <summary>"Wi-Fi" or "Bluetooth" while connected (diagnostics only).</summary>
     public string? Transport => _link?.Transport;
@@ -169,6 +179,8 @@ public sealed class RemoteDevice : IAsyncDisposable
             {
                 foreach (var s in _starting.Values) { s.TrySetException(new IOException($"{Name} disconnected.")); }
                 _starting.Clear();
+                foreach (var s in _pausing.Values) { s.TrySetException(new IOException($"{Name} disconnected.")); }
+                _pausing.Clear();
             }
         };
         try
@@ -181,6 +193,7 @@ public sealed class RemoteDevice : IAsyncDisposable
             Name = hello.Name;
             Platform = hello.Platform;
             HasVideo = hello.HasVideo;
+            Protocol = hello.EffectiveLevel;
             SetState(RemoteDeviceState.AwaitingApproval);
             if (!await _accepted.Task.WaitAsync(TimeSpan.FromSeconds(90), ct).ConfigureAwait(false))
             {
@@ -242,6 +255,17 @@ public sealed class RemoteDevice : IAsyncDisposable
                     {
                         if (_starting.Remove(started.TakeId, out var tcs)) { tcs.TrySetResult(started); }
                     }
+                    break;
+                case RemoteMsg.Paused:
+                    var paused = RemoteLink.Parse<PausedMsg>(payload);
+                    lock (_lock)
+                    {
+                        if (_pausing.Remove((paused.TakeId, paused.Paused), out var ptcs)) { ptcs.TrySetResult(paused); }
+                    }
+                    break;
+                case RemoteMsg.RecordRequest:
+                    RecordRequested?.Invoke(this);
+                    _net.RaiseRecordRequested(this);
                     break;
                 case RemoteMsg.TakeReady:
                     OnTakeReady(link, RemoteLink.Parse<TakeReadyMsg>(payload));
@@ -332,6 +356,83 @@ public sealed class RemoteDevice : IAsyncDisposable
         var ms = (started.T0 - offset - startAt) / 10_000.0;
         lock (_lock) { _startOffsets[takeId] = (ms, ClockRtt.TotalMilliseconds / 2); }
         return ms;
+    }
+
+    /// <summary>
+    /// Pauses the remote's take at <paramref name="pauseAt"/> (controller clock; e.g. now + 0.3 s so every device pauses together)
+    /// and waits for its reply. Returns the remote's actual instant relative to <paramref name="pauseAt"/> in ms.
+    /// Records the pause in <c>take.json</c>. Throws <see cref="NotSupportedException"/> for a remote with <see cref="SupportsPause"/> false.
+    /// </summary>
+    public Task<double> PauseAsync(string takeId, long pauseAt) => ChangePauseAsync(takeId, pauseAt, pause: true);
+
+    /// <summary>Resumes the remote's take at <paramref name="resumeAt"/> (controller clock); see <see cref="PauseAsync"/>.</summary>
+    public Task<double> ResumeAsync(string takeId, long resumeAt) => ChangePauseAsync(takeId, resumeAt, pause: false);
+
+    private async Task<double> ChangePauseAsync(string takeId, long at, bool pause)
+    {
+        if (!SupportsPause)
+        {
+            throw new NotSupportedException($"{Name} doesn't support pause.");
+        }
+        var link = _link;
+        if (State != RemoteDeviceState.Connected || link is null || link.IsClosed)
+        {
+            throw new InvalidOperationException($"{Name} is not connected.");
+        }
+        var offset = ClockOffset ?? throw new InvalidOperationException($"{Name}: clock not synchronised yet.");
+        var tcs = new TaskCompletionSource<PausedMsg>(TaskCreationOptions.RunContinuationsAsynchronously);
+        bool added;
+        lock (_lock) { added = _pausing.TryAdd((takeId, pause), tcs); }
+        if (!added)
+        {
+            throw new InvalidOperationException($"{Name}: a {(pause ? "pause" : "resume")} is already pending.");
+        }
+        PausedMsg reply;
+        try
+        {
+            if (pause)
+            {
+                await link.SendAsync(RemoteMsg.Pause, new PauseMsg(takeId, at + offset)).ConfigureAwait(false);
+            }
+            else
+            {
+                await link.SendAsync(RemoteMsg.Resume, new ResumeMsg(takeId, at + offset)).ConfigureAwait(false);
+            }
+            var wait = TimeSpan.FromTicks(Math.Max(0, at - MediaClock.Now)) + TimeSpan.FromSeconds(6);
+            reply = await tcs.Task.WaitAsync(wait).ConfigureAwait(false);
+        }
+        catch (TimeoutException)
+        {
+            throw new InvalidOperationException($"{Name} did not answer in time.");
+        }
+        finally
+        {
+            lock (_lock)
+            {
+                if (_pausing.TryGetValue((takeId, pause), out var cur) && ReferenceEquals(cur, tcs)) { _pausing.Remove((takeId, pause)); }
+            }
+        }
+        if (reply.Error is { } e)
+        {
+            throw new InvalidOperationException($"{Name}: {e}");
+        }
+        if (_net.FolderFor(takeId) is { } folder && _net.ScheduledStart(takeId) is { } startAt)
+        {
+            var ms = (at - startAt) / 10_000.0;
+            TakeManifest.Update(folder, m =>
+            {
+                var d = m.Device(Id, Name);
+                if (pause)
+                {
+                    d.Pauses.Add(new ManifestPause { StartMs = ms });
+                }
+                else if (d.Pauses.LastOrDefault() is { EndMs: null } open)
+                {
+                    open.EndMs = ms;
+                }
+            });
+        }
+        return (reply.At - offset - at) / 10_000.0;
     }
 
     public Task StopAsync(string takeId) =>

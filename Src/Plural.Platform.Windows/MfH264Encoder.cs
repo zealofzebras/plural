@@ -24,6 +24,10 @@ internal sealed class MfH264Encoder : IDisposable
     private int _inputCredits;
     private IMFSample? _pending;                         // async: newest frame waiting for a NeedInput event
     private bool _awaitingKey = true;
+    private volatile bool _keyRequested;                 // set from any thread, consumed on the encoding thread
+    private bool _headerWanted;                          // next IDR must carry SPS/PPS
+    private static readonly Guid PictureTypeKey = new("973704e6-cd14-483c-8f20-c9fc0928bad5");   // MFSampleExtension_VideoEncodePictureType
+    private const uint PictureTypeIdr = 2;               // eAVEncH264PictureType_IDR
     private bool _drainComplete;
     private bool _disposed;
 
@@ -153,12 +157,28 @@ internal sealed class MfH264Encoder : IDisposable
         throw new PlatformNotSupportedException("No usable H.264 encoder found in Media Foundation.", lastError);
     }
 
+    /// <summary>
+    /// Makes the next encoded frame an IDR with SPS/PPS. Applied on the encoding thread just before the next input: sets
+    /// CODECAPI_AVEncVideoForceKeyFrame on the MFT and also tags that input sample with MFSampleExtension_VideoEncodePictureType=IDR
+    /// (hardware MFTs that ignore the codec property usually honour the sample attribute). SPS/PPS are prepended if the MFT omits them.
+    /// </summary>
+    public void RequestKeyFrame() => _keyRequested = true;
+
+    private void ApplyKeyRequest(IMFSample frame)
+    {
+        if (!_keyRequested) return;
+        _keyRequested = false;
+        _headerWanted = true;
+        MfCommon.SetCodecValue(_mft, MfCommon.AvEncVideoForceKeyFrame, 1);
+        try { frame.Set(PictureTypeKey, PictureTypeIdr); } catch { }
+    }
+
     /// <summary>Feeds one NV12 frame (takes ownership of <paramref name="frame"/>); encoded access units are delivered through <paramref name="output"/>.</summary>
     public void Encode(IMFSample frame, Action<EncodedSample> output)
     {
         if (_events is null)
         {
-            try { _mft.ProcessInput(0, frame, 0); }
+            try { ApplyKeyRequest(frame); _mft.ProcessInput(0, frame, 0); }
             finally { frame.Dispose(); }
             Drain(output);
             return;
@@ -168,7 +188,7 @@ internal sealed class MfH264Encoder : IDisposable
         if (_inputCredits > 0)
         {
             _inputCredits--;
-            try { _mft.ProcessInput(0, frame, 0); }
+            try { ApplyKeyRequest(frame); _mft.ProcessInput(0, frame, 0); }
             finally { frame.Dispose(); }
         }
         else
@@ -218,6 +238,7 @@ internal sealed class MfH264Encoder : IDisposable
                     case MediaEventTypes.TransformNeedInput:
                         if (_pending is not null)
                         {
+                            ApplyKeyRequest(_pending);
                             _mft.ProcessInput(0, _pending, 0);
                             _pending.Dispose();
                             _pending = null;
@@ -273,10 +294,11 @@ internal sealed class MfH264Encoder : IDisposable
         var nals = ScanNals(data, out bool hasSps);
         bool key = nals;
 
-        if (_awaitingKey)
+        if (_awaitingKey && !key) return;     // drop everything before the first IDR
+        if (key && (_awaitingKey || _headerWanted))
         {
-            if (!key) return;                 // drop everything before the first IDR
             _awaitingKey = false;
+            _headerWanted = false;
             if (!hasSps)
             {
                 if (_sequenceHeader is null)

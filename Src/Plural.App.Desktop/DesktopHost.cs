@@ -2,6 +2,7 @@ using System;
 using System.Diagnostics;
 using System.IO;
 using System.Collections.Generic;
+using System.Runtime.InteropServices;
 using System.Threading.Tasks;
 using Plural.App.Services;
 using Plural.Core.Platform;
@@ -96,6 +97,42 @@ public sealed class DesktopHost : IAppHost
     public void OnRecordingChanged(bool recording)
     {
     }
+
+    /// <summary>Free bytes for the user on the volume holding <paramref name="folder"/> (walks up to an existing parent).</summary>
+    public long? GetFreeSpace(string folder)
+    {
+        try
+        {
+            var dir = Path.GetFullPath(folder);
+            while (!Directory.Exists(dir) && Path.GetDirectoryName(dir) is { Length: > 0 } parent) dir = parent;
+            var root = Path.GetPathRoot(dir);
+            return new DriveInfo(OperatingSystem.IsWindows() ? root! : dir).AvailableFreeSpace;
+        }
+        catch (Exception ex) when (ex is IOException or ArgumentException or UnauthorizedAccessException or NotSupportedException)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>Windows: GetSystemPowerStatus (null on desktops without a battery). macOS: not implemented yet.</summary>
+    public HostBattery? GetBattery()
+    {
+        if (!OperatingSystem.IsWindows()) return null;
+        if (!GetSystemPowerStatus(out var s)) return null;
+        if (s.BatteryFlag == 128 || s.BatteryFlag == 255 || s.BatteryLifePercent > 100) return null;   // no battery / unknown
+        return new HostBattery(s.BatteryLifePercent, s.ACLineStatus == 1);
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct SystemPowerStatus
+    {
+        public byte ACLineStatus, BatteryFlag, BatteryLifePercent, SystemStatusFlag;
+        public uint BatteryLifeTime, BatteryFullLifeTime;
+    }
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool GetSystemPowerStatus(out SystemPowerStatus status);
 
     public string DeviceName => Environment.MachineName;
 

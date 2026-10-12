@@ -23,6 +23,17 @@ public interface IRemoteRecorder
     /// <summary>Stops the take; the app then reports it through <see cref="RemoteResponder.TakeFinished"/>.</summary>
     Task StopAsync(string takeId);
 
+    /// <summary>
+    /// Pauses the running take at <paramref name="pauseAt"/> (this device's MediaClock; typically ~0.3 s ahead) and returns the
+    /// instant applied. Only called for protocol-2 controllers; the default says pause is unsupported.
+    /// </summary>
+    Task<long> PauseAsync(string takeId, long pauseAt) =>
+        Task.FromException<long>(new NotSupportedException("This app cannot pause a remote take."));
+
+    /// <summary>Resumes the paused take at <paramref name="resumeAt"/> (this device's MediaClock); returns the instant applied.</summary>
+    Task<long> ResumeAsync(string takeId, long resumeAt) =>
+        Task.FromException<long>(new NotSupportedException("This app cannot pause a remote take."));
+
     /// <summary>The controlling device changed: connected, lost (still listed) or gone (null).</summary>
     void ControllerChanged(RemoteControllerInfo? controller);
 }
@@ -260,6 +271,14 @@ public sealed class RemoteResponder
                     _ = Run(() => _recorder.StopAsync(stop.TakeId));
                 }
                 break;
+            case RemoteMsg.Pause:
+                var pause = RemoteLink.Parse<PauseMsg>(payload);
+                _ = PauseResumeAsync(c, pause.TakeId, pause.At, pause: true);
+                break;
+            case RemoteMsg.Resume:
+                var resume = RemoteLink.Parse<ResumeMsg>(payload);
+                _ = PauseResumeAsync(c, resume.TakeId, resume.At, pause: false);
+                break;
             case RemoteMsg.TakeAck:
                 var ack = RemoteLink.Parse<TakeAckMsg>(payload);
                 lock (_lock) { _pending.RemoveAll(p => p.TakeId == ack.TakeId); }
@@ -269,6 +288,44 @@ public sealed class RemoteResponder
                 }
                 break;
         }
+    }
+
+    private async Task PauseResumeAsync(Connection c, string takeId, long at, bool pause)
+    {
+        PausedMsg reply;
+        try
+        {
+            if (_active?.TakeId != takeId)
+            {
+                throw new InvalidOperationException("Not recording this take.");
+            }
+            var applied = await (pause ? _recorder.PauseAsync(takeId, at) : _recorder.ResumeAsync(takeId, at)).ConfigureAwait(false);
+            reply = new PausedMsg(takeId, pause, applied, null);
+        }
+        catch (Exception ex)
+        {
+            reply = new PausedMsg(takeId, pause, 0, ex.Message);
+        }
+        try { await c.Link.SendAsync(RemoteMsg.Paused, reply).ConfigureAwait(false); }
+        catch (Exception) { /* lost; Status.Paused tells the controller after reconnecting */ }
+    }
+
+    /// <summary>
+    /// A mic button on this device asked to toggle recording. While a controller is connected the press is sent to it as a
+    /// <c>RecordRequest</c> (it starts or stops everyone) and the app must <b>not</b> record by itself: returns true.
+    /// Returns false when nobody controls this device (or the controller predates protocol 2 and no take is running): the app
+    /// then handles the press as its own Record button. During a controller's take whose link is down the press is swallowed (true).
+    /// </summary>
+    public bool ForwardRecordButton(string? source = null)
+    {
+        Connection? c;
+        lock (_lock) { c = _current; }
+        if (c is not null && !c.Link.IsClosed && c.Hello.EffectiveLevel >= RemoteProtocol.RecordRequestVersion)
+        {
+            _ = c.Link.SendAsync(RemoteMsg.RecordRequest, new RecordRequestMsg(source)).ContinueWith(_ => { }, TaskScheduler.Default);
+            return true;
+        }
+        return _active is not null;
     }
 
     private static async Task Run(Func<Task> action)

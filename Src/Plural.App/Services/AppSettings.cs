@@ -51,6 +51,9 @@ public sealed class AppSettings
     public double MixFaderDb { get; set; }
     public bool MixMuted { get; set; }
 
+    /// <summary>A press on a SmartMike's Record button starts and stops recording (all mics).</summary>
+    public bool MicButtonsControlRecording { get; set; } = true;
+
     /// <summary>Player page: video area height as a fraction of the page (desktop/tablet splitter); capped at 0.5 by the layout.</summary>
     public double PlayerSplitter { get; set; } = 0.5;
 }

@@ -81,9 +81,10 @@ public sealed class TrackInfo
     public static string PeakPath(string takeFolder, string trackId) => Path.Combine(takeFolder, TakeSidecar.PeaksFolder, PeakFileName(trackId));
 }
 
-/// <summary>A pause point on the output timeline (pause/resume removes the paused time from every track).</summary>
+/// <summary>A pause point (pause/resume removes the paused time from every track).</summary>
 public sealed class PauseInfo
 {
+    /// <summary>Position of the pause in milliseconds on the take's output timeline (recorded time, paused time removed), i.e. where the cut sits in every track and in the video; the same for all tracks of this device.</summary>
     public double AtMs { get; set; }
 
     [JsonExtensionData]
@@ -93,8 +94,13 @@ public sealed class PauseInfo
 /// <summary>A stretch of a track that was filled with silence because the mic was away.</summary>
 public sealed class DropoutInfo
 {
+    /// <summary><see cref="TrackInfo.Id"/> of the audio track.</summary>
     public string Track { get; set; } = "";
+
+    /// <summary>Start in milliseconds on that track's own recorded timeline: from the track's sample 0, with paused time already removed (not take-timeline or wall time).</summary>
     public double StartMs { get; set; }
+
+    /// <summary>End (exclusive) in the same track-local milliseconds.</summary>
     public double EndMs { get; set; }
 
     [JsonExtensionData]

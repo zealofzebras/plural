@@ -66,6 +66,12 @@ public interface IAppHost
     /// <summary>This device's battery (phones, laptops); null if it has none or it is unknown.</summary>
     HostBattery? GetBattery() => null;
 
+    /// <summary>
+    /// Keeps the screen on (true) or lets it sleep. The UI asks for it only while the Recorder page is visible and a take is recording,
+    /// this device is remote-controlled or a camera preview is showing; recording itself never depends on it (Android: foreground service).
+    /// </summary>
+    void SetKeepScreenOn(bool on) { }
+
     /// <summary>Recording state for the system (Android: the foreground-service notification "Recording · 12:34" with Pause/Stop).</summary>
     void UpdateRecordingStatus(TimeSpan elapsed, bool paused) { }
 

@@ -1,0 +1,11 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:Plural.App.ViewModels"
+             x:Class="Plural.App.Views.RecDot"
+             x:DataType="vm:MainViewModel">
+    <!-- Recording dot: blinks red while recording, solid amber while paused -->
+    <Panel Width="10" Height="10" VerticalAlignment="Center">
+        <Ellipse Classes="blink" Fill="{DynamicResource RecordBrush}" IsVisible="{Binding !IsPaused}" />
+        <Ellipse Fill="{DynamicResource WarnBrush}" IsVisible="{Binding IsPaused}" />
+    </Panel>
+</UserControl>

@@ -1,5 +1,6 @@
 using Plural.Core.Audio;
 using Plural.Core.Platform;
+using Plural.Core.Protocol;
 using Plural.Core.Recording;
 
 namespace Plural.Core.Session;
@@ -208,7 +209,9 @@ public sealed class MikeHub : IAsyncDisposable
         {
             return existing;
         }
-        var ch = new MikeChannel(new MikeSession(device, Bluetooth), Audio);
+        var session = new MikeSession(device, Bluetooth) { KeepReconnecting = () => IsRecording };
+        var ch = new MikeChannel(session, Audio);
+        session.ButtonPressed += (_, e) => OnMikeButton(ch, e);
         _channels.Add(ch);
         Mix.Attach(ch);
         return ch;
@@ -239,6 +242,49 @@ public sealed class MikeHub : IAsyncDisposable
 
     private readonly object _recLock = new();
     private TakeRecorder? _recorder;
+
+    // ------------------------------------------------------------------ mic buttons
+
+    /// <summary>
+    /// The button report that means "Record". The SmartMike+ has one multi-function button; a short single press sends
+    /// <see cref="ButtonEvent.MfbSinglePress"/> (hardware-verified; double press and a 2 s hold send nothing, a long hold powers the
+    /// mic off). The same button also acts as A2DP play/pause towards the host. Null = nothing toggles.
+    /// </summary>
+    public ButtonEvent? RecordButtonEvent { get; set; } = ButtonEvent.MfbSinglePress;
+
+    /// <summary>"Mic buttons start and stop recording" setting; when false <see cref="RecordButtonPressed"/> never fires.</summary>
+    public bool ButtonsControlRecording { get; set; } = true;
+
+    /// <summary>
+    /// A mic's Record button was pressed (debounced 1 s; ignored within 2 s after a stop). The hub does <b>not</b> start or stop
+    /// recording itself: the app decides — locally it toggles Record All, as a remote it forwards the press to the controller
+    /// (<c>RemoteResponder.ForwardRecordButton</c>). Raised on the mic's receive thread.
+    /// </summary>
+    public event Action<MikeHub, MikeChannel>? RecordButtonPressed;
+
+    /// <summary>Millisecond clock for the button debounce; tests replace it.</summary>
+    internal Func<long> ButtonClockMs { get; set; } = () => Environment.TickCount64;
+
+    private long _lastButtonMs = long.MinValue / 2;
+    private long _lastStopMs = long.MinValue / 2;
+
+    private void OnMikeButton(MikeChannel channel, ButtonEvent e)
+    {
+        if (!ButtonsControlRecording || RecordButtonEvent is not { } record || e != record)
+        {
+            return;
+        }
+        lock (_recLock)
+        {
+            var now = ButtonClockMs();
+            if (now - _lastButtonMs < 1000 || now - _lastStopMs < 2000)
+            {
+                return;
+            }
+            _lastButtonMs = now;
+        }
+        RecordButtonPressed?.Invoke(this, channel);
+    }
 
     /// <summary>Recording options; change while idle (takes the value at <see cref="StartRecordingAll"/>).</summary>
     public RecordingSettings RecordingSettings { get; set; } = new();
@@ -325,7 +371,48 @@ public sealed class MikeHub : IAsyncDisposable
             _recorder = rec;
             IsRecording = true;
             RecordingFolder = folder;
+            rec.PauseStateChanged += OnRecorderPauseChanged;
         }
+        RecordingStateChanged?.Invoke(this);
+    }
+
+    /// <summary>Raised after a take starts, stops, pauses or resumes (also when a scheduled pause/resume instant is reached). Fires on the calling thread, or on a timer thread for scheduled instants; never under a lock.</summary>
+    public event Action<MikeHub>? RecordingStateChanged;
+
+    private void OnRecorderPauseChanged() => RecordingStateChanged?.Invoke(this);
+
+    /// <summary>True while a take is recording and currently paused (a pause scheduled for a future instant counts once that instant has passed). False when not recording.</summary>
+    public bool IsRecordingPaused => _recorder?.IsPaused ?? false;
+
+    /// <summary>Recorded time of the take in progress without paused time (what every track holds, give or take the Bluetooth latency); <see cref="TimeSpan.Zero"/> when not recording.</summary>
+    public TimeSpan RecordedTime => _recorder?.RecordedTime ?? TimeSpan.Zero;
+
+    /// <summary>Bytes the take in progress has written to its files so far (cheap: sums file sizes); 0 when not recording. Buffered data is not counted.</summary>
+    public long RecordingBytesWritten => _recorder?.BytesWritten ?? 0;
+
+    /// <summary>Pauses the take now. Does nothing when not recording or already paused.</summary>
+    public void PauseRecording() => PauseRecording(MediaClock.Now);
+
+    /// <summary>Resumes the take now. Does nothing when not recording or not paused.</summary>
+    public void ResumeRecording() => ResumeRecording(MediaClock.Now);
+
+    /// <summary>
+    /// Pauses at host time <paramref name="atMediaClock"/> (<see cref="MediaClock"/> ticks). An instant in the future is scheduled: audio and video
+    /// are cut exactly there and <see cref="RecordingStateChanged"/> fires then. Does nothing when not recording or already paused (or scheduled to pause).
+    /// </summary>
+    public void PauseRecording(long atMediaClock)
+    {
+        var rec = _recorder;
+        if (rec is null) { return; }
+        rec.Pause(atMediaClock);
+    }
+
+    /// <summary>Resumes at host time <paramref name="atMediaClock"/> (may be in the future: scheduled). Does nothing when not recording or not paused.</summary>
+    public void ResumeRecording(long atMediaClock)
+    {
+        var rec = _recorder;
+        if (rec is null) { return; }
+        rec.Resume(atMediaClock);
     }
 
     /// <summary>Finishes the take: stops audio and camera encoding and finalises all files off the receive thread.</summary>
@@ -337,7 +424,9 @@ public sealed class MikeHub : IAsyncDisposable
             rec = _recorder ?? throw new InvalidOperationException("Not recording.");
             _recorder = null;
             IsRecording = false;
+            _lastStopMs = ButtonClockMs();
         }
+        rec.PauseStateChanged -= OnRecorderPauseChanged;
         try
         {
             return await rec.StopAsync().ConfigureAwait(false);
@@ -348,6 +437,7 @@ public sealed class MikeHub : IAsyncDisposable
             {
                 ch.SetRecording(null, null);
             }
+            RecordingStateChanged?.Invoke(this);
         }
     }
 
@@ -371,4 +461,5 @@ public sealed class MikeHub : IAsyncDisposable
         }
         _channels.Clear();
     }
+
 }
