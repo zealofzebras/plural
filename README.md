@@ -3,155 +3,50 @@
 **Record several microphones at once, each on its own track, all in sync.** Press Record once and every mic starts together;
 press Stop and the take is ready.
 
-Plural started as a way to bring the discontinued **Sabinetek SmartMike+** wireless mics back to life. Their app is gone,
-so Plural talks to the mics directly over Bluetooth. It also records the mics you already have (built-in, USB, wired or Bluetooth
-headset), and it can link several phones and computers so they record one take together.
+![Plural recording with three SmartMike+ wireless mics and a USB microphone](Marketing/screenshots/desktop/01.png)
 
-Website: [getplural.net](https://getplural.net) · Releases: [GitHub releases](https://github.com/zealofzebras/plural/releases)
+Plural started as a way to bring the discontinued **Sabinetek SmartMike+** wireless mics back to life. Their app is gone,
+so Plural talks to the mics directly over Bluetooth. It also records the mics you already have (built-in, USB, wired or
+Bluetooth headset), and it can link several phones and computers so they record one take together.
+
+**Website:** [getplural.net](https://getplural.net) · **Download:** [latest release](https://github.com/zealofzebras/plural/releases)
 
 > Plural is an independent project. It is not made by, endorsed by or affiliated with Sabinetek. SmartMike is a trademark of its owner.
 
-## What it does
+## What you can do with it
 
-- **Many mics, one take**: connect two, three or more SmartMike+ mics plus local mics; every mic gets its own track or file.
-- **Stays in sync**: each wireless mic's clock drifts by about 0.2 %, so Plural locks every track to one clock. Tracks line up
-  with each other and with video, even in long recordings.
-- **Formats**: WAV, M4A, MP3 (one file per mic), MKA (one file, one track per mic), and MKV or MP4 with camera video.
-- **Mixer**: per-mic fader, mute, live level meter, battery, mic gain / AGC / monitor volume, a direct output per mic and a mix output.
-  On Windows, a mic can be sent to a virtual audio cable so other apps (Zoom, OBS, a DAW) see it as a microphone.
-- **Record together**: one Plural app starts and stops others over Wi-Fi or Bluetooth and collects their files into one take
-  ([Docs/Plural/Remote.md](Docs/Plural/Remote.md)).
-- **Command line**: `plural` (the `Plural.Cli` project) does all of the above without a UI. It can also run as an MCP server,
-  so an AI assistant can drive the mics and recording.
+- **Record a podcast or interview** with a mic on every guest, each voice on its own track for easy editing.
+- **Use your SmartMike+ mics again**: connect two, three or more at once, alongside any other mic you have.
+- **Stay in sync, even in long recordings**: every track lines up with the others and with your video.
+- **Pick your format**: WAV, M4A or MP3 (one file per mic), MKA (one file with a track per mic), or video with sound (MKV or MP4).
+- **Mix as you go**: a volume slider, mute button and level meter for each mic, plus battery level, mic gain and headphone volume
+  for SmartMike+ mics.
+- **Use the mics in other apps**: on Windows, send a mic to a virtual audio cable so Zoom, OBS or your editing software sees it as a microphone.
+- **Record on several devices together**: start and stop Plural on other phones and computers over Wi-Fi or Bluetooth, and
+  collect all their files into one take.
 
-### Platforms
+## Getting started
 
-| Platform | State |
+1. **Pair your SmartMike+ mics** in your phone's or computer's Bluetooth settings. Plural only shows mics that are already paired.
+2. **Open Plural** and add your mics. Each one gets its own card with a level meter, and other mics you have (USB, built-in) can be added too.
+3. **Press the red Record button.** Every mic starts at the same moment. Press it again to stop; your recording is under **Takes**.
+
+## Where it runs
+
+| Device | Status |
 |---|---|
-| Windows 10/11, arm64 and x64 | Main development platform; tested with SmartMike+ mics |
-| Android 8.0+ (arm64 phones, x64 emulator) | Builds and runs on a Pixel 8; newer features still being tested on phones |
-| macOS (arm64, x64) | Builds; not yet run on a Mac |
-| iOS | Compiles; not yet run on a device. SmartMike support depends on Apple's MFi rules (iOS has no plain Bluetooth serial) |
-| Linux | Planned; nothing in the design blocks it |
+| Windows 10 and 11 | Ready to use; tested with SmartMike+ mics |
+| Android 8.0 and newer | Works on phones; newer features are still being tested |
+| Mac | Available, but not yet tested on a Mac |
+| iPhone and iPad | In progress; SmartMike+ support depends on Apple's accessory rules |
+| Linux | Planned |
 
-The detailed status of each part is in [Docs/Plural/Design.md](Docs/Plural/Design.md#status-2026-10-11).
+## Help and feedback
 
-## How it works
+Found a problem or have an idea? [Open an issue](https://github.com/zealofzebras/plural/issues). We especially welcome
+reports from Mac, iPhone and Android users, since those are the devices we can test least.
 
-```
- SmartMike+ ──Bluetooth SPP (RFCOMM)──►  MikeSession ─┐
- (QCELT audio, control)                  (handshake,  │
-                                          settings)   ├─► MikeChannel ─► fader/mute ─┬─► recorder (WAV/FLAC/AAC/MP3/MKV/MP4)
- local mic ──OS audio API──────────────► LocalMic ────┘   (jitter buffer,            ├─► direct output per mic
-                                                           drift resampling)         └─► mix bus ─► mix output
-```
+## For developers
 
-- **The SmartMike protocol** was reverse engineered from the original MetAudio app and live captures. Each mic exposes a
-  private serial (SPP) channel. Plural sends small framed commands over it, and the mic streams audio as
-  **QCELT**: a 4-byte header plus a CELT 0.7.1 frame, 44.1 kHz mono. The full write-up is in [SmartMike/](SmartMike/README.md) and [Docs/Protocol/](Docs/Protocol/).
-- **`Plural.Core`** holds everything that isn't OS-specific: protocol frames, sessions, CELT decoding (native `celt071` via P/Invoke),
-  a drift-compensating jitter buffer, the mixer, and the recording containers (WAV, FLAC, Matroska, MP4 written in managed code).
-- **Platform projects** add Bluetooth sockets, audio in/out, AAC and H.264 encoders, and cameras for each OS:
-  Windows (Winsock `AF_BTH`, WASAPI, Media Foundation), Android (BluetoothSocket, AudioTrack/AudioRecord, MediaCodec,
-  Camera2), macOS (IOBluetooth, Core Audio) and iOS (External Accessory, AVAudioSession).
-- **`Plural.App`** is one shared [Avalonia](https://avaloniaui.net) UI. Small app heads wrap it for the desktop, Android and iOS.
-
-The architecture, platform notes and design decisions are in [Docs/Plural/Design.md](Docs/Plural/Design.md); the recording
-pipeline is in [Docs/Plural/Recording.md](Docs/Plural/Recording.md).
-
-## Repository layout
-
-| Folder | Contents |
-|---|---|
-| [`Src/`](Src/) | The app: `Plural.slnx` with Core, Core.Tests, Platform.\*, App (shared UI), App.Desktop / .Android / .iOS heads, Cli, Screenshots |
-| [`Native/`](Native/) | Build scripts and per-platform binaries for the two native libraries: CELT 0.7.1 (audio decoding) and LAME 3.100 (MP3) |
-| [`Docs/`](Docs/README.md) | Design docs for the app ([Docs/Plural/](Docs/Plural/)) and the SmartMike findings (protocol, app, firmware) |
-| [`SmartMike/`](SmartMike/README.md) | The reverse-engineering material: the original app, firmware images, decompiled code |
-| [`Tools/`](Tools/) | Python reference tools for the SmartMike protocol, and the store-listing builder (`Tools/store/`) |
-| [`Marketing/`](Marketing/README.md) | Store text, icon and screenshots |
-| [`Packaging/`](Packaging/) | Windows MSIX and macOS app bundle packaging |
-| [`.github/workflows/`](.github/workflows/release.yml) | Release pipeline: builds every platform and the store packages when a GitHub release is published |
-
-## Building
-
-### Prerequisites
-
-- **.NET SDK 10.0.301** ([download](https://dotnet.microsoft.com/download/dotnet/10.0))
-- **Android**: `dotnet workload install android`, JDK 21, and the Android SDK. To install the SDK packages Plural needs, run
-  `dotnet build Src/Plural.App.Android -t:InstallAndroidDependencies -f net10.0-android`.
-- **iOS**: `dotnet workload install ios`. It compiles on Windows; linking, signing and running need a Mac with Xcode.
-- **Native CELT library**: `celt071` is **not committed**, so build it once after cloning (see below). LAME binaries for
-  Windows and Android are committed.
-
-### CELT (once after cloning)
-
-Download [celt-0.7.1.tar.gz](https://downloads.xiph.org/releases/celt/celt-0.7.1.tar.gz) and extract it to
-`Tools/ext/src/celt-0.7.1`, then run the script for your target in bash (Git Bash on Windows):
-
-```bash
-# Windows x64 + arm64 DLLs. Needs llvm-mingw 20240619 (github.com/mstorsjo/llvm-mingw);
-# set LLVM_MINGW to it unless it is at Tools/ext/llvm-mingw-20240619-ucrt-aarch64.
-bash Native/celt/build-windows.sh
-
-# Android arm64 + x64. Needs NDK r29 (sdkmanager "ndk;29.0.14206865"); set ANDROID_NDK if it isn't in the default SDK folder.
-bash Native/celt/build-android.sh
-
-# macOS dylibs / iOS xcframeworks (on a Mac)
-bash Native/celt/build-macos.sh
-bash Native/celt/build-ios.sh
-```
-
-The libraries land in `Native/celt/runtimes/<rid>/native/`. The release workflow builds them the same way.
-
-### Build and run (from `Src/`)
-
-```bash
-dotnet test Plural.Core.Tests                     # unit tests, including decoding a real SmartMike capture
-dotnet test Plural.Core.Tests --arch x64          # also on x64 when you are on an arm64 machine
-
-dotnet run --project Plural.App.Desktop           # desktop app (Windows, macOS)
-dotnet build Plural.App.Android                   # Android debug build
-dotnet publish Plural.App.Android -c Release      # → Plural.App.Android/bin/Release/net10.0-android/publish/net.getplural.app-Signed.apk
-dotnet publish Plural.App.Desktop -c Release -r osx-arm64 --self-contained -p:UseAppHost=true   # macOS
-dotnet build Plural.App.iOS                       # iOS compile check
-
-dotnet run --project Plural.Cli -- help           # command line: list, inputs, outputs, run, serve, control, mcp, …
-```
-
-Install an APK on a phone with `adb install -r <apk>`. SmartMikes must be **paired in the OS Bluetooth settings** first;
-Plural lists paired devices and doesn't scan for new ones.
-
-### Using Plural from an AI assistant
-
-`plural mcp` runs the mixer as an MCP server on stdin/stdout, with tools to list devices, add mics, set faders, and record and stop.
-For example, in Claude Code:
-
-```bash
-claude mcp add plural -- <path-to>/Plural.Cli.exe mcp
-```
-
-## Contributing
-
-Issues and pull requests are welcome, especially testing on hardware we don't have: Macs, iPhones, other Android phones,
-and Linux for the planned port.
-
-- **Read the docs first.** `Docs/` is the source of truth: [Docs/Plural/Design.md](Docs/Plural/Design.md) for the app,
-  [Docs/Protocol/](Docs/Protocol/) for the SmartMike protocol. When you change behaviour, update the doc and the
-  status table in the same pull request.
-- **Keep `Plural.Core` free of OS APIs.** Platform code goes in `Plural.Platform.*` or an app head, behind the interfaces in
-  `Plural.Core/Platform/`.
-- **Every platform counts.** Changes must build and work on win-arm64 and win-x64, android-arm64 and android-x64, and still
-  build for osx-arm64/osx-x64 and ios-arm64. Don't add anything that would block a Linux port.
-- **Run the tests** on both arm64 and x64 (`dotnet test` with and without `--arch x64`) before opening a pull request.
-- **Stack conventions**: Avalonia 12 with compiled bindings (`x:DataType`), CommunityToolkit.Mvvm
-  (`[ObservableProperty] public partial …`, `[RelayCommand]`). Match the style of the code around your change.
-- **Hardware safety**:
-  - Never install, flash or send firmware to a mic, and don't add firmware-update code.
-  - After testing on a mic, put its settings back to the defaults: monitor volume 80, AGC on, mic gain 50.
-- **Protocol findings**: document them in `Docs/Protocol/` and mark each claim **Verified**, **Inferred** or **Open**,
-  with evidence. See [SmartMike/README.md](SmartMike/README.md) for how the reverse engineering is organised.
-- **Store text**: product names, subtitles and keywords must not contain "SmartMike" or "Sabinetek"
-  (see [Marketing/README.md](Marketing/README.md)).
-
-Releases are built by publishing a GitHub release; [release.yml](.github/workflows/release.yml) builds Windows (MSIX),
-Android (APK/AAB), macOS and iOS packages and attaches them with the store listings.
+Plural is open source. How it works, how to build it, the command-line version (which an AI assistant can also control) and how to contribute
+are all in the **[developer guide](DEVELOPMENT.md)**.
