@@ -1,4 +1,5 @@
 using Plural.Core.Audio;
+using Plural.Core.Library;
 using Plural.Core.Platform;
 using Plural.Core.Session;
 
@@ -12,22 +13,47 @@ public sealed record RecordedTake(string Folder, RecordingFormat Format, IReadOn
 
     /// <summary>Queue items dropped because the writer could not keep up (0 normally).</summary>
     public long DroppedItems { get; init; }
+
+    /// <summary>The tracks of the take as stored in the sidecar (ids, files, durations); empty if the sidecar could not be written.</summary>
+    public IReadOnlyList<TrackInfo> Tracks { get; init; } = [];
+
+    /// <summary>Full path of <c>plural.json</c> (null if it could not be written).</summary>
+    public string? SidecarPath { get; init; }
 }
 
 /// <summary>Zip/share helper for finished takes.</summary>
 public static class TakeExport
 {
+    /// <summary>True for the library's own files (sidecar, poster, peaks), which are never shared.</summary>
+    internal static bool IsLibraryFile(string relativePath)
+    {
+        var rel = relativePath.Replace('\\', '/');
+        return rel.Equals(TakeSidecar.FileName, StringComparison.OrdinalIgnoreCase)
+            || rel.Equals(TakeSidecar.PosterFileName, StringComparison.OrdinalIgnoreCase)
+            || rel.StartsWith(TakeSidecar.PeaksFolder + "/", StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>File-name-safe version of a title (invalid characters become '_'); empty if nothing is left.</summary>
+    public static string SanitizeTitle(string? title)
+    {
+        if (string.IsNullOrWhiteSpace(title)) { return ""; }
+        var bad = Path.GetInvalidFileNameChars();
+        var s = new string(title.Select(c => bad.Contains(c) || c == '…' ? '_' : c).ToArray()).Trim().TrimEnd('.', ' ');
+        return s.Length > 100 ? s[..100].TrimEnd('.', ' ') : s;
+    }
+
     /// <summary>
-    /// The single media file of the take, or (for several files) <c>&lt;takeFolder&gt;.zip</c> next to the folder, created or reused
-    /// when it is newer than every file in the take.
+    /// The single media file of the take, or (for several files) a zip, created or reused when it is newer than every file in the
+    /// take. Without a title the zip is <c>&lt;takeFolder&gt;.zip</c> next to the folder; with a title it is
+    /// <c>&lt;root&gt;/.share/&lt;take&gt;/&lt;sanitized title&gt;.zip</c>. The sidecar, poster and peaks are not shared.
     /// </summary>
-    public static string GetShareFile(string takeFolder)
+    public static string GetShareFile(string takeFolder, string? title = null)
     {
         var folder = takeFolder.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
         // Takes with remote devices hold one sub-folder per device and take.json: the zip keeps that layout.
         var files = Directory.GetFiles(folder, "*", SearchOption.AllDirectories)
             .Where(f => !f.EndsWith(".zip", StringComparison.OrdinalIgnoreCase) && !f.EndsWith(".tmp", StringComparison.OrdinalIgnoreCase)
-                && !f.EndsWith(".part", StringComparison.OrdinalIgnoreCase))
+                && !f.EndsWith(".part", StringComparison.OrdinalIgnoreCase) && !IsLibraryFile(Path.GetRelativePath(folder, f)))
             .OrderBy(f => f, StringComparer.OrdinalIgnoreCase).ToList();
         if (files.Count == 0)
         {
@@ -38,6 +64,13 @@ public static class TakeExport
             return files[0];
         }
         var zip = folder + ".zip";
+        var name = SanitizeTitle(title);
+        if (name.Length > 0)
+        {
+            var dir = Path.Combine(Path.GetDirectoryName(Path.GetFullPath(folder))!, TakeLibrary.ShareFolderName, Path.GetFileName(folder));
+            Directory.CreateDirectory(dir);
+            zip = Path.Combine(dir, name + ".zip");
+        }
         if (File.Exists(zip) && File.GetLastWriteTimeUtc(zip) >= files.Max(File.GetLastWriteTimeUtc))
         {
             return zip;
@@ -361,6 +394,11 @@ internal sealed class TakeRecorder
     private readonly TaskCompletionSource _done = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private readonly long _t0;
     private bool _stopped;
+    private PeakWriter?[] _peaks = [];
+    private List<TrackInfo> _sidecarTracks = [];
+    private List<TrackInfo> _micTracks = [];
+    private bool _sidecarWritten;
+    private PosterCapture? _poster;
 
     public string Folder { get; }
     public RecordingFormat Format { get; }
@@ -411,9 +449,73 @@ internal sealed class TakeRecorder
             try { output.Complete(); } catch { /* best effort */ }
             throw;
         }
+        r.InitLibrary(settings, names);
         r.Begin();
         return r;
     }
+
+    /// <summary>Writes the sidecar (status recording) and opens one peaks file per mic. Failures are reported in the take's errors, not thrown.</summary>
+    private void InitLibrary(RecordingSettings settings, List<string> names)
+    {
+        var tracks = new List<TrackInfo>();
+        var multi = Format.IsMultiTrack();
+        var videoFirst = _camera is not null && Format.IsVideo();
+        if (videoFirst)
+        {
+            var file = RelativeFile(_output.Files[0]);
+            tracks.Add(new TrackInfo
+            {
+                Id = TrackInfo.MakeId(file, 0), Kind = TrackKinds.Video, File = file, TrackIndex = 0, Name = "Video", Codec = "h264",
+                Width = _camera!.Width, Height = _camera.Height,
+                Rotation = _camera.EncodedRotationDegrees, // what the file stores
+            });
+        }
+        var codec = Format switch
+        {
+            RecordingFormat.Wav => "pcm_s16le",
+            RecordingFormat.Mp3 => "mp3",
+            RecordingFormat.M4a or RecordingFormat.Mp4 => "aac",
+            _ => settings.MatroskaAudio == MatroskaAudioCodec.Flac ? "flac" : "pcm_s16le",
+        };
+        var micTracks = new List<TrackInfo>();
+        for (var i = 0; i < names.Count; i++)
+        {
+            var file = RelativeFile(Mics[i].Path ?? _output.Files[0]);
+            var index = multi ? i + (videoFirst ? 1 : 0) : 0;
+            var t = new TrackInfo
+            {
+                Id = TrackInfo.MakeId(file, index), Kind = TrackKinds.Audio, File = file, TrackIndex = index, Name = names[i],
+                Codec = codec, SampleRate = ClockLockedTrack.OutputRate, Channels = 1,
+            };
+            tracks.Add(t);
+            micTracks.Add(t);
+        }
+        _sidecarTracks = tracks;
+        _micTracks = micTracks;
+        try
+        {
+            TakeSidecar.Update(Folder, s =>
+            {
+                s.Status = TakeStatus.Recording;
+                s.Created = DateTime.Now;
+                s.Tracks = tracks;
+            });
+            _sidecarWritten = true;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            Error("sidecar: " + ex.Message);
+        }
+        _peaks = new PeakWriter?[names.Count];
+        for (var i = 0; i < names.Count; i++)
+        {
+            try { _peaks[i] = new PeakWriter(TrackInfo.PeakPath(Folder, micTracks[i].Id), ClockLockedTrack.OutputRate); }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { Error("peaks: " + ex.Message); }
+        }
+        if (_camera is not null && Format.IsVideo()) { _poster = new PosterCapture(_camera, Folder, _t0); }
+    }
+
+    private string RelativeFile(string path) => Path.GetRelativePath(Folder, path).Replace('\\', '/');
 
     private static TakeOutput CreateOutput(string folder, string stamp, RecordingSettings s, IReadOnlyList<MikeChannel> channels,
         List<string> names, IAacEncoderFactory? aac, IVideoCapture? camera)
@@ -507,6 +609,7 @@ internal sealed class TakeRecorder
                 _camera.SampleEncoded -= _videoHandler;
                 try { _camera.StopEncoding(); } catch (Exception ex) { lock (_errors) { _errors.Add("camera: " + ex.Message); } }
             }
+            if (_poster is not null) { await _poster.StopAsync().ConfigureAwait(false); }
             foreach (var t in _tracks) { t.Finish(tStop); }
             lock (_q)
             {
@@ -515,12 +618,16 @@ internal sealed class TakeRecorder
             }
         }
         await _done.Task.ConfigureAwait(false);
+        var duration = TimeSpan.FromTicks(tStop - _t0);
+        CompleteSidecar(duration);
         List<string> errors;
         lock (_errors) { errors = [.. _errors]; }
-        return new RecordedTake(Folder, Format, _output.Files.ToArray(), TimeSpan.FromTicks(tStop - _t0))
+        return new RecordedTake(Folder, Format, _output.Files.ToArray(), duration)
         {
             Errors = errors,
             DroppedItems = Interlocked.Read(ref _dropped),
+            Tracks = _sidecarWritten ? _sidecarTracks : [],
+            SidecarPath = _sidecarWritten ? Path.Combine(Folder, TakeSidecar.FileName) : null,
         };
     }
 
@@ -590,7 +697,11 @@ internal sealed class TakeRecorder
                 {
                     if (w.Pcm is not null)
                     {
-                        if (!_failed[w.Mic]) { _output.Mics[w.Mic].Write(w.Pcm); }
+                        if (!_failed[w.Mic])
+                        {
+                            _output.Mics[w.Mic].Write(w.Pcm);
+                            WritePeaks(w.Mic, w.Pcm); // exactly the samples that went into the file
+                        }
                     }
                     else if (w.Video is not null)
                     {
@@ -605,10 +716,50 @@ internal sealed class TakeRecorder
             }
             try { _output.Complete(); }
             catch (Exception ex) { Error(ex.Message); }
+            foreach (var p in _peaks)
+            {
+                try { p?.Complete(); }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { Error("peaks: " + ex.Message); }
+            }
         }
         finally
         {
             _done.TrySetResult();
+        }
+    }
+
+    private void WritePeaks(int mic, short[] pcm)
+    {
+        var p = _peaks[mic];
+        if (p is null) { return; }
+        try { p.Write(pcm); }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            _peaks[mic] = null;
+            Error("peaks: " + ex.Message);
+        }
+    }
+
+    /// <summary>Sidecar at the end of the take: status complete and the durations. Failures are reported, not thrown.</summary>
+    private void CompleteSidecar(TimeSpan duration)
+    {
+        if (!_sidecarWritten) { return; }
+        for (var i = 0; i < _tracks.Length; i++)
+        {
+            _micTracks[i].DurationMs = Math.Round(_tracks[i].Duration.TotalMilliseconds, 1);
+        }
+        foreach (var v in _sidecarTracks.Where(x => x.IsVideo)) { v.DurationMs = Math.Round(duration.TotalMilliseconds, 1); }
+        try
+        {
+            TakeSidecar.Update(Folder, s =>
+            {
+                s.Status = TakeStatus.Complete;
+                s.Tracks = _sidecarTracks;
+            });
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            Error("sidecar: " + ex.Message);
         }
     }
 }

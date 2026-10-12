@@ -306,45 +306,33 @@ public class Mp4Tests
         }
         var file = ms.ToArray();
         var root = Mp4Box.ParseFile(file);
-        Assert.Equal(["ftyp", "mdat", "moov"], root.Children.Select(c => c.Type));
+        // fragmented layout: ftyp, moov first, then moof+mdat roughly every second (video fragments start on key frames), mfra at a clean close
+        Assert.Equal(["ftyp", "moov", "moof", "mdat", "moof", "mdat", "moof", "mdat", "mfra"], root.Children.Select(c => c.Type));
         Assert.Equal("isom", Encoding.ASCII.GetString(root.Children[0].Data[..4]));
-        // 64-bit mdat: size == 1 then largesize
-        Assert.Equal(1u, BinaryPrimitives.ReadUInt32BigEndian(file.AsSpan((int)root.Children[1].Start)));
-        Assert.Equal(root.Children[1].End - root.Children[1].Start, (long)BinaryPrimitives.ReadUInt64BigEndian(file.AsSpan((int)root.Children[1].Start + 8)));
 
-        var moov = root.Children[2];
+        var moov = root.Children[1];
         var traks = moov.FindAll("trak").ToList();
         Assert.Equal(3, traks.Count);
         Assert.Equal(["Video", "Mic One", "Mic Two"], traks.Select(t => Encoding.UTF8.GetString(t.Path("udta/name").Data)));
         Assert.Equal(["vide", "soun", "soun"], traks.Select(t => Encoding.ASCII.GetString(t.Path("mdia/hdlr").Data.Slice(8, 4))));
         Assert.Equal(["Video", "Mic One", "Mic Two"],
             traks.Select(t => { var d = t.Path("mdia/hdlr").Data; return Encoding.UTF8.GetString(d.Slice(24, d.Length - 25)); }));
+        Assert.Equal(3, moov.Path("mvex").FindAll("trex").Count());
+        Assert.NotNull(moov.Path("mvex").Find("mehd"));
 
-        int[] expectedCounts = [90, 360, 360];
-        for (var i = 0; i < 3; i++)
+        // sample tables in moov are empty, everything is in the fragments
+        foreach (var t in traks)
         {
-            var stbl = traks[i].Path("mdia/minf/stbl");
-            Assert.Equal((uint)expectedCounts[i], stbl.Path("stsz").U32(8));
-            var co = stbl.Path("co64");
-            Assert.True(co.U32(4) >= 1);
-            Assert.NotNull(stbl.Find("stsc"));
-            Assert.Equal(i == 0, stbl.Find("stss") is not null);
+            var stbl = t.Path("mdia/minf/stbl");
+            Assert.Equal(0u, stbl.Path("stsz").U32(8));
+            Assert.Equal(0u, stbl.Path("stts").U32(4));
+            Assert.Null(stbl.Find("stss"));
         }
-        // key frames 1, 31, 61
-        var stss = traks[0].Path("mdia/minf/stbl/stss");
-        Assert.Equal(3u, stss.U32(4));
-        Assert.Equal([1u, 31u, 61u], new[] { stss.U32(8), stss.U32(12), stss.U32(16) });
-        // video timescale and audio timescale
+        // video timescale and audio timescale; durations are patched at close
         Assert.Equal(90000u, traks[0].Path("mdia/mdhd").U32(12));
         Assert.Equal(44100u, traks[1].Path("mdia/mdhd").U32(12));
-        // stts: constant 3000 ticks per frame
-        var stts = traks[0].Path("mdia/minf/stbl/stts");
-        Assert.Equal(1u, stts.U32(4));
-        Assert.Equal(90u, stts.U32(8));
-        Assert.Equal(3000u, stts.U32(12));
-        // first video chunk contents are in mdat
-        var off = (long)BinaryPrimitives.ReadUInt64BigEndian(traks[0].Path("mdia/minf/stbl/co64").Data[8..]);
-        Assert.Equal(videoSamples[0], file[(int)off..((int)off + videoSamples[0].Length)]);
+        Assert.Equal(90u * 3000, traks[0].Path("mdia/mdhd").U32(16));
+        Assert.Equal(360u * 1024, traks[1].Path("mdia/mdhd").U32(16));
         // avc1/avcC and esds
         var stsdV = traks[0].Path("mdia/minf/stbl/stsd");
         Assert.Contains("avc1", Encoding.ASCII.GetString(stsdV.Data));
@@ -352,9 +340,43 @@ public class Mp4Tests
         var stsdA = traks[1].Path("mdia/minf/stbl/stsd").Data;
         Assert.True(stsdA.IndexOf("esds"u8) > 0);
         Assert.True(stsdA.IndexOf(new byte[] { 0x05, 0x02, 0x12, 0x08 }) > 0);
-        // late first video frame (20 s) becomes an empty edit
+        // late first video frame (2 s) becomes an empty edit
         Assert.NotNull(traks[0].Find("edts"));
         Assert.Null(traks[1].Find("edts"));
+
+        // fragments: video fragment k starts with a key frame (first sample flags) at 0, 30, 60
+        var moofs = root.FindAll("moof").ToList();
+        var keyTimes = new List<uint>();
+        foreach (var moof in moofs)
+        {
+            var trafs = moof.FindAll("traf").ToList();
+            Assert.Equal(3, trafs.Count);
+            var video = trafs[0];
+            Assert.Equal(1u, video.Path("tfhd").U32(4));           // track id
+            Assert.Equal(0x020000u, video.Path("tfhd").U32(0) & 0xFFFFFF); // default-base-is-moof
+            Assert.Equal(1, video.Path("tfdt").Data[0]);
+            keyTimes.Add((uint)BinaryPrimitives.ReadUInt64BigEndian(video.Path("tfdt").Data[4..]));
+            var trun = video.Path("trun").Data;
+            Assert.Equal(0x000701u, BinaryPrimitives.ReadUInt32BigEndian(trun) & 0xFFFFFF);
+            Assert.Equal(0x02000000u, BinaryPrimitives.ReadUInt32BigEndian(trun[(8 + 4 + 8)..])); // first sample is a sync sample
+        }
+        Assert.Equal([0u, 90000u, 180000u], keyTimes);
+        // mfra index: one entry per video fragment
+        var mfra = root.Path("mfra");
+        Assert.Equal(["tfra", "tfra", "tfra", "mfro"], mfra.Children.Select(c => c.Type));
+        Assert.Equal(mfra.End - mfra.Start, (long)BinaryPrimitives.ReadUInt32BigEndian(mfra.Children[^1].Data[4..]));
+
+        // contents through the reader
+        using var reader = new Plural.Core.Media.Mp4Reader(new MemoryStream(file));
+        var counts = new int[3];
+        var firstVideo = new List<byte[]>();
+        while (reader.TryRead(out var pkt))
+        {
+            counts[pkt.Track]++;
+            if (pkt.Track == 0) { firstVideo.Add(pkt.Data.ToArray()); }
+        }
+        Assert.Equal([90, 360, 360], counts);
+        Assert.Equal(videoSamples, firstVideo);
     }
 
     [Fact]
@@ -390,7 +412,8 @@ public class Mp4Tests
         Assert.Equal("M4A ", Encoding.ASCII.GetString(root.Children[0].Data[..4]));
         var traks = root.Path("moov").FindAll("trak").ToList();
         Assert.Single(traks);
-        Assert.Equal(100u, traks[0].Path("mdia/minf/stbl/stsz").U32(8));
+        Assert.Equal(["ftyp", "moov", "moof", "mdat", "moof", "mdat", "moof", "mdat", "mfra"], root.Children.Select(c => c.Type)); // ~1 s fragments
+        Assert.Equal(100u, (uint)root.FindAll("moof").Sum(m => (int)m.Path("traf/trun").U32(4)));
         Assert.Null(traks[0].Path("mdia/minf/stbl").Find("stss"));
         // duration = 100 * 1024 samples
         Assert.Equal(102_400u, traks[0].Path("mdia/mdhd").U32(16));

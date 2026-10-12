@@ -26,7 +26,7 @@ string platform;
 if (OperatingSystem.IsWindows())
 {
     var audio = new WasapiAudio();
-    hub = new MikeHub(new WindowsBluetooth(), audio, new MfAacEncoderFactory(), new MfVideoPlatform(), audio);
+    hub = new MikeHub(new WindowsBluetooth(), audio, new MfAacEncoderFactory(), new MfVideoPlatform(), audio, new MfAudioDecoderFactory(), new MfVideoDecoderFactory());
     platform = "Windows";
 }
 else if (OperatingSystem.IsMacOS())

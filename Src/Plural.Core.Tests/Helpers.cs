@@ -267,7 +267,7 @@ public sealed class Mp4Box
     public byte[] File = [];
     public List<Mp4Box> Children = [];
 
-    private static readonly HashSet<string> Containers = ["moov", "trak", "mdia", "minf", "stbl", "dinf", "udta", "edts"];
+    private static readonly HashSet<string> Containers = ["moov", "trak", "mdia", "minf", "stbl", "dinf", "udta", "edts", "mvex", "moof", "traf", "mfra"];
 
     public static Mp4Box ParseFile(byte[] f)
     {

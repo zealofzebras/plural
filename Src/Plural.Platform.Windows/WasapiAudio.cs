@@ -21,6 +21,24 @@ public sealed class WasapiAudio : IAudioPlatform, IAudioInputPlatform
             .ToList();
     }
 
+    /// <summary>The default render endpoint (console role); same Id scheme as <see cref="GetOutputDevices"/>.</summary>
+    public AudioOutputDevice? DefaultOutput
+    {
+        get
+        {
+            try
+            {
+                using var en = new MMDeviceEnumerator();
+                using var d = en.GetDefaultAudioEndpoint(DataFlow.Render, Role.Console);
+                return new AudioOutputDevice(d.ID, d.FriendlyName);
+            }
+            catch (Exception)
+            {
+                return null;   // no render endpoint
+            }
+        }
+    }
+
     public IAudioSink Open(AudioOutputDevice device, IAudioSource source, int sampleRate) =>
         new WasapiSink(device, source, sampleRate);
 

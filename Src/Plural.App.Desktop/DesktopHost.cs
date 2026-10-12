@@ -21,7 +21,7 @@ public sealed class DesktopHost : IAppHost
         if (OperatingSystem.IsWindows())
         {
             var audio = new WasapiAudio();
-            return new MikeHub(new WindowsBluetooth(), audio, new MfAacEncoderFactory(), new MfVideoPlatform(), audio);
+            return new MikeHub(new WindowsBluetooth(), audio, new MfAacEncoderFactory(), new MfVideoPlatform(), audio, new MfAudioDecoderFactory(), new MfVideoDecoderFactory());
         }
         if (OperatingSystem.IsMacOS())
         {

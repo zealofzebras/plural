@@ -19,7 +19,8 @@ public sealed class AndroidHost(Context context) : IAppHost
     private static TaskCompletionSource<bool>? _permission;
 
     public MikeHub CreateHub() => new(new AndroidBluetooth(context), new AndroidAudio(context), new AndroidAacEncoderFactory(),
-        new AndroidVideoPlatform(context), new AndroidAudioInput(context));
+        new AndroidVideoPlatform(context), new AndroidAudioInput(context),
+        new AndroidAudioDecoderFactory(), new AndroidVideoDecoderFactory());
 
     /// <summary>App-specific storage: no storage permission needed; visible over USB under Android/data/&lt;app&gt;/files/Recordings.</summary>
     public string RecordingRoot =>

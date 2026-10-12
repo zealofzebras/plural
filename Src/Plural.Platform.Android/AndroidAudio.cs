@@ -26,6 +26,9 @@ public sealed class AndroidAudio(Context context) : IAudioPlatform
         return list;
     }
 
+    /// <summary>The system route (phone speaker, or headphones/Bluetooth if connected) chosen by Android itself.</summary>
+    public AudioOutputDevice? DefaultOutput => new(DefaultId, "Phone output (system default)");
+
     private static string? Describe(AudioDeviceInfo d)
     {
         var product = d.ProductNameFormatted?.ToString();
