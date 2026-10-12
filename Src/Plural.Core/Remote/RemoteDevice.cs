@@ -556,7 +556,20 @@ public sealed class RemoteDevice : IAsyncDisposable
         public void Begin(FileBeginMsg m)
         {
             Abort();
-            var name = Path.GetFileName(m.Name); // never trust a path from the network
+            // Never trust a path from the network; older remotes may send names that are invalid here (e.g. "Bluetooth: Mic.wav").
+            var raw = m.Name.Replace('\\', '/');
+            raw = raw[(raw.LastIndexOf('/') + 1)..];
+            var name = raw.Length == 0 ? "" : FileNames.Sanitize(raw, "track");
+            if (name.Length > 0)
+            {
+                // Two remote names can collapse to the same sanitized name: keep both files.
+                var stem = Path.GetFileNameWithoutExtension(name);
+                var ext = Path.GetExtension(name);
+                for (var i = 2; Files.Any(f => string.Equals(Path.GetFileName(f), name, StringComparison.OrdinalIgnoreCase)); i++)
+                {
+                    name = $"{stem}_{i}{ext}";
+                }
+            }
             if (name.Length == 0 || m.TakeId != take.TakeId)
             {
                 throw new InvalidDataException("Unexpected file.");

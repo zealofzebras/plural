@@ -984,7 +984,30 @@ public partial class MainViewModel : ViewModelBase, IAsyncDisposable
     }
 
     [RelayCommand]
-    private Task ConnectAllAsync() => Task.WhenAll(Mikes.Select(m => m.ConnectAsync()));
+    private async Task ConnectAllAsync()
+    {
+        var all = Mikes.ToList();
+        var smart = all.Where(m => m.IsSmartMike).ToList();
+        // SmartMikes first; a local input that is the same SmartMike's Bluetooth headset (HFP/SCO) would compete with the SPP stream.
+        await Task.WhenAll(smart.Select(m => m.ConnectAsync()));
+        await Task.WhenAll(all.Where(m => !m.IsSmartMike && !IsHeadsetOfSmartMike(m, smart)).Select(m => m.ConnectAsync()));
+    }
+
+    /// <summary>True for a local input named after a present SmartMike ("Bluetooth: SmartMike+" for "SmartMike+ 14A8"); Android does not expose an input's address.</summary>
+    internal static bool IsHeadsetOfSmartMike(MikeViewModel local, IReadOnlyList<MikeViewModel> smartMikes)
+    {
+        if (local.IsSmartMike || smartMikes.Count == 0) { return false; }
+        var name = local.Name;
+        foreach (var sm in smartMikes.Where(m => !m.NotPaired))
+        {
+            var full = sm.Name.Trim();
+            var stem = full;
+            var sp = full.LastIndexOf(' ');
+            if (sp > 0 && full[(sp + 1)..].All(Uri.IsHexDigit)) { stem = full[..sp].Trim(); }
+            if (stem.Length > 0 && name.Contains(stem, StringComparison.OrdinalIgnoreCase)) { return true; }
+        }
+        return name.Contains("SmartMike", StringComparison.OrdinalIgnoreCase);
+    }
 
     private void UpdateSummary()
     {

@@ -2,6 +2,7 @@ using System.Text.Json;
 using System.Net;
 using System.Net.Sockets;
 using Plural.Core.Platform;
+using Plural.Core.Library;
 using Plural.Core.Recording;
 using Plural.Core.Remote;
 
@@ -58,7 +59,7 @@ public class RemoteTests
         public long RequestedStart { get; private set; }
         public bool? Mode { get; private set; }
         public List<RemoteControllerInfo?> Controllers { get; } = [];
-        public byte[] Content { get; } = Enumerable.Range(0, 300_000).Select(i => (byte)(i * 7)).ToArray();
+        public byte[] Content { get; } = MakeWav(300_000);
 
         public StatusMsg GetStatus() => new([new RemoteMicStatus("Mic", true, 0.5f)], Recording, TakeId, 0, true, Mode == true, true, "WAV", IsPaused);
 
@@ -133,6 +134,19 @@ public class RemoteTests
         }
     }
 
+    /// <summary>A valid 16-bit mono 44.1 kHz WAV of <paramref name="total"/> bytes (so the library can probe it).</summary>
+    private static byte[] MakeWav(int total)
+    {
+        var b = Enumerable.Range(0, total).Select(i => (byte)(i * 7)).ToArray();
+        var h = new List<byte>();
+        h.AddRange("RIFF"u8.ToArray()); h.AddRange(BitConverter.GetBytes(total - 8)); h.AddRange("WAVEfmt "u8.ToArray());
+        h.AddRange(BitConverter.GetBytes(16)); h.AddRange(BitConverter.GetBytes((short)1)); h.AddRange(BitConverter.GetBytes((short)1));
+        h.AddRange(BitConverter.GetBytes(44100)); h.AddRange(BitConverter.GetBytes(88200)); h.AddRange(BitConverter.GetBytes((short)2));
+        h.AddRange(BitConverter.GetBytes((short)16)); h.AddRange("data"u8.ToArray()); h.AddRange(BitConverter.GetBytes(total - 44));
+        h.CopyTo(b);
+        return b;
+    }
+
     private static async Task Until(Func<bool> cond, double seconds = 10)
     {
         var sw = System.Diagnostics.Stopwatch.StartNew();
@@ -141,6 +155,53 @@ public class RemoteTests
             if (sw.Elapsed.TotalSeconds > seconds) { throw new TimeoutException("Condition not met."); }
             await Task.Delay(20);
         }
+    }
+
+    [Fact]
+    public async Task RemoteFileWithInvalidName_ArrivesSanitizedAndLibraryListsIt()
+    {
+        var tmp = Path.Combine(Path.GetTempPath(), "plural_remote_" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            var registry = new Dictionary<string, (RemoteIdentity, Func<Stream, Task>)>();
+            var remoteRec = new FakeRecorder(Path.Combine(tmp, "remote", "take"));
+            var ctrlRec = new FakeRecorder(Path.Combine(tmp, "unused"));
+            await using var remote = new RemoteNetwork(new RemoteIdentity("r-1", "Pixel 8", "Android"), [new LoopTransport(registry)], remoteRec);
+            await using var ctrl = new RemoteNetwork(new RemoteIdentity("c-1", "Surface", "Windows"), [new LoopTransport(registry)], ctrlRec);
+            remoteRec.Net = remote;
+            ctrlRec.Net = ctrl;
+            // An older remote announces the mic file as Android allowed it.
+            remote.Responder.WireNameOverride = f => Path.GetFileName(f) == "Mic.wav" ? "Bluetooth: SmartMike+.wav" : Path.GetFileName(f);
+            remote.StartListening();
+            ctrl.StartListening();
+            await Until(() => registry.Count == 2);
+            var found = new List<DiscoveredPeer>();
+            await ctrl.SearchAsync(p => { lock (found) { found.Add(p); } }, TimeSpan.FromSeconds(1));
+            var dev = ctrl.Connect(Assert.Single(found));
+            await Until(() => dev.State == RemoteDeviceState.Connected && dev.ClockOffset is not null && dev.Status is not null);
+
+            var takeFolder = Path.Combine(tmp, "ctrl", "20261012_101010");
+            Directory.CreateDirectory(takeFolder);
+            var startAt = MediaClock.Now + TimeSpan.FromMilliseconds(300).Ticks;
+            ctrl.RegisterTake("take-1", takeFolder, startAt);
+            ctrl.ActiveTakeId = "take-1";
+            await dev.StartAsync("take-1", startAt, video: false);
+            ctrl.ActiveTakeId = null;
+            var wait = dev.WaitForTakeAsync("take-1");
+            await dev.StopAsync("take-1");
+            var result = await wait.WaitAsync(TimeSpan.FromSeconds(10));
+
+            var wav = Path.Combine(takeFolder, "Pixel 8", "Bluetooth_ SmartMike+.wav");
+            Assert.Contains(wav, result.Files);
+            Assert.Equal(remoteRec.Content, File.ReadAllBytes(wav));
+            Assert.False(File.Exists(Path.Combine(takeFolder, "Pixel 8", "Bluetooth")));
+            var md = Assert.Single(TakeManifest.Load(takeFolder)!.Devices);
+            Assert.Contains("Pixel 8/Bluetooth_ SmartMike+.wav", md.Files);
+
+            var take = new TakeLibrary(tmp + Path.DirectorySeparatorChar + "ctrl").Load(takeFolder)!;
+            Assert.Contains(take.Tracks, t => t.Device == "Pixel 8" && t.Id.StartsWith("Pixel 8/Bluetooth_ SmartMike+.wav#"));
+        }
+        finally { try { Directory.Delete(tmp, true); } catch { /* best effort */ } }
     }
 
     [Fact]

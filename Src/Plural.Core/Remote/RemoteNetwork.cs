@@ -217,9 +217,7 @@ public sealed class RemoteNetwork : IAsyncDisposable
 
     private static string Sanitize(string s)
     {
-        var bad = Path.GetInvalidFileNameChars();
-        var clean = new string(s.Select(c => bad.Contains(c) ? '_' : c).ToArray()).Trim().TrimEnd('.');
-        return clean.Length == 0 ? "Device" : clean;
+        return FileNames.Sanitize(s, "Device");
     }
 
     public async ValueTask DisposeAsync()

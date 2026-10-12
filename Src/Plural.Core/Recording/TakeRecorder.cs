@@ -36,10 +36,7 @@ public static class TakeExport
     /// <summary>File-name-safe version of a title (invalid characters become '_'); empty if nothing is left.</summary>
     public static string SanitizeTitle(string? title)
     {
-        if (string.IsNullOrWhiteSpace(title)) { return ""; }
-        var bad = Path.GetInvalidFileNameChars();
-        var s = new string(title.Select(c => bad.Contains(c) || c == '…' ? '_' : c).ToArray()).Trim().TrimEnd('.', ' ');
-        return s.Length > 100 ? s[..100].TrimEnd('.', ' ') : s;
+        return FileNames.Sanitize(title, "");
     }
 
     /// <summary>
@@ -414,6 +411,9 @@ internal sealed class TakeRecorder
     private readonly object _pauseLock = new();
     private bool _keyWait;
     private long _keyWaitFrom;
+
+    /// <summary>How long before a resume a key frame may have been captured and still start the resumed video (see <see cref="OnVideoSample"/>).</summary>
+    private static readonly long KeyFrameGrace = TimeSpan.FromMilliseconds(250).Ticks;
     private long? _stoppedAt;
     private readonly List<Timer> _timers = [];
     private Timer? _flushTimer;
@@ -596,6 +596,16 @@ internal sealed class TakeRecorder
     private void OnVideoSample(EncodedSample s)
     {
         var ts = s.Timestamp;
+        lock (_pauseLock)
+        {
+            // Cameras stamp frames with their capture time, and the encoder's answer to RequestKeyFrame is often a frame captured shortly
+            // before the resume (capture-to-encoder latency: ~40–150 ms on Media Foundation and MediaCodec). Use it as the first frame at the
+            // resume instant instead of waiting for the next natural key frame (≈ 1 s of frozen video).
+            if (_keyWait && s.IsKeyFrame && ts < _keyWaitFrom && ts >= _keyWaitFrom - KeyFrameGrace && MediaClock.Now >= _keyWaitFrom)
+            {
+                ts = _keyWaitFrom;
+            }
+        }
         if (_timeline.IsPausedAt(ts) || ts > (_stoppedAt ?? long.MaxValue)) { return; } // paused, or captured after the stop (during the audio latency wait)
         lock (_pauseLock)
         {
@@ -735,11 +745,7 @@ internal sealed class TakeRecorder
         return new PerMicOutput(sinks.ToArray(), paths);
     }
 
-    private static string Sanitize(string s)
-    {
-        var bad = Path.GetInvalidFileNameChars();
-        return new string(s.Select(c => bad.Contains(c) || c == '…' ? '_' : c).ToArray()).Trim();
-    }
+    private static string Sanitize(string s) => FileNames.Sanitize(s, "Mic");
 
     private void Begin()
     {

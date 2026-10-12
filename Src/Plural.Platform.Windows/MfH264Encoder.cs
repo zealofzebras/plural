@@ -24,7 +24,7 @@ internal sealed class MfH264Encoder : IDisposable
     private int _inputCredits;
     private IMFSample? _pending;                         // async: newest frame waiting for a NeedInput event
     private bool _awaitingKey = true;
-    private volatile bool _keyRequested;                 // set from any thread, consumed on the encoding thread
+    private long _keyRequestedAt;                        // MediaClock ticks of the pending request (0 = none); set from any thread, consumed on the encoding thread
     private bool _headerWanted;                          // next IDR must carry SPS/PPS
     private static readonly Guid PictureTypeKey = new("973704e6-cd14-483c-8f20-c9fc0928bad5");   // MFSampleExtension_VideoEncodePictureType
     private const uint PictureTypeIdr = 2;               // eAVEncH264PictureType_IDR
@@ -162,12 +162,16 @@ internal sealed class MfH264Encoder : IDisposable
     /// CODECAPI_AVEncVideoForceKeyFrame on the MFT and also tags that input sample with MFSampleExtension_VideoEncodePictureType=IDR
     /// (hardware MFTs that ignore the codec property usually honour the sample attribute). SPS/PPS are prepended if the MFT omits them.
     /// </summary>
-    public void RequestKeyFrame() => _keyRequested = true;
+    public void RequestKeyFrame() => Interlocked.Exchange(ref _keyRequestedAt, Math.Max(1, MediaClock.Now));
 
     private void ApplyKeyRequest(IMFSample frame)
     {
-        if (!_keyRequested) return;
-        _keyRequested = false;
+        long at = Interlocked.Read(ref _keyRequestedAt);
+        // The camera stamps a frame with its capture time, which is up to ~50 ms before the frame reaches us. A key frame forced onto
+        // a frame captured before the request would carry a timestamp the caller (a resume at that instant) discards, so the request
+        // waits for the first frame captured at or after it.
+        if (at == 0 || frame.SampleTime < at) return;
+        Interlocked.CompareExchange(ref _keyRequestedAt, 0, at);
         _headerWanted = true;
         MfCommon.SetCodecValue(_mft, MfCommon.AvEncVideoForceKeyFrame, 1);
         try { frame.Set(PictureTypeKey, PictureTypeIdr); } catch { }

@@ -441,12 +441,6 @@ public sealed class MikeHub : IAsyncDisposable
         }
     }
 
-    private static string Sanitize(string s)
-    {
-        var bad = Path.GetInvalidFileNameChars();
-        return new string(s.Select(c => bad.Contains(c) || c == '…' ? '_' : c).ToArray()).Trim();
-    }
-
     public async ValueTask DisposeAsync()
     {
         if (IsRecording)

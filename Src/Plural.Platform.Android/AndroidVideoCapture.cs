@@ -66,7 +66,8 @@ public sealed class AndroidVideoCapture : IVideoCapture
     private Surface? _stSurface;
     private int _texId;
     private int _program, _aPos, _aTex, _uTex;
-    private readonly float[] _texMatrix = new float[16];
+    // Column-major: v' = 1 - v (buffer row 0 is the top; GL texture t=0 is the bottom). Sensor-oriented, uncropped.
+    private readonly float[] _texMatrix = [1, 0, 0, 0, 0, -1, 0, 0, 0, 0, 1, 0, 0, 1, 0, 1];
     private Java.Nio.FloatBuffer? _vertices;
 
     // Diagnostics.
@@ -90,7 +91,7 @@ public sealed class AndroidVideoCapture : IVideoCapture
     public int Width => _encoding ? _lockedWidth : EncodeSize(RotationDegrees).W;
     public int Height => _encoding ? _lockedHeight : EncodeSize(RotationDegrees).H;
 
-    /// <summary>Frames are rotated by the GL pipeline, so the encoded video is already upright.</summary>
+    /// <summary>Frames are rotated upright by the GL pipeline into a portrait/landscape surface, so no display hint is needed (players handle hints inconsistently).</summary>
     public int EncodedRotationDegrees => 0;
 
     /// <summary>Clockwise degrees to rotate the (sensor-oriented) preview frames so they appear upright for the current device orientation.</summary>
@@ -122,11 +123,9 @@ public sealed class AndroidVideoCapture : IVideoCapture
 
     private int DisplayDegrees()
     {
-        Display? display = null;
-        if (OperatingSystem.IsAndroidVersionAtLeast(30))
-        {
-            try { display = _context.Display; } catch (Java.Lang.UnsupportedOperationException) { }
-        }
+        // The Application context's Display/WindowManager keeps the rotation from when the process started (it reported 0 in landscape on
+        // a Pixel 8 / Android 17, so frames and preview came out rotated), while a DisplayManager Display is live.
+        Display? display = (_context.GetSystemService(Context.DisplayService) as global::Android.Hardware.Display.DisplayManager)?.GetDisplay(0);
         if (display is null)
         {
 #pragma warning disable CA1422 // Display from WindowManager for non-visual contexts.
@@ -485,7 +484,7 @@ public sealed class AndroidVideoCapture : IVideoCapture
             p.PutInt(MediaCodec.ParameterKeyRequestSyncFrame, 0);
             try { _enc!.Codec.SetParameters(p); } catch (Java.Lang.IllegalStateException) { }
         });
-        Log.Info(Tag, $"StartEncoding size={size.W}x{size.H} rotation={rotation} mediaNow={_startMediaTicks}");
+        Log.Info(Tag, $"StartEncoding size={size.W}x{size.H} rotation={rotation} sensor={SensorOrientation} front={Camera.IsFrontFacing} display={DisplayDegrees()} resRot={_context.Resources?.Configuration?.Orientation} mediaNow={_startMediaTicks}");
     }
 
     /// <summary>Asks the encoder for a sync frame now (a remote viewer joined).</summary>
@@ -535,7 +534,9 @@ public sealed class AndroidVideoCapture : IVideoCapture
         if (_framesIn <= 3) { Log.Info(Tag, $"updateTexImage ok ts={_st.Timestamp}"); }
         if (_encoding && _enc is { } enc)
         {
-            _st.GetTransformMatrix(_texMatrix);
+            // Deliberately NOT SurfaceTexture.GetTransformMatrix(): the camera HAL attaches a buffer transform (on a Pixel 8 it contains a
+            // 90 degree rotation for the sensor orientation) so the matrix already yields a display-upright texture. Our quad rotates the
+            // raw sensor image by RotationDegrees itself, so that would rotate twice (sideways video). Use only the GL/buffer Y flip.
             var cameraNs = _st.Timestamp;
             var ptsNs = cameraNs == 0 ? MediaClock.Now * 100L : ToMediaNs(cameraNs);
             if (ptsNs <= _lastPtsNs)

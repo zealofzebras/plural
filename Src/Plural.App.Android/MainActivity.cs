@@ -1,4 +1,5 @@
 using Android.App;
+using Android.Content;
 using Android.Content.PM;
 using Android.OS;
 using Avalonia.Android;
@@ -26,8 +27,23 @@ public class MainActivity : AvaloniaMainActivity
         {
             VideoSelfTest.Run(this);
         }
+        if (Intent?.GetBooleanExtra("selftest_aac", false) == true)
+        {
+            AacSelfTest.Run(this);
+        }
 #endif
     }
+
+#if DEBUG
+    protected override void OnNewIntent(Intent? intent)
+    {
+        base.OnNewIntent(intent);
+        if (intent?.GetBooleanExtra("selftest_aac", false) == true)
+        {
+            AacSelfTest.Run(this);
+        }
+    }
+#endif
 
     /// <summary>True while the activity is resumed (a microphone/camera foreground service may be started only then on Android 14+).</summary>
     public static bool IsVisible { get; private set; }

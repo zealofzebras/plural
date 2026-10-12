@@ -252,6 +252,10 @@ public class PauseTests
         public int Height => 480;
         public int FrameRate => 30;
         public bool HonorRequest = true;
+        /// <summary>Frames are stamped this long before they are delivered (capture-to-encoder latency of real cameras).</summary>
+        public TimeSpan CaptureLatency;
+        /// <summary>Frames between natural key frames.</summary>
+        public int Gop = 30;
         public int KeyRequests;
         private volatile bool _requested;
         public event Action<PreviewFrame>? PreviewFrameReady { add { } remove { } }
@@ -266,9 +270,9 @@ public class PauseTests
                 byte[] delta = [0, 0, 1, 0x41, 9, 9, 9];
                 for (var i = 0; i < 1000 && _encoding; i++)
                 {
-                    var k = i % 30 == 0 || (HonorRequest && _requested);
+                    var k = i % Gop == 0 || (HonorRequest && _requested);
                     _requested = false;
-                    SampleEncoded?.Invoke(new EncodedSample(k ? key : delta, MediaClock.Now, k));
+                    SampleEncoded?.Invoke(new EncodedSample(k ? key : delta, MediaClock.Now - CaptureLatency.Ticks, k));
                     await Task.Delay(33);
                 }
             });
@@ -451,6 +455,42 @@ public class PauseTests
             Assert.True(wait.Item1 > 0.3e7, $"expected a key-frame wait, largest gap {wait.Item1 / 1e4} ms");
             Assert.True(wait.Key, "the first frame after the wait is a key frame");
             Assert.All(video.Where((v, i) => i > 0 && gaps[i - 1].Item1 > 0.3e7), v => Assert.True(v.Key));
+        }
+        finally
+        {
+            if (Directory.Exists(root)) { Directory.Delete(root, true); }
+        }
+    }
+
+    [Fact]
+    public async Task Resume_UsesTheRequestedKeyFrame_EvenWhenItWasCapturedJustBeforeTheResume()
+    {
+        // Real cameras (Media Foundation, MediaCodec) answer RequestKeyFrame with a frame captured ~40–150 ms earlier: it must still be used,
+        // not dropped as "paused" (which froze the video until the next natural key frame, ≈ 1 s).
+        var root = Path.Combine(Path.GetTempPath(), "plural_pause_" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            var (hub, sessions) = NewHub(1);
+            var camera = new FakeCamera { CaptureLatency = TimeSpan.FromMilliseconds(120), Gop = 300 }; // no natural key frame after the resume
+            hub.Camera = camera;
+            hub.RecordingSettings = new RecordingSettings { Format = RecordingFormat.Mkv };
+            var mics = new Mics(sessions);
+            hub.StartRecordingAll(root);
+            await mics.Run(0.5);
+            hub.PauseRecording();
+            await mics.Run(0.3);
+            hub.ResumeRecording();
+            await mics.Run(0.9);
+            var take = await hub.StopRecordingAllAsync();
+            Assert.Equal(1, camera.KeyRequests);
+
+            using var reader = MediaReader.Open(take.Files[0]);
+            var video = new List<(long Ts, bool Key)>();
+            while (reader.TryRead(out var pkt)) { if (pkt.Track == 0) { video.Add((pkt.Timestamp, pkt.KeyFrame)); } }
+            var gaps = video.Zip(video.Skip(1), (a, b) => (b.Ts - a.Ts, b.Key)).ToList();
+            var largest = gaps.MaxBy(g => g.Item1);
+            Assert.True(largest.Item1 < 0.25e7, $"video froze after the resume: largest gap {largest.Item1 / 1e4} ms");
+            Assert.Contains(video.Skip(10), v => v.Key); // the forced key frame made it into the file
         }
         finally
         {

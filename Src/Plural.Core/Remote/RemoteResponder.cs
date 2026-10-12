@@ -418,10 +418,15 @@ public sealed class RemoteResponder
         }
     }
 
+    /// <summary>Test hook: the name announced for a file (default: its file name), to simulate older remotes.</summary>
+    internal Func<string, string>? WireNameOverride { get; set; }
+
+    private string WireName(string path) => WireNameOverride?.Invoke(path) ?? Path.GetFileName(path);
+
     private async Task SendTakeAsync(Connection c, PendingTake p)
     {
         var files = p.Take.Files.Where(File.Exists).ToList();
-        var infos = files.Select(f => new RemoteFile(Path.GetFileName(f), new FileInfo(f).Length)).ToList();
+        var infos = files.Select(f => new RemoteFile(WireName(f), new FileInfo(f).Length)).ToList();
         var total = Math.Max(1, infos.Sum(f => f.Size));
         long sent = 0;
         SendProgress = 0;
@@ -430,7 +435,7 @@ public sealed class RemoteResponder
         var buf = new byte[RemoteProtocol.FileChunk];
         foreach (var f in files)
         {
-            await c.Link.SendAsync(RemoteMsg.FileBegin, new FileBeginMsg(p.TakeId, Path.GetFileName(f), new FileInfo(f).Length)).ConfigureAwait(false);
+            await c.Link.SendAsync(RemoteMsg.FileBegin, new FileBeginMsg(p.TakeId, WireName(f), new FileInfo(f).Length)).ConfigureAwait(false);
             using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
             await using (var fs = new FileStream(f, FileMode.Open, FileAccess.Read, FileShare.Read, 1 << 16, useAsync: true))
             {
@@ -443,7 +448,7 @@ public sealed class RemoteResponder
                     SendProgress = (double)sent / total;
                 }
             }
-            await c.Link.SendAsync(RemoteMsg.FileEnd, new FileEndMsg(p.TakeId, Path.GetFileName(f), Convert.ToHexString(hash.GetHashAndReset()))).ConfigureAwait(false);
+            await c.Link.SendAsync(RemoteMsg.FileEnd, new FileEndMsg(p.TakeId, WireName(f), Convert.ToHexString(hash.GetHashAndReset()))).ConfigureAwait(false);
         }
     }
 }

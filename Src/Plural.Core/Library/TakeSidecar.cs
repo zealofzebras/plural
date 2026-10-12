@@ -73,8 +73,7 @@ public sealed class TrackInfo
     /// <summary>File name (without folder) of the peaks file for a track id: <c>/</c>, <c>#</c>, <c>\</c> and invalid characters become <c>_</c>.</summary>
     public static string PeakFileName(string trackId)
     {
-        var bad = Path.GetInvalidFileNameChars();
-        return new string(trackId.Select(c => c is '/' or '#' or '\\' || bad.Contains(c) ? '_' : c).ToArray()) + ".peaks";
+        return FileNames.Sanitize(trackId.Replace('#', '_'), "track") + ".peaks";
     }
 
     /// <summary>Full path of the peaks file of <paramref name="trackId"/> in <paramref name="takeFolder"/>.</summary>
