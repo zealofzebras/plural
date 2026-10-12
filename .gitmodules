@@ -1,0 +1,3 @@
+[submodule "SmartMike/App/Reference/SwissSample-android"]
+	path = SmartMike/App/Reference/SwissSample-android
+	url = https://github.com/ztimc/SwissSample-android.git
