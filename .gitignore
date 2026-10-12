@@ -1,5 +1,5 @@
 Captures/
-App/Decompiled/
+SmartMike/App/Decompiled/
 Tools/ext/
 bin/
 obj/
@@ -7,8 +7,8 @@ __pycache__/
 *.pyc
 *.pyo
 *.pyd
-Firmware/Updater/extracted/
-Firmware/Updater/extracted_mac/
+SmartMike/Firmware/Updater/extracted/
+SmartMike/Firmware/Updater/extracted_mac/
 Native/celt/runtimes/
 out/
 Native/lame/runtimes/osx-*/
