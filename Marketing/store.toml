@@ -17,9 +17,9 @@ play = "MUSIC_AND_AUDIO"
 microsoft = "Music"
 
 [brand]
-accent = "#0D6EFD"                       # logo blue
-background_top = "#0B1F4D"               # screenshot / feature graphic gradient
-background_bottom = "#0D6EFD"
+accent = "#EE4B55"                       # recording coral
+background_top = "#182321"               # screenshot / feature graphic gradient
+background_bottom = "#344A41"
 caption_color = "#FFFFFF"
 icon_background = "#FFFFFF"              # tile behind the logo on store icons
 logo = "brand/icon.png"                  # square transparent PNG, 1024 px or larger

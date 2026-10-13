@@ -24,6 +24,7 @@ import os
 import shutil
 import sys
 import tomllib
+import xml.etree.ElementTree as ET
 from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageFilter, ImageFont
@@ -176,29 +177,22 @@ def gradient(size: tuple[int, int], top: tuple, bottom: tuple) -> Image.Image:
     return column.resize((w, h))
 
 
-def render_logo(size: int, color: tuple[int, int, int]) -> Image.Image:
-    """The Plural mark: a rounded 'a' with a dot, drawn on a 400-unit grid and supersampled."""
-    ss = 4
-    s = size * ss
-    k = s / 400
-    mask = Image.new("L", (s, s), 0)
-    d = ImageDraw.Draw(mask)
-
-    def circle(cx: float, cy: float, r: float, fill: int) -> None:
-        d.ellipse([(cx - r) * k, (cy - r) * k, (cx + r) * k, (cy + r) * k], fill=fill)
-
-    d.ellipse([26 * k, 18 * k, 372 * k, 380 * k], fill=255)        # outer body
-    d.rounded_rectangle([199 * k, 199 * k, 372 * k, 380 * k], radius=30 * k, fill=255,
-                        corners=(False, False, True, False))        # squared-off bottom-right
-    circle(200, 200, 112, 0)                                       # inner opening
-    d.rectangle([252 * k, 200 * k, 312 * k, 318 * k], fill=0)      # foot of the 'a' stem
-    circle(200, 202, 57, 255)                                      # centre dot
-    circle(84, 200, 28, 255)                                       # small ring on the left
-    circle(84, 200, 16, 0)
-    mask = mask.resize((size, size), Image.LANCZOS)
-    img = Image.new("RGBA", (size, size), color + (0,))
-    img.putalpha(mask)
-    return img
+def render_logo(size: int, color: tuple[int, int, int] | None = None) -> Image.Image:
+    """Render the shared rectangle-based SVG, optionally as a monochrome mark without its tile."""
+    vector = ET.parse(MARKETING / "brand" / "plural.svg").getroot()
+    scale = size * 4 / float(vector.attrib["viewBox"].split()[2])
+    image = Image.new("RGBA", (size * 4, size * 4))
+    draw = ImageDraw.Draw(image)
+    for rect in vector.findall("{http://www.w3.org/2000/svg}rect"):
+        if color is not None and "x" not in rect.attrib:
+            continue
+        left = float(rect.get("x", 0)) * scale
+        top = float(rect.get("y", 0)) * scale
+        right = left + float(rect.attrib["width"]) * scale
+        bottom = top + float(rect.attrib["height"]) * scale
+        fill = color if color is not None else rect.attrib["fill"]
+        draw.rounded_rectangle((left, top, right, bottom), radius=float(rect.get("rx", 0)) * scale, fill=fill)
+    return image.resize((size, size), Image.LANCZOS)
 
 
 def load_logo(cfg: dict) -> Image.Image:
@@ -598,7 +592,7 @@ def cmd_logo(args) -> int:
     cfg = load_config()
     path = MARKETING / cfg["brand"]["logo"]
     path.parent.mkdir(parents=True, exist_ok=True)
-    render_logo(args.size, hex_rgb(cfg["brand"]["accent"])).save(path, optimize=True)
+    render_logo(args.size).save(path, optimize=True)
     print(f"wrote {path.relative_to(ROOT)} ({args.size} px)")
     return 0
 

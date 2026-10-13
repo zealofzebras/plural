@@ -11,6 +11,7 @@ To change the store text, edit a `.txt` file and publish a release. You don't ne
 | File | Used for | Limit |
 |---|---|---|
 | `store.toml` | URLs, categories, brand colours, screenshot sizes, Microsoft Store identity | |
+| `brand/plural.svg` | Shared vector mark: three recording tracks, off-white and coral on an ink tile | |
 | `brand/icon.png` | The logo (transparent, square, ≥1024 px). Every icon and tile is made from it | |
 | `<locale>/name.txt` | App name: App Store, Google Play title, Microsoft Store product name | 30 |
 | `<locale>/subtitle.txt` | App Store subtitle, also the tagline on the Play feature graphic | 30 |
@@ -85,6 +86,7 @@ art, poster and hero, and the MSIX tile and taskbar logos in every scale. To red
 ```bash
 pip install pillow
 python Tools/store/store_assets.py check                                   # text limits only
+python -m unittest discover -s Tools/store -p test_store_assets.py          # shared logo rendering
 python Tools/store/store_assets.py build --version 0.1.0 --build-number 100 --out out/store
 ```
 
