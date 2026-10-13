@@ -60,6 +60,9 @@ public interface IAppHost
     /// <summary>Ways to find and reach other apps (Wi-Fi, Bluetooth); the UI never names them.</summary>
     IReadOnlyList<IRemoteTransport> CreateRemoteTransports(MikeHub hub);
 
+    /// <summary>Phone or tablet (touch-first, held in the hand): the UI gives landscape a slim bottom bar.</summary>
+    bool IsHandheld => OperatingSystem.IsAndroid() || OperatingSystem.IsIOS();
+
     /// <summary>Free bytes for new files on the volume holding <paramref name="folder"/>; null if unknown.</summary>
     long? GetFreeSpace(string folder) => null;
 

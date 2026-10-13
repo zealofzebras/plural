@@ -56,7 +56,51 @@ public sealed class RemoteResponder
     private RemoteControllerInfo? _controller;
     private (string TakeId, string ControllerId, long T0)? _active;
 
-    private sealed record PendingTake(string ControllerId, string TakeId, RecordedTake Take, long T0);
+    private sealed record PendingTake(string ControllerId, string TakeId, RecordedTake Take, long T0, DateTime QueuedUtc);
+
+    /// <summary>
+    /// How long finished takes wait for their controller to come back. They are only copies: the files stay in this device's library,
+    /// so a controller that never returns (another identity, uninstalled) does not keep this device "controlled" forever.
+    /// </summary>
+    internal TimeSpan PendingLifetime { get; set; } = TimeSpan.FromHours(24);
+
+    private Timer? _expiry;
+
+    /// <summary>While no controller is connected: forget expired takes when their time is up, and the lost controller with them.</summary>
+    private void ScheduleExpiry()
+    {
+        DateTime? oldest;
+        lock (_lock) { oldest = _pending.Count == 0 ? null : _pending.Min(p => p.QueuedUtc); }
+        _expiry?.Dispose();
+        _expiry = null;
+        if (oldest is null || _current is not null)
+        {
+            return;
+        }
+        var due = oldest.Value + PendingLifetime - DateTime.UtcNow;
+        _expiry = new Timer(_ => Expire(), null, due < TimeSpan.Zero ? TimeSpan.Zero : due, Timeout.InfiniteTimeSpan);
+    }
+
+    private void Expire()
+    {
+        PurgePending(null);
+        if (_current is null && _active is null && PendingTakes == 0)
+        {
+            if (_controller is not null) { SetController(null); }
+            return;
+        }
+        ScheduleExpiry();
+    }
+
+    /// <summary>Drops takes queued for controllers other than <paramref name="controllerId"/> and those older than <see cref="PendingLifetime"/>.</summary>
+    private void PurgePending(string? controllerId)
+    {
+        var expired = DateTime.UtcNow - PendingLifetime;
+        lock (_lock)
+        {
+            _pending.RemoveAll(p => (controllerId is not null && p.ControllerId != controllerId) || p.QueuedUtc < expired);
+        }
+    }
 
     /// <summary>The controlling device (connected or temporarily lost), or null.</summary>
     public RemoteControllerInfo? Controller => _controller;
@@ -168,6 +212,8 @@ public sealed class RemoteResponder
             _current = conn;
         }
         replaced?.Link.Close(); // same controller reconnecting over another transport
+        // One controller at a time: takes still queued for another one will not be sent (they remain in the library here).
+        PurgePending(hello.Id);
         try
         {
             await link.SendAsync(RemoteMsg.Accept).ConfigureAwait(false);
@@ -200,8 +246,10 @@ public sealed class RemoteResponder
         {
             SendProgress = null;
             // Keep showing the controller while a take or files are outstanding: it is expected back.
+            PurgePending(null);
             var keep = _active is not null || PendingTakes > 0;
             SetController(keep ? new RemoteControllerInfo(conn.Hello.Id, conn.Hello.Name, false) : null);
+            ScheduleExpiry();
         }
     }
 
@@ -369,12 +417,16 @@ public sealed class RemoteResponder
         Connection? c;
         lock (_lock)
         {
-            _pending.Add(new PendingTake(a.ControllerId, a.TakeId, take, a.T0));
+            _pending.Add(new PendingTake(a.ControllerId, a.TakeId, take, a.T0, DateTime.UtcNow));
             c = _current;
         }
         if (c is not null && c.Hello.Id == a.ControllerId)
         {
             _ = SendPendingAsync(c);
+        }
+        else
+        {
+            ScheduleExpiry();
         }
     }
 

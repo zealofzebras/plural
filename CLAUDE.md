@@ -51,6 +51,7 @@ Docs/                           App/, Firmware/, Protocol/, Plural/Design.md, Pl
 - Android: `dotnet build Plural.App.Android` · release APK: `dotnet publish Plural.App.Android -c Release`
   → `Plural.App.Android/bin/Release/net10.0-android/publish/net.getplural.app-Signed.apk`
 - adb: `"C:\Program Files (x86)\Android\android-sdk\platform-tools\adb.exe"` (install `-r`, `logcat`)
+- Debug APK on a phone: `dotnet build Plural.App.Android -t:Install "-p:AdbTarget=-s SERIAL"`. A debug APK installed with plain `adb install` crashes on launch (Fast Deployment leaves the assemblies out of the APK); use the release APK for that.
 - sdkmanager needs `JAVA_HOME=C:\Program Files\Microsoft\jdk-21.0.8.9-hotspot` (path without parentheses).
 - Host is Windows ARM64: the Android emulator can't run here, so test on a real phone over USB.
 

@@ -226,7 +226,11 @@ public partial class MikeViewModel : ViewModelBase
     }
 
     partial void OnMicGainChanged(int value) => Send(MikeSetting.MicGain, value);
-    partial void OnAgcChanged(bool value) => Send(MikeSetting.Agc, value ? 1 : 0);
+    partial void OnAgcChanged(bool value)
+    {
+        _owner.UpdateGainKnobs();
+        Send(MikeSetting.Agc, value ? 1 : 0);
+    }
     partial void OnMonitorVolumeChanged(int value) => Send(MikeSetting.MonitorVolume, value);
     partial void OnNoiseSuppressionChanged(bool value) => Send(MikeSetting.NoiseSuppression, value ? 1 : 0);
 

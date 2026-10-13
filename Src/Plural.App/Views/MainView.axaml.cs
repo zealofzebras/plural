@@ -15,6 +15,10 @@ public partial class MainView : UserControl
     private const double SidePaneWidth = 400;
     private const double CardMargin = 6;
     private const double BodyMargin = 12;
+    // Landscape below this height on desktop (always on phones and tablets): slim bottom bar with a floating record button.
+    private const double LowBarBelow = 600;
+    // Mixer console below this height: the channel strips' mic sections get compact (knobs side by side).
+    private const double LowMixBelow = 580;
     private IActivatableLifetime? _activatable;
     private TopLevel? _top;
 
@@ -22,6 +26,7 @@ public partial class MainView : UserControl
     {
         InitializeComponent();
         SizeChanged += (_, e) => ApplyLayout(e.NewSize.Width);
+        Mixer.SizeChanged += (_, e) => Root.Classes.Set("lowmix", e.NewSize.Height > 0 && e.NewSize.Height < LowMixBelow);
         PreviewPanel.SizeChanged += (_, e) =>
         {
             var h = Math.Round(e.NewSize.Width * 9 / 16);
@@ -159,6 +164,7 @@ public partial class MainView : UserControl
         {
             _vm.PropertyChanged += OnVmPropertyChanged;
             ApplyChrome();
+            Root.Classes.Set("nogain", !_vm.AnyManualGain);
             Relayout();
         }
     }
@@ -172,6 +178,9 @@ public partial class MainView : UserControl
                 break;
             case nameof(MainViewModel.IsRecordingUi):
                 Root.Classes.Set("recui", _vm?.IsRecordingUi == true);
+                break;
+            case nameof(MainViewModel.AnyManualGain):
+                Root.Classes.Set("nogain", _vm?.AnyManualGain != true);
                 break;
             case nameof(MainViewModel.ShowPreviewPanel):
                 Relayout();
@@ -207,7 +216,9 @@ public partial class MainView : UserControl
         }
         var compact = width < CompactBelow;
         Root.Classes.Set("compact", compact);
-        Root.Classes.Set("short", Bounds.Height > 0 && Bounds.Height < 520);
+        var height = Bounds.Height;
+        Root.Classes.Set("short", height > 0 && height < 520);
+        Root.Classes.Set("lowbar", height > 0 && width > height && (_vm?.IsHandheld == true || height < LowBarBelow));
 
         var side = !compact && _vm?.ShowPreviewPanel == true;
         var key = $"{compact}|{side}";

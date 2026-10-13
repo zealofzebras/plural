@@ -100,7 +100,7 @@ dotnet build Plural.App.iOS                       # iOS compile check
 dotnet run --project Plural.Cli -- help           # command line: list, inputs, outputs, run, serve, control, mcp, …
 ```
 
-Install an APK on a phone with `adb install -r <apk>`. SmartMikes must be **paired in the OS Bluetooth settings** first;
+Install an APK on a phone with `adb install -r <apk>` (a debug build from plain `dotnet build` crashes on launch that way; use `dotnet build Plural.App.Android -t:Install "-p:AdbTarget=-s SERIAL"` or the release APK). SmartMikes must be **paired in the OS Bluetooth settings** first;
 Plural lists paired devices and doesn't scan for new ones.
 
 ### Using Plural from an AI assistant

@@ -102,7 +102,7 @@ public sealed class MatroskaWriter : IDisposable
         internal int Blocks;
     }
 
-    private sealed record Block(Track Track, long Ms, byte[] Data, bool Key);
+    private sealed record Block(Track Track, long Ms, long EndMs, byte[] Data, bool Key);
 
     private const long MaxClusterMs = 1000;
     private const int MaxClusterBytes = 5_000_000;
@@ -164,12 +164,20 @@ public sealed class MatroskaWriter : IDisposable
         t.CodecPrivate = data;
     }
 
-    /// <summary>Queues one block. <paramref name="timestamp"/> is in 100 ns ticks from take start.</summary>
-    public void WriteBlock(Track track, long timestamp, ReadOnlySpan<byte> data, bool keyFrame = true)
+    /// <summary>
+    /// Queues one block. <paramref name="timestamp"/> and <paramref name="duration"/> are in 100 ns ticks from take start. The segment
+    /// Duration ends where the last block ends; without a duration a video block lasts one frame, an audio block nothing.
+    /// </summary>
+    public void WriteBlock(Track track, long timestamp, ReadOnlySpan<byte> data, bool keyFrame = true, long duration = 0)
     {
         var ms = Math.Max(0, (timestamp + 5000) / 10000);
+        if (duration <= 0 && track.Kind == TrackKind.Video && track.FrameRate > 0)
+        {
+            duration = (long)(10_000_000 / track.FrameRate);
+        }
+        var endMs = Math.Max(ms, (Math.Max(0, timestamp) + duration + 5000) / 10000);
         track.LastTs = Math.Max(track.LastTs, ms);
-        _buf.Add(new Block(track, ms, data.ToArray(), keyFrame));
+        _buf.Add(new Block(track, ms, endMs, data.ToArray(), keyFrame));
         Drain(false);
     }
 
@@ -291,7 +299,7 @@ public sealed class MatroskaWriter : IDisposable
         Put(head);
         Put(b.Data);
         _clusterBytes += head.Length + b.Data.Length;
-        _maxMs = Math.Max(_maxMs, b.Ms);
+        _maxMs = Math.Max(_maxMs, b.EndMs);
         b.Track.Blocks++;
         BlockCount++;
     }

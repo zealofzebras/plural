@@ -122,6 +122,14 @@
         </Style>
         <Style Selector="Border#BottomBar">
             <Setter Property="Background" Value="{DynamicResource SurfaceBrush}" />
+            <Setter Property="Padding" Value="16,6,16,10" />
+        </Style>
+        <Style Selector="TextBlock.barhint">
+            <Setter Property="HorizontalAlignment" Value="Center" />
+            <Setter Property="TextAlignment" Value="Center" />
+        </Style>
+        <Style Selector="StackPanel.barhint">
+            <Setter Property="HorizontalAlignment" Value="Center" />
         </Style>
 
         <!-- Immersive video: everything floats over the camera on translucent dark scrims -->
@@ -178,6 +186,40 @@
         </Style>
         <Style Selector="Grid#Root.short Border#BottomBar">
             <Setter Property="Padding" Value="16,0,16,0" />
+        </Style>
+        <!-- Landscape on phones and tablets (lowbar): a slim bottom bar, the record button floats up over the content -->
+        <Style Selector="Grid#Root.lowbar Border#BottomBar">
+            <Setter Property="Padding" Value="16,4,16,4" />
+        </Style>
+        <Style Selector="Grid#Root.lowbar Button.rec">
+            <Setter Property="Width" Value="96" />
+            <Setter Property="Height" Value="96" />
+            <Setter Property="Margin" Value="0,-44,0,-4" />
+            <Setter Property="RenderTransform" Value="scale(0.86)" />
+        </Style>
+        <Style Selector="Grid#Root.lowbar Button.rec /template/ Border#Disc">
+            <Setter Property="IsVisible" Value="True" />
+        </Style>
+        <!-- The hints sit right of the floating button instead of under it -->
+        <Style Selector="Grid#Root.lowbar TextBlock.barhint">
+            <Setter Property="HorizontalAlignment" Value="Right" />
+            <Setter Property="TextAlignment" Value="Right" />
+        </Style>
+        <Style Selector="Grid#Root.lowbar StackPanel.barhint">
+            <Setter Property="HorizontalAlignment" Value="Right" />
+        </Style>
+        <Style Selector="Grid#HeaderGrid">
+            <Setter Property="Margin" Value="18,14,12,6" />
+        </Style>
+        <Style Selector="Grid#Root.lowbar Grid#HeaderGrid">
+            <Setter Property="Margin" Value="18,6,12,2" />
+        </Style>
+        <!-- Mixer: room at the bottom so the floating record button doesn't cover the strip names -->
+        <Style Selector="Grid#MixerArea">
+            <Setter Property="Margin" Value="12,6,12,12" />
+        </Style>
+        <Style Selector="Grid#Root.lowbar Grid#MixerArea">
+            <Setter Property="Margin" Value="12,4,12,36" />
         </Style>
 
         <!-- Cards slide down and fade while recording; the compact strip slides up -->
@@ -297,6 +339,83 @@
         <Style Selector="c|MixerMeter">
             <Setter Property="TrackBrush" Value="{DynamicResource MeterTrackBrush}" />
         </Style>
+        <!-- Channel strip mic section: stacked knobs; on a short console (lowmix) the knobs sit side by side -->
+        <Style Selector="Panel.micsec">
+            <Setter Property="Height" Value="196" />
+        </Style>
+        <Style Selector="StackPanel.mastersec">
+            <Setter Property="Height" Value="252" />
+        </Style>
+        <Style Selector="Panel.micsec StackPanel.gain">
+            <Setter Property="Grid.ColumnSpan" Value="2" />
+        </Style>
+        <Style Selector="Panel.micsec Grid.agcns">
+            <Setter Property="Grid.Row" Value="1" />
+            <Setter Property="Grid.ColumnSpan" Value="2" />
+        </Style>
+        <Style Selector="Panel.micsec StackPanel.phones">
+            <Setter Property="Grid.Row" Value="2" />
+            <Setter Property="Grid.ColumnSpan" Value="2" />
+        </Style>
+        <Style Selector="Grid#Root.lowmix Panel.micsec">
+            <Setter Property="Height" Value="104" />
+        </Style>
+        <Style Selector="Grid#Root.lowmix StackPanel.mastersec">
+            <Setter Property="Height" Value="160" />
+        </Style>
+        <Style Selector="Grid#Root.lowmix Panel.micsec StackPanel.gain">
+            <Setter Property="Grid.ColumnSpan" Value="1" />
+        </Style>
+        <Style Selector="Grid#Root.lowmix Panel.micsec StackPanel.phones">
+            <Setter Property="Grid.Row" Value="0" />
+            <Setter Property="Grid.Column" Value="1" />
+            <Setter Property="Grid.ColumnSpan" Value="1" />
+        </Style>
+        <Style Selector="Panel.micsec Grid.agcns ToggleButton.ns">
+            <Setter Property="Grid.Column" Value="1" />
+        </Style>
+        <!-- No strip shows a GAIN knob (AGC on everywhere, or local mics only): shorter mic sections, taller faders -->
+        <Style Selector="Grid#Root.nogain Panel.micsec">
+            <Setter Property="Height" Value="116" />
+        </Style>
+        <Style Selector="Grid#Root.nogain StackPanel.mastersec">
+            <Setter Property="Height" Value="172" />
+        </Style>
+        <!-- Short console without gain knobs: AGC and NS stacked left of the PHONES knob -->
+        <Style Selector="Grid#Root.lowmix.nogain Panel.micsec">
+            <Setter Property="Height" Value="72" />
+        </Style>
+        <Style Selector="Grid#Root.lowmix.nogain StackPanel.mastersec">
+            <Setter Property="Height" Value="128" />
+        </Style>
+        <Style Selector="Grid#Root.lowmix.nogain Panel.micsec Grid.agcns">
+            <Setter Property="Grid.Row" Value="0" />
+            <Setter Property="Grid.ColumnSpan" Value="1" />
+            <Setter Property="RowSpacing" Value="4" />
+            <Setter Property="VerticalAlignment" Value="Center" />
+        </Style>
+        <Style Selector="Grid#Root.lowmix.nogain Panel.micsec Grid.agcns ToggleButton.ns">
+            <Setter Property="Grid.Column" Value="0" />
+            <Setter Property="Grid.Row" Value="1" />
+        </Style>
+        <Style Selector="Grid#Root.lowmix.nogain Panel.micsec Grid.agcns ToggleButton">
+            <Setter Property="Grid.ColumnSpan" Value="2" />
+        </Style>
+        <Style Selector="Grid#Root.lowmix Panel.micsec Grid.agc StackPanel.phones">
+            <Setter Property="Grid.Column" Value="0" />
+            <Setter Property="Grid.ColumnSpan" Value="2" />
+        </Style>
+        <Style Selector="Grid#Root.lowmix.nogain Panel.micsec Grid.agc StackPanel.phones">
+            <Setter Property="Grid.Column" Value="1" />
+            <Setter Property="Grid.ColumnSpan" Value="1" />
+        </Style>
+        <Style Selector="Grid#Root.lowmix Panel.micsec TextBlock.chlabel">
+            <Setter Property="LetterSpacing" Value="0" />
+        </Style>
+        <Style Selector="Grid#Root.lowmix Panel.micsec c|Knob">
+            <Setter Property="Width" Value="38" />
+            <Setter Property="Height" Value="38" />
+        </Style>
         <Style Selector="ComboBox.mini">
             <Setter Property="FontSize" Value="11" />
             <Setter Property="MinHeight" Value="30" />
@@ -391,7 +510,7 @@
 
         <!-- Header -->
         <Border Grid.Row="0" Classes="bar">
-            <Grid ColumnDefinitions="*,Auto" Margin="18,14,12,6">
+            <Grid Name="HeaderGrid" ColumnDefinitions="*,Auto">
                 <StackPanel VerticalAlignment="Center">
                     <TextBlock Text="Plural" FontSize="22" FontWeight="Bold" />
                     <StackPanel Orientation="Horizontal" Spacing="8" Margin="0,2,0,0">
@@ -406,6 +525,23 @@
                 </StackPanel>
                 <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center"
                             IsVisible="{Binding ShowControls}">
+                    <!-- Video tools (camera switch, full-screen preview), left of the menu -->
+                    <Button Classes="tool" Command="{Binding NextCameraCommand}" ToolTip.Tip="Switch camera">
+                        <Button.IsVisible>
+                            <MultiBinding Converter="{x:Static BoolConverters.And}">
+                                <Binding Path="ShowVideoTools" />
+                                <Binding Path="HasMultipleCameras" />
+                            </MultiBinding>
+                        </Button.IsVisible>
+                        <c:Icon Data="{StaticResource IconFlipCamera}" />
+                    </Button>
+                    <Button Classes="tool" Command="{Binding ToggleImmersiveCommand}" IsVisible="{Binding ShowVideoTools}"
+                            ToolTip.Tip="Full-screen preview">
+                        <Panel>
+                            <c:Icon Size="24" Data="{StaticResource IconExpand}" IsVisible="{Binding !IsImmersive}" />
+                            <c:Icon Size="24" Data="{StaticResource IconCompress}" IsVisible="{Binding IsImmersive}" />
+                        </Panel>
+                    </Button>
                     <Button Classes="tool" ToolTip.Tip="Menu" Command="{Binding OpenMenuCommand}">
                         <c:Icon Data="{StaticResource IconMore}" />
                     </Button>
@@ -419,22 +555,6 @@
                     </StackPanel>
                 </Border>
             </Grid>
-        </Border>
-
-        <!-- Video tools (camera switch, full-screen preview) -->
-        <Border Grid.Row="1" Classes="bar" IsVisible="{Binding ShowVideoTools}">
-            <StackPanel Orientation="Horizontal" Spacing="8" HorizontalAlignment="Right" Margin="18,6,12,4">
-                <Button Classes="tool" Command="{Binding NextCameraCommand}" IsVisible="{Binding HasMultipleCameras}"
-                        ToolTip.Tip="Switch camera">
-                    <c:Icon Data="{StaticResource IconFlipCamera}" />
-                </Button>
-                <Button Classes="tool" Command="{Binding ToggleImmersiveCommand}" ToolTip.Tip="Full-screen preview">
-                    <Panel>
-                        <c:Icon Size="24" Data="{StaticResource IconExpand}" IsVisible="{Binding !IsImmersive}" />
-                        <c:Icon Size="24" Data="{StaticResource IconCompress}" IsVisible="{Binding IsImmersive}" />
-                    </Panel>
-                </Button>
-            </StackPanel>
         </Border>
 
         <!-- Content -->
@@ -674,12 +794,14 @@
 
             <!-- Mixer: one channel strip per mic, and a master strip that plays the mix of all mics to one output.
                  Faders and mutes act on the recording and the outputs immediately, also while recording. -->
-            <Grid IsVisible="{Binding IsMixerMode}" RowDefinitions="Auto,*" Margin="12,6,12,12">
+            <Grid Name="MixerArea" IsVisible="{Binding IsMixerMode}" RowDefinitions="Auto,*">
             <!-- Video in mixer mode (phones): docked above the console so it never covers a strip -->
             <Border Classes="pip pipdock" IsVisible="{Binding ShowMixerPreview}" HorizontalAlignment="Center">
                 <ContentControl Content="{Binding}" ContentTemplate="{StaticResource MixerPreviewContent}" />
             </Border>
             <Border Name="Mixer" Grid.Row="1" Classes="console">
+                <!-- Too short for a whole strip (phone landscape): the console scrolls vertically instead of squeezing the faders -->
+                <ScrollViewer HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto">
                 <Grid ColumnDefinitions="*,Auto">
                     <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled">
                         <Grid>
@@ -710,28 +832,30 @@
                                                     </StackPanel>
                                                 </Grid>
 
-                                                <!-- Mic section (SmartMike settings); fixed height so all faders line up -->
-                                                <Panel Grid.Row="1" Height="196">
-                                                    <StackPanel IsVisible="{Binding IsSmartMike}" Spacing="6">
-                                                        <StackPanel Spacing="2">
+                                                <!-- Mic section (SmartMike settings); fixed height so all faders line up.
+                                                     Short consoles (lowmix) put the two knobs side by side. -->
+                                                <Panel Grid.Row="1" Classes="micsec">
+                                                    <Grid IsVisible="{Binding IsSmartMike}" Classes.agc="{Binding Agc}" ColumnDefinitions="*,*" RowDefinitions="Auto,Auto,Auto"
+                                                          ColumnSpacing="4" RowSpacing="6">
+                                                        <!-- Gain only matters with AGC off -->
+                                                        <StackPanel Classes="gain" Spacing="2" IsVisible="{Binding !Agc}">
                                                             <TextBlock Classes="chlabel" Text="GAIN" />
                                                             <c:Knob Minimum="0" Maximum="100" SmallChange="2" LargeChange="10" DefaultValue="50"
-                                                                    Value="{Binding MicGain}" IsEnabled="{Binding !Agc}"
-                                                                    ToolTip.Tip="Mic gain on the SmartMike (turn AGC off to set it)" />
+                                                                    Value="{Binding MicGain}" ToolTip.Tip="Mic gain on the SmartMike" />
                                                             <TextBlock Classes="chvalue" Text="{Binding MicGain}" />
                                                         </StackPanel>
-                                                        <Grid ColumnDefinitions="*,*" ColumnSpacing="4">
-                                                            <ToggleButton Classes="led" Content="AGC" IsChecked="{Binding Agc}" ToolTip.Tip="Automatic gain" />
-                                                            <ToggleButton Grid.Column="1" Classes="led" Content="NS" IsChecked="{Binding NoiseSuppression}"
+                                                        <Grid Classes="agcns" ColumnDefinitions="*,*" RowDefinitions="Auto,Auto" ColumnSpacing="4">
+                                                            <ToggleButton Classes="led" Content="AGC" IsChecked="{Binding Agc}" ToolTip.Tip="Automatic gain (off: set the gain by hand)" />
+                                                            <ToggleButton Classes="led ns" Content="NS" IsChecked="{Binding NoiseSuppression}"
                                                                           ToolTip.Tip="Noise suppression" />
                                                         </Grid>
-                                                        <StackPanel Spacing="2">
+                                                        <StackPanel Classes="phones" Spacing="2">
                                                             <TextBlock Classes="chlabel" Text="PHONES" />
                                                             <c:Knob Minimum="0" Maximum="100" SmallChange="2" LargeChange="10" DefaultValue="80"
                                                                     Value="{Binding MonitorVolume}" ToolTip.Tip="Headphone monitor on the SmartMike" />
                                                             <TextBlock Classes="chvalue" Text="{Binding MonitorVolume}" />
                                                         </StackPanel>
-                                                    </StackPanel>
+                                                    </Grid>
                                                     <StackPanel IsVisible="{Binding IsLocal}" VerticalAlignment="Center" Spacing="6">
                                                         <c:Icon Data="{StaticResource IconMic}" Size="28" Fill="{DynamicResource MutedBrush}" HorizontalAlignment="Center" />
                                                         <TextBlock Classes="chsmall" Text="Device mic" HorizontalAlignment="Center" />
@@ -796,7 +920,7 @@
                                 <TextBlock Classes="chstate" Text="MASTER" />
                                 <TextBlock Classes="chsmall" Text="Live mix" />
                             </StackPanel>
-                            <StackPanel Grid.Row="1" Height="252" Spacing="3">
+                            <StackPanel Grid.Row="1" Classes="mastersec" Spacing="3">
                                 <TextBlock Classes="chlabel" Text="MIX OUT" />
                                 <ComboBox Classes="mini" ItemsSource="{Binding MixOutputs}" SelectedItem="{Binding SelectedMixOutput}"
                                           ToolTip.Tip="Play the mix of all mics on this output">
@@ -824,6 +948,7 @@
                         </Grid>
                     </Border>
                 </Grid>
+                </ScrollViewer>
             </Border>
             </Grid>
 
@@ -887,14 +1012,14 @@
         </Panel>
 
         <!-- Bottom bar: [format chip] [video toggle]  (Record)  [Takes] -->
-        <Border Grid.Row="3" Name="BottomBar" BorderBrush="{DynamicResource StrokeBrush}" BorderThickness="0,1,0,0" Padding="16,6,16,10">
+        <Border Grid.Row="3" Name="BottomBar" BorderBrush="{DynamicResource StrokeBrush}" BorderThickness="0,1,0,0">
             <StackPanel>
-                <TextBlock Classes="muted" Text="{Binding RecordHint}" IsVisible="{Binding HasRecordHint}"
-                           HorizontalAlignment="Center" Margin="0,4,0,0" />
-                <TextBlock Classes="muted" Foreground="{DynamicResource WarnBrush}" Text="{Binding PreflightText}"
-                           IsVisible="{Binding HasPreflight}" TextWrapping="Wrap" TextAlignment="Center"
-                           HorizontalAlignment="Center" Margin="0,4,0,0" />
-                <StackPanel Orientation="Horizontal" Spacing="6" HorizontalAlignment="Center" Margin="0,4,0,0"
+                <TextBlock Classes="muted barhint" Text="{Binding RecordHint}" IsVisible="{Binding HasRecordHint}"
+                           Margin="0,4,0,0" />
+                <TextBlock Classes="muted barhint" Foreground="{DynamicResource WarnBrush}" Text="{Binding PreflightText}"
+                           IsVisible="{Binding HasPreflight}" TextWrapping="Wrap"
+                           Margin="0,4,0,0" />
+                <StackPanel Classes="barhint" Orientation="Horizontal" Spacing="6" Margin="0,4,0,0"
                             IsVisible="{Binding HasSpaceHint}">
                     <c:Icon Data="{StaticResource IconWarning}" Size="14" Fill="{DynamicResource WarnBrush}" />
                     <TextBlock Classes="muted" Foreground="{DynamicResource WarnBrush}" Text="{Binding SpaceHint}" />

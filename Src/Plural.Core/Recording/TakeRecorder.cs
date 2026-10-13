@@ -220,7 +220,7 @@ internal sealed class MatroskaOutput : TakeOutput
 
         private void EmitFlac(ReadOnlySpan<byte> frame, int count)
         {
-            _w.WriteBlock(_t, _samples * 10_000_000 / ClockLockedTrack.OutputRate, frame);
+            _w.WriteBlock(_t, _samples * 10_000_000 / ClockLockedTrack.OutputRate, frame, duration: count * 10_000_000L / ClockLockedTrack.OutputRate);
             _samples += count;
         }
 
@@ -229,7 +229,7 @@ internal sealed class MatroskaOutput : TakeOutput
             if (_n == 0) { return; }
             var b = new byte[_n * 2];
             for (var i = 0; i < _n; i++) { System.Buffers.Binary.BinaryPrimitives.WriteInt16LittleEndian(b.AsSpan(2 * i), _pcmBlock[i]); }
-            _w.WriteBlock(_t, _samples * 10_000_000 / ClockLockedTrack.OutputRate, b);
+            _w.WriteBlock(_t, _samples * 10_000_000 / ClockLockedTrack.OutputRate, b, duration: _n * 10_000_000L / ClockLockedTrack.OutputRate);
             _samples += _n;
             _n = 0;
         }

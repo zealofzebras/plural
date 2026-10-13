@@ -26,6 +26,13 @@ public sealed class AndroidAacEncoder : IAacEncoder
     public int Channels { get; }
     public ReadOnlyMemory<byte> AudioSpecificConfig { get; private set; }
 
+    /// <summary>
+    /// The MediaCodec AAC-LC encoder (FDK) delays its output by 2048 samples. Measured with AacSelfTest (a click encoded and decoded
+    /// again) on a Pixel 8 (Android 17) and a Lenovo Tab P10 (TB-X705L, Android 9): both 2048, and an M4A with this priming plays the click
+    /// within 0.3 ms of where it was recorded.
+    /// </summary>
+    public int PrimingSamples => 2048;
+
     public AndroidAacEncoder(int sampleRate, int channels, int bitRate)
     {
         SampleRate = sampleRate;

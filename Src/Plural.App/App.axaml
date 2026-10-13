@@ -271,6 +271,9 @@
             <Setter Property="Template">
                 <ControlTemplate>
                     <Panel Background="Transparent">
+                        <!-- Shown when the button floats over the content (landscape on phones and tablets) -->
+                        <Border Name="Disc" Width="90" Height="90" CornerRadius="45" IsVisible="False"
+                                Background="{DynamicResource SurfaceBrush}" BoxShadow="0 4 16 0 #40000000" />
                         <Ellipse Name="Ring" Width="84" Height="84" Stroke="{DynamicResource RecordBrush}" StrokeThickness="3" Opacity="0" />
                         <Ellipse Width="84" Height="84" Stroke="{DynamicResource MutedBrush}" StrokeThickness="3" Opacity="0.55" />
                         <Border Name="Core" Width="66" Height="66" CornerRadius="33" Background="{DynamicResource RecordBrush}" />

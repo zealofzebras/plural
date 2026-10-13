@@ -13,6 +13,7 @@ Decided 2026-10-11 with Peter. Every mic is always its own stream (track or file
 
 - Per-mic file formats are stored as separate files in the take folder; **sharing/exporting** a take with several files sends one **zip** (`<take>.zip`).
 - Track/file names = mic `DisplayName` (e.g. "SmartMike+ 0D5E"). Matroska/MP4 tracks carry the name and language `und`.
+- File names go through `Plural.Core.FileNames.Sanitize` (take, track and peak names, and files received from remotes): control characters and `<>:"/\|?*` removed, trailing dots and spaces dropped, Windows reserved names (CON, PRN, AUX, NUL, COM1–9, LPT1–9) handled, max 120 characters. Received duplicates become `name_2.ext`. Found on hardware: an Android mic named "Bluetooth: SmartMike+" became an NTFS alternate data stream on Windows.
 - Take folder: `<RecordingRoot>/<yyyyMMdd_HHmmss>/`; single-file formats write `<yyyyMMdd_HHmmss>.<ext>` inside it.
 
 ## Take folder, sidecar and library (`Plural.Core/Library`)
@@ -59,7 +60,7 @@ Contracts: `Plural.Core/Platform/Media.cs`, `Plural.Core/Recording/RecordingSett
 - Mic tracks start at `t0` (first samples after Record). A mic that drops out gets silence for the gap, so later audio stays in place.
 - Video samples carry `MediaClock` timestamps from the platform; the writer subtracts `t0`. The first video sample written must be a key frame (earlier ones are dropped).
 
-## Implementation status (2026-10-12)
+## Implementation status (2026-10-13)
 Built in `Plural.Core/Recording` (`FlacEncoder`, `MatroskaWriter`, `Mp4Writer` (fragmented), `H264`, `LameMp3Encoder`, `ClockLockedTrack`,
 `PauseTimeline`, `RecordingEstimate`, `TakeRecorder`, `RecordedTake`, `TakeExport`) and `Plural.Core/Library` (sidecar, peaks, poster,
 trash, recovery). Platform: `AndroidAacEncoder`, `AndroidVideoPlatform`/`AndroidVideoCapture` (Android); `MfAacEncoder`,
@@ -67,24 +68,24 @@ trash, recovery). Platform: `AndroidAacEncoder`, `AndroidVideoPlatform`/`Android
 
 | Part | State |
 |---|---|
-| Container writers, FLAC, LAME, clock-locked tracks | Built; unit-tested: 326 Core tests pass on win-arm64 and win-x64 (timing-sensitive classes run in the non-parallel `timing` collection). Covers FLAC round-trip, Matroska/MP4 structure, LAME, sync drift/dropout, real capture → WAV/MKA bit-exact, fake end-to-end of all six formats |
-| Fragmented MP4 / M4A | Built; unit-tested. Players other than the ones we use are **untested** (VLC, QuickTime, WMP/Photos, Android Photos, Resolve, Premiere). Forced-kill test **not run** |
-| Pause / resume | Built (local, remote, CLI `pause`/`resume`); `PauseTests` cover the timeline. Not yet run with real mics or camera |
-| Free space, batteries, reconnect | Built. Not run with real hardware (a mic switched off mid-take is still to test) |
-| Rotation | `IVideoCapture.RotationDegrees` / `MirrorPreview` written as the MP4 `tkhd` matrix and the Matroska `ProjectionPoseRoll`. Sign not yet verified in players |
+| Container writers, FLAC, LAME, clock-locked tracks | Built; unit-tested: 350 Core tests pass on win-arm64 and win-x64 (timing-sensitive classes run in the non-parallel `timing` collection). Covers FLAC round-trip, Matroska/MP4 structure, LAME, sync drift/dropout, real capture → WAV/MKA bit-exact, fake end-to-end of all six formats |
+| Fragmented MP4 / M4A | Built; unit-tested. Surface: MP4 force-killed at 8.0 s keeps 8.05 s video / 7.96 s audio and plays; files open and decode in Media Foundation. Pixel 8: force-stop → Recovered. Players **untested**: VLC, QuickTime, WMP/Photos, Android Photos, Resolve, Premiere |
+| Pause / resume | Built (local, remote, CLI `pause`/`resume`); `PauseTests` cover the timeline. Verified 2026-10-13: Surface CLI, all six formats with pause record and decode; Pixel 8 MP4 and MKV with pause. Track alignment after resume not measured |
+| Free space, batteries, reconnect | Built. Pixel 8: two ~350 ms SmartMike Bluetooth stalls logged as dropouts and filled with silence. A mic switched off mid-take is still to test |
+| Rotation | `IVideoCapture.RotationDegrees` / `MirrorPreview` written as the MP4 `tkhd` matrix and the Matroska `ProjectionPoseRoll`. Sign not yet verified in players. Android: see the Android row |
 | Windows video | Verified on Surface arm64 + x64: 1080p30, 3 keyframes per 3 s, ~10.5 Mbps; QPC timestamps match `MediaClock`. MF H.264 `RequestKeyFrame` verified with synthetic frames (QCOM hardware and Microsoft software MFT, arm64 + x64). Intel/AMD/NVIDIA hardware encoders untested |
-| Android | AAC, camera and foreground service built. APK ran on a Pixel 8 (Android 17) before this work; the service, camera, new formats and decoders are **not yet run on the phone** |
-| Real mics + camera end-to-end | Not yet tested |
+| Android | AAC, camera, foreground service and decoders built. Pixel 8 (Android 17), 2026-10-13: 118 s WAV incl. 30 s screen-off; MP4 and MKV with pause; front and rear camera recorded upright (fixed Y-flip texture matrix, display rotation from `DisplayManager`, since `GetTransformMatrix` already holds the sensor rotation and the old double rotation turned video 90°); force-stop → Recovered; Takes and Player work. Lenovo Tab P10 (Android 9): AAC priming measured. **Not yet: Android 17 background video** |
+| Real mics + camera end-to-end | Pixel 8 and Surface takes with pause, recovery and video verified (rows above). Not yet: SmartMike auto-reconnect with the mic switched off |
 
 Open items:
 - Audio is ~Bluetooth latency behind video. Measure with a clap test, then compensate.
-- Android AAC priming is unmeasured (1024 assumed).
+- AAC priming: Android measured 2048 (see Priming); Apple still the 1024 default, unmeasured.
 - Camera privacy-denied path (Windows and Android) untested.
 - No "Finalize" rewrite of fMP4 to progressive MP4; add it only if an editor rejects the files.
 - Android background video: allowed only if the service started while the app was visible; to check on Android 17.
 
 ## Pause / resume, dropouts, size estimate
-- `MikeHub.PauseRecording()/ResumeRecording()` (+ overloads with a `MediaClock` instant, which may be in the near future) → `TakeRecorder.Pause/Resume` → `PauseTimeline` (host-clock spans; `Effective(t)` = recorded time). Paused time leaves every track: video frames inside a span are dropped and later timestamps are shifted by the paused time; on resume `IVideoCapture.RequestKeyFrame()` is called and delta frames are dropped until a key frame. `RecordedTake.Duration` = recorded time. No-ops when not recording / already paused.
+- `MikeHub.PauseRecording()/ResumeRecording()` (+ overloads with a `MediaClock` instant, which may be in the near future) → `TakeRecorder.Pause/Resume` → `PauseTimeline` (host-clock spans; `Effective(t)` = recorded time). Paused time leaves every track: video frames inside a span are dropped and later timestamps are shifted by the paused time; on resume `IVideoCapture.RequestKeyFrame()` is called and delta frames are dropped until a key frame. Windows `MfH264Encoder` forces the IDR on the first input frame captured after the request, and `TakeRecorder` accepts a requested key frame captured up to 250 ms before the resume (`KeyFrameGrace`). Video gap after resume: 34 ms on Surface (was 1017 ms), 42 ms on Pixel 8 (was 953 ms). `RecordedTake.Duration` = recorded time. No-ops when not recording / already paused.
 - `ClockLockedTrack`: output runs `Latency` behind host time, so a pause at host instant P is reached in the output `Latency` later (production time uses `Effective(now - lag)`). At output position nP = `Effective(P)` the track cuts its input at nP + the smoothed cursor offset (so the alignment before and after is the same), discards input worth (R − P) at the smoothed long-run input ratio (the mic's drift), and carries on with no silence and no controller windup. Accuracy is about 5 ms after the first seconds (the startup transient of the rate controller is not part of this).
 - Sidecar: `pauses[].atMs` = position on the take's output timeline (recorded ms); `dropouts[]` = `{track, startMs, endMs}` in the track's own recorded ms (from its sample 0, pauses removed), written at the stop and every ~4 s. A dropout starts where the output stalled, which is up to the 60 ms jitter margin before the audio really ended.
 - `RecordingEstimate.BytesPerSecond/TimeLeft` and `MikeHub.RecordingBytesWritten` feed the free-space warning (project from the real rate after ~10 s).
@@ -94,10 +95,10 @@ Open items:
 - **Batteries**: before a take, a SmartMike at or below 20 % is listed as a preflight note. During a take a toast names the mic at 15 %
   and again at 5 % (recording continues). Host battery under 15 % while not charging: one toast.
 - **SmartMike reconnect**: a dropped link is retried (1, 2, 4, 10 s, then every 10 s) while a take runs; the gap is filled with silence
-  and the sidecar gets a `dropouts[]` entry. Not in a take: 2 min. Untested with a real mic.
+  and the sidecar gets a `dropouts[]` entry. Not in a take: 2 min. Pixel 8: two ~350 ms SmartMike Bluetooth stalls were logged as dropouts and filled with silence. A mic switched off mid-take is untested.
 
 ## Containers
-- **Matroska:** EBML header, Segment with unknown size, Info (TimestampScale 1 ms, MuxingApp/WritingApp "Plural", Title), Tracks, then Clusters (unknown size, ≤ 1 s or 5 MB) of SimpleBlocks interleaved by timestamp; Cues and segment size patched on close if possible. Unknown sizes keep a crashed recording playable.
+- **Matroska:** EBML header, Segment with unknown size, Info (TimestampScale 1 ms, MuxingApp/WritingApp "Plural", Title), Tracks, then Clusters (unknown size, ≤ 1 s or 5 MB) of SimpleBlocks interleaved by timestamp; Cues and segment size patched on close if possible. Unknown sizes keep a crashed recording playable. Segment Duration ends where the last block ends (audio sinks pass the block's sample count, video one frame); it used to be the last block's start, ~70 ms short.
   - Video `V_MPEG4/ISO/AVC` + CodecPrivate avcC (from SPS/PPS); blocks in length-prefixed (AVCC) form.
   - Audio `A_FLAC` + CodecPrivate `fLaC`+STREAMINFO (block size 4096), or `A_PCM/INT/LIT` (16-bit), `A_AAC` + ASC.
 - **MP4/M4A (fragmented):** `ftyp` (isom/mp42; M4A brand `M4A `), then `moov` with `mvex`/`mehd`/`trex` and empty sample tables
@@ -111,7 +112,9 @@ Open items:
     and patches the durations. A crashed file keeps the `free` box; `Mp4Reader` honours it.
   - **Crash behaviour**: everything up to the last complete fragment stays playable (no seeking needed). **Forced-kill test not yet run.**
   - **Priming**: `IAacEncoder.PrimingSamples`. Windows Media Foundation AAC = **0** (measured: decoder output aligned with the source; ffmpeg
-    agrees). Android MediaCodec uses the default **1024** (not measured yet).
+    agrees). Android MediaCodec = **2048**, measured 2026-10-13 on Pixel 8 (Android 17) and Lenovo Tab P10 (Android 9) with the debug-only
+    `AacSelfTest` (`adb shell am start -n net.getplural.app/crc64181cfaae50b6581c.MainActivity --ez selftest_aac true`, logcat tag `Plural`).
+    It was 1024, which left audio 23 ms late. Apple AAC still the 1024 default (unmeasured).
   - A "Finalize" rewrite to progressive MP4 is **not built**; it is needed only if an editor rejects fMP4 (see Plan).
 - **FLAC encoder:** 16-bit mono, block size 4096, fixed predictors order 0–4 (pick smallest), partitioned Rice coding, verbatim fallback, CRC-8/CRC-16 per frame, STREAMINFO (MD5 may be zero).
 

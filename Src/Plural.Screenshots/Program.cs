@@ -37,6 +37,9 @@ internal static class Program
     /// <summary>Extra profile for the page scenes only: a phone held sideways.</summary>
     private static readonly Profile PhoneLandscape = new("phone-land", 844, 390, 2.0, true);
 
+    /// <summary>Development only: a tablet held sideways (e.g. Lenovo Tab, 1280 x 800 dp).</summary>
+    private static readonly Profile TabletLandscape = new("tablet-land", 1280, 800, 1.5, true);
+
     /// <summary>--mixer: render only the mixer-mode preview (for development; the store set is unchanged).</summary>
     internal static bool MixerOnly;
 
@@ -73,7 +76,7 @@ internal static class Program
             return 0;
         }
 
-        var profile = Profiles.Append(PhoneLandscape).FirstOrDefault(p => p.Name == profileName);
+        var profile = Profiles.Append(PhoneLandscape).Append(TabletLandscape).FirstOrDefault(p => p.Name == profileName);
         if (profile is null)
         {
             Console.Error.WriteLine($"Unknown profile '{profileName}'. Use all, {string.Join(", ", Profiles.Select(p => p.Name))}.");
@@ -175,6 +178,10 @@ internal static class Program
             vm.SelectedMixOutput = vm.MixOutputs.Skip(1).FirstOrDefault() ?? vm.SelectedMixOutput;
             Pump(TimeSpan.FromSeconds(1.5));
             Shot("mixer");
+            vm.Mikes[1].Agc = false;
+            Pump(TimeSpan.FromSeconds(0.5));
+            Shot("mixer manual gain");
+            vm.Mikes[1].Agc = true;
             vm.ToggleRecordingCommand.Execute(null);
             Require(PumpUntil(() => vm.IsRecording, 10), "recording did not start");
             Pump(TimeSpan.FromSeconds(3));
@@ -496,6 +503,7 @@ internal sealed class ScreenshotHost : IAppHost
 
     public string RecordingRoot { get; }
     public bool CanChangeRecordingRoot => !_mobile;
+    public bool IsHandheld => _mobile;
     public string OutputLabel => _mobile ? "Live monitor" : "Windows input (virtual cable)";
     public bool CanOpenFolder => !_mobile;
     public bool CanShare => _mobile;

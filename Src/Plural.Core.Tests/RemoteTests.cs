@@ -484,6 +484,71 @@ public class RemoteTests
         await ctrl.DisconnectAsync(dev);
         Directory.Delete(tmp, true);
     }
+
+    [Fact]
+    public async Task TakeQueuedForAVanishedController_IsDroppedWhenAnotherControllerConnects()
+    {
+        var tmp = Path.Combine(Path.GetTempPath(), "plural_remote_" + Guid.NewGuid().ToString("N"));
+        var registry = new Dictionary<string, (RemoteIdentity, Func<Stream, Task>)>();
+        var remoteRec = new FakeRecorder(Path.Combine(tmp, "remote"));
+        await using var remote = new RemoteNetwork(new RemoteIdentity("r-5", "Phone", "Android"), [new LoopTransport(registry)], remoteRec);
+        remoteRec.Net = remote;
+        remote.StartListening();
+        await Until(() => registry.Count == 1);
+        var peer = new DiscoveredPeer("r-5", "Phone", "Android", [new RemoteEndpoint("Loop", "r-5", "r-5", "Phone", "Android")]);
+
+        // Controller A starts a take and goes away for good before the files arrive.
+        var ctrlA = new RemoteNetwork(new RemoteIdentity("c-5a", "Old PC", "Windows"), [new LoopTransport(registry)], new FakeRecorder(tmp));
+        var devA = ctrlA.Connect(peer);
+        await Until(() => devA.State == RemoteDeviceState.Connected && devA.ClockOffset is not null);
+        var startAt = MediaClock.Now + TimeSpan.FromMilliseconds(100).Ticks;
+        ctrlA.RegisterTake("t", Path.Combine(tmp, "take"), startAt);
+        ctrlA.ActiveTakeId = "t";
+        await devA.StartAsync("t", startAt, false);
+        await ctrlA.DisposeAsync();
+        await Until(() => remote.Responder.Controller is { Connected: false });
+        await remoteRec.StopAsync("t");
+        Assert.Equal(1, remote.Responder.PendingTakes);
+
+        // Controller B (another identity) takes over: A's take is no longer waited for; it stays in the remote's library.
+        await using var ctrlB = new RemoteNetwork(new RemoteIdentity("c-5b", "New PC", "Windows"), [new LoopTransport(registry)], new FakeRecorder(tmp));
+        var devB = ctrlB.Connect(peer);
+        await Until(() => devB.State == RemoteDeviceState.Connected);
+        Assert.Equal(0, remote.Responder.PendingTakes);
+        Assert.Equal("c-5b", remote.Responder.Controller?.Id);
+
+        // After B leaves, nothing is outstanding, so the remote is free again instead of waiting for A.
+        await ctrlB.DisconnectAsync(devB);
+        await Until(() => remote.Responder.Controller is null);
+        Directory.Delete(tmp, true);
+    }
+
+    [Fact]
+    public async Task QueuedTakeExpires_SoTheRemoteStopsWaitingForItsController()
+    {
+        var tmp = Path.Combine(Path.GetTempPath(), "plural_remote_" + Guid.NewGuid().ToString("N"));
+        var registry = new Dictionary<string, (RemoteIdentity, Func<Stream, Task>)>();
+        var remoteRec = new FakeRecorder(Path.Combine(tmp, "remote"));
+        await using var remote = new RemoteNetwork(new RemoteIdentity("r-6", "Phone", "Android"), [new LoopTransport(registry)], remoteRec);
+        remoteRec.Net = remote;
+        remote.Responder.PendingLifetime = TimeSpan.Zero;
+        remote.StartListening();
+        await Until(() => registry.Count == 1);
+        var peer = new DiscoveredPeer("r-6", "Phone", "Android", [new RemoteEndpoint("Loop", "r-6", "r-6", "Phone", "Android")]);
+        var ctrl = new RemoteNetwork(new RemoteIdentity("c-6", "PC", "Windows"), [new LoopTransport(registry)], new FakeRecorder(tmp));
+        var dev = ctrl.Connect(peer);
+        await Until(() => dev.State == RemoteDeviceState.Connected && dev.ClockOffset is not null);
+        var startAt = MediaClock.Now + TimeSpan.FromMilliseconds(100).Ticks;
+        ctrl.RegisterTake("t", Path.Combine(tmp, "take"), startAt);
+        ctrl.ActiveTakeId = "t";
+        await dev.StartAsync("t", startAt, false);
+        await ctrl.DisposeAsync(); // the controller vanishes while the take records...
+        await Until(() => remote.Responder.Controller is { Connected: false });
+        await remoteRec.StopAsync("t"); // ...so the finished take is queued for it, then expires
+        await Until(() => remote.Responder.Controller is null);
+        Assert.Equal(0, remote.Responder.PendingTakes);
+        Directory.Delete(tmp, true);
+    }
 }
 
 /// <summary>The real Wi-Fi transport on this machine: UDP discovery and a TCP link (both ends in-process).</summary>

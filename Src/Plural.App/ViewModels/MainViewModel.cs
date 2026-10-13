@@ -37,6 +37,14 @@ public partial class MainViewModel : ViewModelBase, IAsyncDisposable
     private Task<bool>? _micPermission;
 
     public ObservableCollection<MikeViewModel> Mikes { get; } = [];
+
+    /// <summary>
+    /// Some SmartMike has AGC off, so its mixer strip shows the GAIN knob. When none does (AGC on, or local mics only),
+    /// every strip's mic section gets shorter and the faders get the room.
+    /// </summary>
+    [ObservableProperty] public partial bool AnyManualGain { get; set; }
+
+    internal void UpdateGainKnobs() => AnyManualGain = Mikes.Any(m => m.IsSmartMike && !m.Agc);
     public ObservableCollection<Choice> FormatOptions { get; } = [];
     public ObservableCollection<CameraInfo> Cameras { get; } = [];
     public ObservableCollection<AudioInputDevice> AvailableInputs { get; } = [];
@@ -140,8 +148,12 @@ public partial class MainViewModel : ViewModelBase, IAsyncDisposable
         Summary = "2 of 3 mics live";
     }
 
+    /// <summary>Phone or tablet (see <see cref="IAppHost.IsHandheld"/>).</summary>
+    public bool IsHandheld => _host?.IsHandheld ?? (OperatingSystem.IsAndroid() || OperatingSystem.IsIOS());
+
     public MainViewModel(IAppHost host)
     {
+        Mikes.CollectionChanged += (_, _) => UpdateGainKnobs();
         _host = host;
         _hub = host.CreateHub();
         // Change handlers save settings; until they are loaded that would overwrite the file with defaults.

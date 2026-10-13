@@ -334,6 +334,23 @@ public class WavReaderTests
 public class MatroskaReaderTests
 {
     [Fact]
+    public void Writer_DurationEndsWhereTheLastBlockEnds()
+    {
+        // 10 blocks of 100 ms: the segment Duration is 1000 ms, not the 900 ms where the last block starts.
+        var ms = new MemoryStream();
+        using (var w = new MatroskaWriter(ms, "t", leaveOpen: true))
+        {
+            var t = w.AddAudio("Pcm", "A_PCM/INT/LIT", 44100, 1, 16);
+            for (var i = 0; i < 10; i++)
+            {
+                w.WriteBlock(t, i * 1_000_000L, new byte[4410 * 2], duration: 1_000_000);
+            }
+        }
+        using var r = new MatroskaReader(new MemoryStream(ms.ToArray()));
+        Assert.Equal(1000, r.Duration.TotalMilliseconds, 1.0);
+    }
+
+    [Fact]
     public void FlacMka_RoundTrip_TracksPacketsAndDecoding()
     {
         var pcm = MediaFixtures.Tone(44100 * 3 + 123, 440);

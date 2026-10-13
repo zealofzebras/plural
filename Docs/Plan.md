@@ -44,7 +44,7 @@
 - [x] UI v1: mic cards, settings, Record All
 - [x] Recording formats (WAV, M4A, MP3, MKA, MKV, MP4), camera video, UI redesign with persisted settings: built, 46 Core tests pass (see [Plural/Recording.md](Plural/Recording.md))
 - [x] Windows video: 1080p30 H.264 verified on Surface arm64 + x64
-- [ ] Hardware test of the new formats and camera with real mics (Windows and Pixel 8); Android camera and AAC not yet run
+- [x] Hardware test of the new formats and camera (Surface: all six formats with pause; Pixel 8: MP4/MKV with pause, front and rear camera; 2026-10-13)
 - [ ] Measure audio-video latency (clap test) and compensate; verify MKV rotation sign in players
 - [ ] Hardware test of the UI with the user
 - [ ] Install a virtual cable (VB-CABLE has ARM64 since Oct 2024) and verify a mic appears in another app
@@ -56,32 +56,34 @@
 - [ ] Own virtual-mic driver (later), Linux platform layer (later)
 
 ## Phase 3c — Tier 1: take library, player, recording reliability → [Plural/Recording.md](Plural/Recording.md)
-Built (2026-10-12); 326 Core tests pass on win-arm64 and win-x64.
+Built (2026-10-12); hardware tests and fixes 2026-10-13. 350 Core tests pass on win-arm64 and win-x64.
 - [x] Take library: scan, `plural.json` sidecar, rename and notes, soft delete with Undo, Recently deleted, purge after 30 days, poster, peaks
 - [x] Managed readers (WAV, Matroska, MP4 progressive and fragmented, MP3) and FLAC decoder; platform decoders (MF, MediaCodec, AudioConverter)
 - [x] `TakePlayer`: audio master clock, per-track gain, mute and solo, remote offsets, video decode with late-frame drop; `VideoLayout` and `SpotlightFollower`
 - [x] Navigation (Recorder, Takes, Player), Takes page, Player page with waveforms and video layout
-- [x] Pause / resume: local, remote (Hello level 2) and CLI `pause`/`resume`
-- [x] Fragmented MP4/M4A writer; Windows AAC priming measured = 0
+- [x] Pause / resume: local, remote (Hello level 2) and CLI `pause`/`resume`; key frame after resume (video gap 34 ms Surface, 42 ms Pixel 8; 2026-10-13)
+- [x] Fragmented MP4/M4A writer; Windows AAC priming measured = 0; Android AAC priming measured = 2048 (Pixel 8, Tab P10)
 - [x] Recovery on launch (`recovered` status, WAV and MKV header repair)
 - [x] Free-space estimate, auto-stop at 200 MB, mic and host battery warnings
 - [x] SmartMike auto-reconnect (backoff 1, 2, 4, 10 s; dropouts in the sidecar)
 - [x] SmartMike button events logged on hardware (single button: short press = `MFB_SINGLE`, used as Record); Record toggle mapped in `MikeHub`
-- [x] Android foreground service (`RecordingService`) with Pause/Stop notification actions, built
+- [x] Android foreground service (`RecordingService`) with Pause/Stop notification actions, built; notification and screen-off recording seen on Pixel 8 (2026-10-13)
 - [ ] Android build of Tier 1 (release APK) — not verified yet
-- [ ] Surface and Pixel 8: take with 2+ mics (one SmartMike) and video, pause and resume, playback with waveforms and synced video, rename, delete, restore
-- [ ] Pixel 8: record 10 min with the screen off, local mic and SmartMike; check the notification and the Pause/Stop actions
+- [ ] Surface and Pixel 8: take with 2+ mics (one SmartMike) and video, pause and resume, playback with waveforms and synced video, rename, delete, restore (2026-10-13: on Pixel 8 takes, Player, rename, delete and undo work; the rest not recorded)
+- [ ] Pixel 8: record 10 min with the screen off, local mic and SmartMike; check the notification and the Pause/Stop actions (2026-10-13: 118 s take incl. 30 s screen-off; 10 min not run)
 - [ ] Android 17: video in the background only when the service started while visible — check and document
-- [ ] Pixel 8: MediaCodec decoders and player (AAC and H.264 playback); measure AAC priming (1024 assumed)
-- [ ] Forced kill during an MP4 take leaves a playable file
+- [x] Measure AAC priming: Android 2048 (Pixel 8, Lenovo Tab P10); Apple still 1024 assumed
+- [ ] Pixel 8: MediaCodec decoders and player (AAC and H.264 playback): the Player works (takes, rename, delete, undo); each codec's playback not separately recorded
+- [x] Forced kill during an MP4 take leaves a playable file (Surface: killed at 8.0 s, 8.05 s video / 7.96 s audio, plays; Pixel 8: force-stop → Recovered)
 - [ ] Check fMP4 in VLC, QuickTime, Windows Media Player/Photos, Android Photos/Files, DaVinci Resolve, Premiere; add a Finalize step only if an editor rejects it
 - [ ] SmartMike reconnect: switch a mic off for 10 s mid-take, then on; clap before and after, track stays aligned
 - [ ] SmartMike Record button starts and stops a real take (button tested; the record path not yet)
-- [ ] Pause with real mics and camera: tracks and video stay aligned after resume
+- [ ] Pause with real mics and camera: tracks and video stay aligned after resume (video gap after resume 34 ms Surface, 42 ms Pixel 8; track alignment not measured)
 - [ ] Free-space auto-stop at 200 MB (dry run on a small disk)
-- [ ] Remote: 3-video take on phone portrait, phone landscape and desktop shows the expected layout; Pause between two devices; "Doesn't support pause" with a level-1 peer
+- [ ] Remote: 3-video take on phone portrait, phone landscape and desktop shows the expected layout; Pause between two devices (verified PC → Pixel 8 over Wi‑Fi, 2026-10-13); "Doesn't support pause" with a level-1 peer
 - [ ] Tablet and desktop Takes and Player layouts with real takes
 - [ ] macOS and iOS: playback decodes compiled only; video needs VideoToolbox (not started)
+- [x] 2026-10-13 fixes (tested): Android video orientation (Pixel 8, front and rear), key frame after resume, MKA/MKV duration, file-name sanitizing, remote pending takes expire after 24 h, Connect mics skips HFP inputs, landscape and mixer layouts (Tab P10, Pixel 8)
 
 ## Phase 4 — Firmware (stretch, risk of bricking)
 - [x] Try to get newer images from the server API — all Sabinetek API servers are offline; device's 0.4.37 is the newest known

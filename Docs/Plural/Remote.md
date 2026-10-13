@@ -13,6 +13,7 @@ Users see device names only. Wi‑Fi and Bluetooth are both searched and the bes
   this device (if a mic is live) and all connected remotes at one scheduled instant; **Stop** stops all, then a toast tracks
   "Collecting files from …" until every remote's files are in.
 - Remote: a banner "Controlled by X" with Disconnect; its Record button belongs to the controller while connected.
+- Connect mics (card, or `ConnectMics`) connects SmartMikes first and skips a SmartMike's Bluetooth headset (HFP) input.
 - "Let other devices control this one" (Devices sheet, default on) makes the app findable and controllable.
 
 ## Take package
@@ -62,7 +63,11 @@ Frames over any duplex stream: `kind u8 · length u32 LE · payload` (JSON, or r
 - **Robustness**: links close after 12 s of silence; the controller reconnects through any endpoint (backoff 2→10 s). A remote keeps
   recording if the controller disappears; a remote still recording a take the controller has ended gets Stop when it reconnects.
   Finished takes stay queued on the remote until TakeAck and are resent after a reconnect (a damaged file fails its hash and is resent).
-  Received files are written as `.part` and renamed when complete.
+  Received files are written as `.part` and renamed when complete. Received names go through `FileNames.Sanitize`; a clash becomes `name_2.ext`.
+- **Pending takes**: a take queued for one controller is dropped when a different controller is accepted (one controller at a time; the files
+  stay in the remote's own library) and expires after 24 h (`RemoteResponder.PendingLifetime`, counted while no controller is connected).
+  The "lost controller" state clears with them. Before this, a controller that never came back (e.g. the CLI, new identity each run) kept
+  the remote showing a lost controller forever.
 
 ## Transports
 | | Wi‑Fi (`LanTransport`, Core) | Bluetooth (`BluetoothRemoteTransport` + `IBluetoothServicePlatform`) |
@@ -78,11 +83,14 @@ in the OS Bluetooth settings first, as with SmartMikes; there is no in-app Bluet
 ## Testing
 - `Plural.Core.Tests/RemoteTests.cs`: two networks over loopback (approve, decline, clock, start, files + hash, manifest, zip,
   resend after reconnect) and a real `LanTransport` discovery + TCP test.
-- CLI: `smartmike serve --input Microphone --name X` (auto-allows), `smartmike control --record 3 --peer X`, `smartmike search`.
+- CLI: `plural serve --input Microphone --name X` (auto-allows), `plural control --record 3 --peer X`, `plural search`;
+  `control --connect-mics` and `control --pause AT:SECONDS` (repeatable).
 
-## Status (2026-10-12)
-Tier 1 (2026-10-12): Hello `level` = 2, Pause/Resume, RecordRequest and the "Doesn't support pause" flag are built. Not yet run
-between two devices.
+## Status (2026-10-13)
+Tier 1: Hello `level` = 2, Pause/Resume, RecordRequest and the "Doesn't support pause" flag are built. Pause/Resume verified between
+two devices (2026-10-13, below); RecordRequest not yet.
+2026-10-13, Surface (CLI) controls Pixel 8 over Wi‑Fi: start 3–19 ms after schedule, pause and resume on schedule, files received in
+~0.2–0.35 s. Video over Bluetooth is too slow to transfer (expected, see throughput below).
 Verified over Wi‑Fi between a Surface (arm64, CLI) and a Pixel 8 (Android 17, app):
 - PC controls phone: found in ~100 ms, approval dialog, start +6…19 ms vs. schedule (±5 ms clock), 5 s WAV synced in 373 ms.
 - Phone controls PC: Devices sheet search, remote card, Record/Stop from the phone, "Take complete · 2 devices"; package holds
@@ -100,6 +108,7 @@ Verified over Wi‑Fi between a Surface (arm64, CLI) and a Pixel 8 (Android 17, 
   longer than the shared start (a SmartMike that is off times out after several seconds).
 
 **Not yet tested**: the desktop app as remote/controller through its UI, two remotes at once, reconnect during a real take,
-Pause/Resume and mic-button RecordRequest between two devices, a level-1 peer ("Doesn't support pause").
+mic-button RecordRequest between two devices, a level-1 peer ("Doesn't support pause").
 Open: Android 17 may need a local-network permission if the target SDK is raised. An Android remote that is being controlled runs in
-the foreground service (`RecordingService`, untested on a phone); before that it had to stay open on screen.
+the foreground service (`RecordingService`: verified on Pixel 8 for local takes; whether it keeps a controlled take going with the screen
+off is not recorded); before that it had to stay open on screen.
