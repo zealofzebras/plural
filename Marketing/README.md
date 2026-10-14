@@ -119,9 +119,40 @@ Version numbers come from the tag: `v1.2.3` gives version 1.2.3, Android version
 1.2.3.0. Running the workflow by hand (Actions → Release → Run workflow) builds everything as run artifacts without
 touching a release or submitting to a store. GitHub prereleases also do not submit to Microsoft Store.
 
+Currently only Android files and the Google Play store ZIP are attached to releases. Windows builds remain available
+as workflow artifacts; Windows release uploads and Microsoft Store submissions are temporarily disabled.
+
+## Google Play publishing
+
+Stable GitHub releases automatically submit the signed AAB, localized listing text, release notes, icons, feature
+graphics and screenshots to Google Play. Manual workflow runs and prereleases build artifacts without submitting.
+The default target is the **internal testing** track with release status `completed`, not public production.
+Set `GOOGLE_PLAY_TRACK` to `production` when ready, or `GOOGLE_PLAY_RELEASE_STATUS` to `draft` for manual review.
+Submission success means the Play edit was committed, not that Google's review has passed or publication is immediate.
+Existing listing languages and image types with no generated replacements are retained.
+
+Authentication uses GitHub OIDC and Google Workload Identity Federation with service account impersonation. No service
+account JSON key or downloaded ADC file is needed: `google-github-actions/auth` creates temporary ADC credentials for
+the Google API client. Configure the provider with issuer `https://token.actions.githubusercontent.com`, default
+audience, `google.subject = assertion.sub` and `attribute.repository = assertion.repository`. Restrict the provider
+condition to your repository and release tags, preferably also using immutable repository and owner IDs.
+Grant matching identities `roles/iam.workloadIdentityUser` on the publishing service account.
+
+Enable the Google Play Android Developer API in Google Cloud. Invite the service account email in Play Console and
+grant access to `net.getplural.app`, including listing management and release permissions for the selected track.
+Complete the initial Play Console setup, Play App Signing, declarations and a first manual signed AAB upload before
+using API publishing. The GitHub signing secrets must contain the registered **upload key**, not Google's app-signing
+key. The Android build fails if any signing secret is missing; private temporary key/password files are removed after
+the build even on failure. Both APK and AAB include native CELT and LAME libraries for arm64 and x64.
+
+The publisher validates the uploaded versionCode, updates a single edit, validates it, then commits it. Failed uploads
+abandon the edit without publishing. Use a new version tag for each new Play upload: versionCodes cannot be reused.
+Draft-only apps may require `GOOGLE_PLAY_RELEASE_STATUS=draft` until their first release is configured.
+
 ## Microsoft Store publishing
 
-Stable GitHub releases automatically run the `microsoft-store` job after the Windows build and store assets succeed.
+The `microsoft-store` job is temporarily disabled while Android publishing is verified. When re-enabled, stable GitHub
+releases run it after the Windows build and store assets succeed.
 It reuses any existing editable draft (`PendingCommit`), including a draft created in Partner Center. If no pending
 submission exists, it creates a new one. It never deletes submissions. An existing submission in certification or
 publishing cannot be edited: a rerun of the same release checks its status; a different release fails without changing it.
@@ -170,8 +201,9 @@ Store tooling tests: `python -m unittest discover -s Tools/store -p test_store_a
 
 ## Release workflow secrets
 
-Signing secrets are optional for building. Stable releases require the Microsoft Store credentials for submission;
-without them the submission job fails, while the other jobs still produce their artifacts.
+Android builds require all four upload-key secrets. Other platform signing secrets are optional for building.
+Stable Android submissions require the WIF variables below, not a service account key secret. Microsoft Store
+credentials will be required for stable submissions once that job is re-enabled.
 Add secrets under Settings → Secrets and variables → Actions.
 
 | Secret | Needed for |
@@ -186,6 +218,10 @@ Add secrets under Settings → Secrets and variables → Actions.
 
 | Variable | Needed for |
 |---|---|
+| `GCP_WORKLOAD_IDENTITY_PROVIDER` | Full WIF provider name: `projects/PROJECT_NUMBER/locations/global/workloadIdentityPools/POOL/providers/PROVIDER` |
+| `GCP_PLAY_SERVICE_ACCOUNT` | Google Play publishing service account email |
+| `GOOGLE_PLAY_TRACK` | Optional Play release track; defaults to `internal` |
+| `GOOGLE_PLAY_RELEASE_STATUS` | Optional `completed` (default) or `draft` |
 | `MSSTORE_IDENTITY_NAME`, `MSSTORE_PUBLISHER`, `MSSTORE_PUBLISHER_DISPLAY_NAME` | The MSIX identity. Copy them from Partner Center → Product identity. They override `store.toml` |
 | `MSSTORE_APP_ID` | Microsoft Store ID of Plural, from Partner Center Product identity |
 | `MSSTORE_TENANT_ID`, `MSSTORE_CLIENT_ID` | Entra tenant and application IDs associated with Partner Center |

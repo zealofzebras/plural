@@ -7,8 +7,75 @@ from urllib.parse import parse_qs
 import zipfile
 from unittest.mock import Mock, patch
 
+from google_play import PACKAGE_NAME, publish as publish_google_play
 from microsoft_store import IMAGE_TYPES, StoreClient, prepare_submission, publish, safe_message, wait_for_commit, write_archive
 from store_assets import LIMITS, load_texts, Report, render_logo, validate, windows_listing
+
+
+class GooglePlayTests(unittest.TestCase):
+    def setUp(self):
+        self.directory = tempfile.TemporaryDirectory()
+        self.addCleanup(self.directory.cleanup)
+        self.assets = Path(self.directory.name)
+        self.locale = self.assets / "metadata" / "android" / "en-US"
+        (self.locale / "changelogs").mkdir(parents=True)
+        for filename, text in (("title.txt", "Plural"), ("short_description.txt", "Record audio"),
+                               ("full_description.txt", "Record independent tracks"), ("changelogs/1020300.txt", "Fixes")):
+            (self.locale / filename).write_text(text, encoding="utf-8")
+        (self.locale / "images" / "phoneScreenshots").mkdir(parents=True)
+        (self.locale / "images" / "icon.png").write_bytes(b"icon")
+        (self.locale / "images" / "phoneScreenshots" / "01.png").write_bytes(b"screenshot")
+        self.package = self.assets / "app.aab"
+        self.package.write_bytes(b"bundle")
+        self.service = Mock()
+        self.edits = self.service.edits.return_value
+        self.edits.insert.return_value.execute.return_value = {"id": "edit-1"}
+        self.upload = self.edits.bundles.return_value.upload.return_value
+        self.upload.next_chunk.side_effect = [(None, None), (None, {"versionCode": 1020300})]
+
+    def submit(self):
+        return publish_google_play(self.service, self.assets, self.package, 1020300, "1.2.3",
+                                   "internal", "completed", Mock())
+
+    def test_uploads_bundle_listing_images_and_commits_internal_release(self):
+        self.assertEqual(self.submit(), "edit-1")
+        self.assertEqual(self.upload.next_chunk.call_count, 2)
+        self.edits.listings.return_value.update.assert_called_once_with(
+            packageName=PACKAGE_NAME, editId="edit-1", language="en-US",
+            body={"title": "Plural", "shortDescription": "Record audio", "fullDescription": "Record independent tracks"})
+        self.assertEqual(self.edits.images.return_value.upload.call_count, 2)
+        self.assertEqual(self.edits.images.return_value.deleteall.call_count, 2)
+        self.edits.tracks.return_value.update.assert_called_once_with(
+            packageName=PACKAGE_NAME, editId="edit-1", track="internal",
+            body={"track": "internal", "releases": [{"name": "1.2.3", "versionCodes": ["1020300"],
+                  "status": "completed", "releaseNotes": [{"language": "en-US", "text": "Fixes"}]}]})
+        self.edits.validate.assert_called_once_with(packageName=PACKAGE_NAME, editId="edit-1")
+        self.edits.commit.assert_called_once_with(packageName=PACKAGE_NAME, editId="edit-1")
+        self.edits.delete.assert_not_called()
+
+    def test_upload_failure_abandons_edit_without_committing(self):
+        self.upload.next_chunk.side_effect = RuntimeError("upload failed")
+        with self.assertRaisesRegex(RuntimeError, "upload failed"):
+            self.submit()
+        self.edits.delete.assert_called_once_with(packageName=PACKAGE_NAME, editId="edit-1")
+        self.edits.commit.assert_not_called()
+
+    def test_wrong_bundle_version_abandons_edit(self):
+        self.upload.next_chunk.side_effect = [(None, {"versionCode": 1})]
+        with self.assertRaisesRegex(ValueError, "versionCode"):
+            self.submit()
+        self.edits.delete.assert_called_once()
+        self.edits.tracks.return_value.update.assert_not_called()
+
+    def test_missing_package_or_long_notes_fails_before_creating_edit(self):
+        self.package.unlink()
+        with self.assertRaises(ValueError):
+            self.submit()
+        self.package.write_bytes(b"bundle")
+        (self.locale / "changelogs" / "1020300.txt").write_text("x" * 501, encoding="utf-8")
+        with self.assertRaisesRegex(ValueError, "500"):
+            self.submit()
+        self.edits.insert.assert_not_called()
 
 
 class SharedLogoTests(unittest.TestCase):
