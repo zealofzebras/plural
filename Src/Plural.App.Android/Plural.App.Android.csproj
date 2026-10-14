@@ -10,7 +10,7 @@
     <ApplicationId>net.getplural.app</ApplicationId>
     <ApplicationVersion>1</ApplicationVersion>
     <ApplicationDisplayVersion>0.1</ApplicationDisplayVersion>
-    <AndroidPackageFormat>apk</AndroidPackageFormat>
+    <AndroidPackageFormats>apk</AndroidPackageFormats>
     <AndroidEnableProfiledAot>false</AndroidEnableProfiledAot>
     <RuntimeIdentifiers>android-arm64;android-x64</RuntimeIdentifiers>
   </PropertyGroup>

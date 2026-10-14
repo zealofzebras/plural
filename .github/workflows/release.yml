@@ -363,7 +363,7 @@ jobs:
             -p:ApplicationDisplayVersion="$VERSION" -p:Version="$VERSION" "${signing[@]}"
           pub=Src/Plural.App.Android/bin/Release/net10.0-android/publish
           mkdir -p out/dist
-          cp "$pub/net.getplural.app-Signed.apk" "out/dist/Plural-$VERSION-android.apk"
+          cp "$pub/../net.getplural.app-Signed.apk" "out/dist/Plural-$VERSION-android.apk"
           cp "$pub/net.getplural.app-Signed.aab" "out/dist/Plural-$VERSION-android.aab"
       - name: Remove upload key
         if: always()
