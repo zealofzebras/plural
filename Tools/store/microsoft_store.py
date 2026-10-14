@@ -25,7 +25,7 @@ SENSITIVE_VALUES: list[str] = []
 IMAGE_TYPES = {
     "StoreLogo-300x300.png": "Icon",
     "BoxArt-1080x1080.png": "StoreLogoSquare",
-    "Poster-720x1080.png": "PromotionalArtwork2x3",
+    "Poster-720x1080.png": "PromotionalArtwork",
     "Hero-1920x1080.png": "PromotionalArt16x9",
 }
 TEXT_FIELDS = {

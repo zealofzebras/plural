@@ -135,7 +135,7 @@ jobs:
           if-no-files-found: error
 
   native:
-    name: Native libraries (Windows, Android)
+    name: Native libraries (Windows)
     needs: plan
     runs-on: ubuntu-24.04
     steps:
@@ -150,13 +150,18 @@ jobs:
           echo "$LLVM_MINGW_SHA256  llvm-mingw.tar.xz" | sha256sum -c -
           mkdir -p "$RUNNER_TEMP/llvm-mingw"
           tar -xJf llvm-mingw.tar.xz -C "$RUNNER_TEMP/llvm-mingw" --strip-components=1
-          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install "ndk;$ANDROID_NDK_VERSION" > /dev/null
       - name: CELT
         env:
           CELT_SRC: ${{ runner.temp }}/src/celt-0.7.1
           LLVM_MINGW: ${{ runner.temp }}/llvm-mingw
         run: |
           bash Native/celt/build-windows.sh
+      - name: Android native libraries
+        if: ${{ false }}
+        env:
+          CELT_SRC: ${{ runner.temp }}/src/celt-0.7.1
+        run: |
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install "ndk;$ANDROID_NDK_VERSION" > /dev/null
           ANDROID_NDK="$ANDROID_HOME/ndk/$ANDROID_NDK_VERSION" bash Native/celt/build-android.sh
       - uses: actions/upload-artifact@v7
         with:
@@ -294,6 +299,7 @@ jobs:
   android:
     name: Android (APK, AAB)
     needs: [plan, native]
+    if: ${{ false }}
     runs-on: ubuntu-24.04
     env:
       VERSION: ${{ needs.plan.outputs.version }}
@@ -354,7 +360,7 @@ jobs:
   macos:
     name: macOS (arm64, x64)
     needs: [plan, store-assets]
-    if: ${{ !cancelled() && needs.store-assets.result == 'success' }}
+    if: ${{ false && !cancelled() && needs.store-assets.result == 'success' }}
     runs-on: macos-15
     env:
       VERSION: ${{ needs.plan.outputs.version }}
@@ -483,7 +489,7 @@ jobs:
   ios:
     name: iOS
     needs: [plan]
-    if: needs.plan.outputs.has_ios == 'true'
+    if: ${{ false && needs.plan.outputs.has_ios == 'true' }}
     # The .NET iOS workload tracks the newest Xcode (27.x), which only the xcode-27 image has.
     runs-on: xcode-27
     env:
@@ -560,7 +566,7 @@ jobs:
   publish:
     name: Store packages and release upload
     needs: [plan, store-assets, windows, android, macos, ios]
-    if: ${{ !cancelled() && needs.plan.result == 'success' && needs.store-assets.result == 'success' }}
+    if: ${{ false && !cancelled() && needs.plan.result == 'success' && needs.store-assets.result == 'success' }}
     runs-on: ubuntu-24.04
     permissions:
       contents: write

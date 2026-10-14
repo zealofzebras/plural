@@ -134,6 +134,22 @@ class MicrosoftSubmissionTests(unittest.TestCase):
             self.assertIn(image["fileName"], files)
         self.assertEqual(len(files), 11)
 
+    def test_uploaded_images_use_documented_api_types(self):
+        body, files = prepare_submission(self.template, self.cfg, self.assets, self.package)
+        expected = {
+            "desktop_01.png": "Screenshot",
+            "StoreLogo-300x300.png": "Icon",
+            "BoxArt-1080x1080.png": "StoreLogoSquare",
+            "Poster-720x1080.png": "PromotionalArtwork",
+            "Hero-1920x1080.png": "PromotionalArt16x9",
+        }
+        for locale, listing in body["listings"].items():
+            with self.subTest(locale=locale):
+                uploaded = {files[image["fileName"]].name: image["imageType"]
+                            for image in listing["baseListing"]["images"]
+                            if image["fileStatus"] == "PendingUpload"}
+                self.assertEqual(uploaded, expected)
+
     def test_empty_initial_draft_and_regional_unavailability_are_preserved(self):
         template = {"listings": None, "applicationPackages": None,
                     "pricing": {"priceId": "Free", "marketSpecificPricings": {"US": "Tier2", "CA": "NotAvailable"}}}
