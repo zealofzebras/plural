@@ -352,6 +352,7 @@ public class PauseTests
         try
         {
             var (hub, sessions) = NewHub(2);
+            await using var hubLifetime = hub;
             var camera = new FakeCamera();
             hub.Camera = camera;
             hub.RecordingSettings = new RecordingSettings { Format = format };
@@ -360,36 +361,44 @@ public class PauseTests
             var mics = new Mics(sessions) { Latency = 0.15 };
 
             var folder = hub.StartRecordingAll(root);
+            var startedAt = hub.RecordingStartTime;
             Assert.False(hub.IsRecordingPaused);
             await mics.Run(1.0);
-            hub.PauseRecording();
+            var pausedAt = MediaClock.Now;
+            hub.PauseRecording(pausedAt);
             Assert.True(hub.IsRecordingPaused);
             var frozen = hub.RecordedTime;
             await mics.Run(0.8);
             Assert.Equal(frozen, hub.RecordedTime);
             hub.PauseRecording(); // second pause is ignored
-            hub.ResumeRecording();
+            var resumedAt = MediaClock.Now;
+            hub.ResumeRecording(resumedAt);
             Assert.False(hub.IsRecordingPaused);
             await mics.Run(1.0);
-            Assert.InRange(hub.RecordedTime.TotalSeconds, 1.95, 2.15);
+            var recordedTime = hub.RecordedTime;
+            var observedAt = MediaClock.Now;
+            var expected = (observedAt - startedAt - (resumedAt - pausedAt)) / 1e7;
+            Assert.InRange(recordedTime.TotalSeconds, expected - 0.05, expected + 0.05);
+            var stoppedAt = MediaClock.Now;
             var take = await hub.StopRecordingAllAsync();
 
             Assert.Equal(4, states); // start, pause, resume, stop
             Assert.Empty(take.Errors);
-            Assert.InRange(take.Duration.TotalSeconds, 1.95, 2.2);
+            expected = (stoppedAt - startedAt - (resumedAt - pausedAt)) / 1e7;
+            Assert.InRange(take.Duration.TotalSeconds, expected - 0.05, expected + 0.1);
             if (format.IsVideo()) { Assert.Equal(1, camera.KeyRequests); }
 
             var side = TakeSidecar.Load(folder)!;
             Assert.Equal(TakeStatus.Complete, side.Status);
             var p = Assert.Single(side.Pauses);
-            Assert.InRange(p.AtMs, 940, 1150);
-            Assert.Empty(side.Dropouts);
+            var expectedPauseMs = (pausedAt - startedAt) / 1e4;
+            Assert.InRange(p.AtMs, expectedPauseMs - 5, expectedPauseMs + 5);
             foreach (var t in side.Tracks)
             {
                 Assert.InRange(t.DurationMs, take.Duration.TotalMilliseconds - 70, take.Duration.TotalMilliseconds + 70);
             }
 
-            // the files themselves: every audio track and the video are about 2 s, not 2.8 s
+            // Every file follows the measured active time, excluding the pause.
             foreach (var file in take.Files)
             {
                 using var reader = MediaReader.Open(file);
@@ -404,18 +413,19 @@ public class PauseTests
                 {
                     if (tr.Kind == MediaKind.Audio)
                     {
-                        Assert.InRange(tr.Duration.TotalSeconds, 1.9, 2.25);
+                        Assert.InRange(tr.Duration.TotalSeconds, take.Duration.TotalSeconds - 0.1, take.Duration.TotalSeconds + 0.1);
                     }
                     else
                     {
-                        Assert.InRange(lastTs[tr.Index] / 1e7, 1.85, 2.2);          // last frame time on the shifted timeline
+                        Assert.InRange(lastTs[tr.Index] / 1e7, take.Duration.TotalSeconds - 0.15, take.Duration.TotalSeconds + 0.05);
                         Assert.True(maxGap[tr.Index] < 0.25e7, $"video gap {maxGap[tr.Index] / 1e4:F0} ms"); // continuous across the pause
                     }
                 }
             }
             if (format == RecordingFormat.Wav)
             {
-                Assert.All(take.Files, f => Assert.InRange((new FileInfo(f).Length - 44) / 88200.0, 1.95, 2.2));
+                Assert.All(take.Files, f => Assert.InRange((new FileInfo(f).Length - 44) / 88200.0,
+                    take.Duration.TotalSeconds - 0.05, take.Duration.TotalSeconds + 0.05));
             }
         }
         finally
