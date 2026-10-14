@@ -13,3 +13,4 @@ Native/celt/runtimes/
 out/
 Native/lame/runtimes/osx-*/
 Native/lame/runtimes/ios/
+publish.log

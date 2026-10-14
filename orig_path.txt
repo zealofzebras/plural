@@ -1,0 +1,1 @@
+C:\Program Files\dotnet\packs\Microsoft.Android.Sdk.Windows\35.0.105\tools\proguard-android.txt

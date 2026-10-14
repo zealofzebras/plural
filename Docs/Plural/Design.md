@@ -78,6 +78,7 @@ macOS: AudioServerPlugIn (BlackHole-style). Linux: PipeWire virtual source per m
 - The screen stays on only while the Recorder page is visible (`SetKeepScreenOn`).
 - Decoders for playback: MediaCodec (`AndroidAudioDecoderFactory`, `AndroidVideoDecoderFactory`). Takes, Player, rename, delete and undo work on Pixel 8; the video decode path is not separately recorded.
 - min Android 8.0 (API 26); 16 KB-page-aligned native lib for Android 15+.
+- Release builds use R8 to shrink and optimize Java/DEX code and include the mapping in the AAB. `EnableAndroidR8Optimization` copies the workload's default rules into `obj/`, removing only `-dontoptimize`; obfuscation remains disabled and JNI/generated keep rules are retained. With Android workload 36.1.43, optimized DEX is 2,104,424 bytes (2.01 MiB), smaller than the shrink-only build. APK/AAB builds and 350 core tests pass; the optimized release still needs phone testing. Managed trimming/AOT and native libraries are separate from Play's DEX score.
 
 ## Mixer mode
 - A layout next to the cards (bottom-bar **Mixer** chip, switchable at any time, also mid-take), independent of Audio/Video: the

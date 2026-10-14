@@ -96,8 +96,8 @@ switch (cmd)
         return 0;
     default:
         Console.WriteLine("usage: plural list | outputs | inputs | cameras | formats | search");
-        Console.WriteLine("       plural serve [--input NAME]... [--name NAME]");
-        Console.WriteLine("       plural control [--record SECONDS] [--peer NAME] [--video] [--connect-mics] [--pause AT:SECONDS]...");
+        Console.WriteLine("       plural serve [--input NAME]... [--name NAME] [--platform NAME]");
+        Console.WriteLine("       plural control [--record SECONDS] [--peer NAME] [--name NAME] [--platform NAME] [--video] [--connect-mics] [--pause AT:SECONDS]...");
         Console.WriteLine("       plural " + RunCommand.Usage.TrimStart());
         Console.WriteLine("       plural mcp [MAC...] [run options]   MCP server on stdin/stdout (logs on stderr) for AI clients");
         Console.WriteLine(RunCommand.ConsoleHelp);
@@ -122,7 +122,7 @@ async Task<int> Serve(string[] a)
     var root = Path.Combine(AppContext.BaseDirectory, "Recordings", "remote");
     var recorder = new CliRecorder(hub, root);
     var name = OptOf(a, "--name") ?? Environment.MachineName + " (cli)";
-    await using var net = new RemoteNetwork(new RemoteIdentity(Guid.NewGuid().ToString("N"), name, platform), Transports(), recorder);
+    await using var net = new RemoteNetwork(new RemoteIdentity(Guid.NewGuid().ToString("N"), name, OptOf(a, "--platform") ?? platform), Transports(), recorder);
     recorder.Net = net;
     net.StartListening();
     Console.WriteLine($"serving as \"{name}\" — Ctrl+C to stop");
@@ -144,7 +144,8 @@ async Task<int> Control(string[] a)
     var seconds = OptOf(a, "--record") is { } r ? double.Parse(r, System.Globalization.CultureInfo.InvariantCulture) : 3;
     var want = OptOf(a, "--peer");
     var recorder = new CliRecorder(hub, Path.GetTempPath());
-    await using var net = new RemoteNetwork(new RemoteIdentity(Guid.NewGuid().ToString("N"), Environment.MachineName + " (controller)", platform), Transports(), recorder);
+    await using var net = new RemoteNetwork(new RemoteIdentity(Guid.NewGuid().ToString("N"),
+        OptOf(a, "--name") ?? Environment.MachineName + " (controller)", OptOf(a, "--platform") ?? platform), Transports(), recorder);
     recorder.Net = net;
     var found = new TaskCompletionSource<DiscoveredPeer>(TaskCreationOptions.RunContinuationsAsynchronously);
     var sw = System.Diagnostics.Stopwatch.StartNew();

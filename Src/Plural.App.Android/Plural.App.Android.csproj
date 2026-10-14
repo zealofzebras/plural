@@ -15,6 +15,10 @@
     <RuntimeIdentifiers>android-arm64;android-x64</RuntimeIdentifiers>
   </PropertyGroup>
 
+  <PropertyGroup Condition="'$(Configuration)' == 'Release'">
+    <AndroidLinkTool>r8</AndroidLinkTool>
+  </PropertyGroup>
+
   <ItemGroup>
     <AndroidResource Include="Icon.png">
       <Link>Resources\drawable\Icon.png</Link>
@@ -44,4 +48,24 @@
     <ProjectReference Include="..\Plural.App\Plural.App.csproj" />
     <ProjectReference Include="..\Plural.Platform.Android\Plural.Platform.Android.csproj" />
   </ItemGroup>
+
+  <Target Name="EnableAndroidR8Optimization" AfterTargets="_CalculateProguardConfigurationFiles"
+          Condition="'$(Configuration)' == 'Release' And '$(AndroidLinkTool)' == 'r8'">
+    <ItemGroup>
+      <_PluralProguardDefaults Include="@(_ProguardConfiguration)"
+                              Condition="'%(Filename)%(Extension)' == 'proguard-android.txt'" />
+    </ItemGroup>
+    <ReadLinesFromFile File="%(_PluralProguardDefaults.Identity)">
+      <Output TaskParameter="Lines" ItemName="_PluralProguardOptimizedRules" />
+    </ReadLinesFromFile>
+    <ItemGroup>
+      <_PluralProguardOptimizedRules Remove="-dontoptimize" />
+    </ItemGroup>
+    <WriteLinesToFile File="$(IntermediateOutputPath)proguard\proguard_android_optimize.cfg"
+                      Lines="@(_PluralProguardOptimizedRules)" Overwrite="true" WriteOnlyWhenDifferent="true" />
+    <ItemGroup>
+      <_ProguardConfiguration Remove="@(_PluralProguardDefaults)" />
+      <_ProguardConfiguration Include="$(IntermediateOutputPath)proguard\proguard_android_optimize.cfg" />
+    </ItemGroup>
+  </Target>
 </Project>
