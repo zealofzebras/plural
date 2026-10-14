@@ -1,0 +1,5 @@
+First release of Plural.
+
+Record multiple SmartMike+ and built-in or USB microphones with separate tracks and a shared mix. Adjust levels, mute channels and monitor audio. Record WAV, FLAC, MP3, or audio/video in Matroska and MP4. Browse, play and share recordings, and connect Plural devices over Wi-Fi.
+
+Windows and Android are the primary tested platforms. macOS and iOS are untested on hardware; direct SmartMike+ connections on iOS require MFi support.

@@ -1,5 +1,5 @@
 # Builds Plural for every platform when a GitHub release is published, generates store listings and images
-# from Marketing/, and attaches the apps and the ready-to-submit store packages to the release.
+# from Marketing/, attaches release files, and submits stable Windows releases to Microsoft Store.
 # Secrets and variables: see Marketing/README.md ("Release workflow").
 name: Release
 
@@ -110,6 +110,8 @@ jobs:
         with:
           python-version: "3.12"
       - run: pip install "pillow==11.3.0"
+      - name: Store tooling tests
+        run: python -m unittest discover -s Tools/store -p test_store_assets.py -v
       - name: Inter font
         run: |
           curl -fsSL -o inter.zip "$INTER_URL"
@@ -243,6 +245,51 @@ jobs:
           name: windows
           path: out/dist
           if-no-files-found: error
+
+  microsoft-store:
+    name: Microsoft Store submission
+    needs: [plan, windows, store-assets]
+    if: ${{ !cancelled() && needs.plan.result == 'success' && needs.windows.result == 'success' && needs.store-assets.result == 'success' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    concurrency:
+      group: microsoft-store-publishing
+      cancel-in-progress: false
+    env:
+      VERSION: ${{ needs.plan.outputs.version }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - uses: actions/download-artifact@v8
+        with:
+          name: windows
+          path: in/windows
+      - uses: actions/download-artifact@v8
+        with:
+          name: store-assets
+          path: in/store-assets
+      - name: Prepare submission
+        run: >
+          python Tools/store/microsoft_store.py --assets in/store-assets/windows
+          --package "in/windows/Plural-$VERSION.msixbundle" --version "$VERSION" --prepare-only
+      - name: Submit to Microsoft Store
+        if: github.event_name == 'release' && !github.event.release.prerelease
+        env:
+          MSSTORE_APP_ID: ${{ vars.MSSTORE_APP_ID }}
+          MSSTORE_TENANT_ID: ${{ vars.MSSTORE_TENANT_ID }}
+          MSSTORE_CLIENT_ID: ${{ vars.MSSTORE_CLIENT_ID }}
+          MSSTORE_CLIENT_SECRET: ${{ secrets.MSSTORE_CLIENT_SECRET }}
+        run: >
+          python Tools/store/microsoft_store.py --assets in/store-assets/windows
+          --package "in/windows/Plural-$VERSION.msixbundle" --version "$VERSION"
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: microsoft-submission
+          path: out/microsoft-submission
+          if-no-files-found: warn
 
   android:
     name: Android (APK, AAB)

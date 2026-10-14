@@ -48,3 +48,19 @@ windows = ["desktop", 3840, 2160]        # Microsoft Store, 16:9 4K
 identity_name = "Plural"
 publisher = "CN=Plural"
 publisher_display_name = "Plural"
+
+[microsoft.submission]
+visibility = "Public"
+targetPublishMode = "Immediate"
+hardwarePreferences = ["Keyboard", "Mouse", "Camera"]
+automaticBackupEnabled = false
+canInstallOnRemovableMedia = true
+isGameDvrEnabled = false
+hasExternalInAppProducts = false
+meetAccessibilityGuidelines = false
+notesForCertification = "Plural is a desktop audio/video recorder. No login or purchase is required. Test recording and playback with a built-in or USB microphone; SmartMike+ Bluetooth hardware is optional. Microphone and camera access are used only for recording. The runFullTrust capability is needed for the desktop application's native audio, camera and Bluetooth APIs."
+
+[microsoft.submission.pricing]
+priceId = "Free"
+trialPeriod = "NoFreeTrial"
+marketSpecificPricings = {}

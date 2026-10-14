@@ -96,6 +96,12 @@ def load_texts(locale: str, release_notes_fallback: str, rep: Report) -> dict:
     t["captions"] = read_lines(locale, "captions")
     if not t["release_notes"]:
         t["release_notes"] = release_notes_fallback.strip() or "Bug fixes and improvements."
+        limit = LIMITS["release_notes"]
+        if len(t["release_notes"]) > limit:
+            prefix = t["release_notes"][:limit - 3].rsplit(" ", 1)[0].rstrip()
+            t["release_notes"] = prefix + "..."
+            rep.warnings.append(f"{locale}: GitHub release notes shortened to {limit} characters for stores; "
+                                "use release_notes.txt for a custom store summary")
         if not release_notes_fallback.strip():
             rep.warnings.append(f"{locale}: release_notes.txt is empty and no release body was given; "
                                 "using \"Bug fixes and improvements.\"")

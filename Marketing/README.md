@@ -20,7 +20,7 @@ To change the store text, edit a `.txt` file and publish a release. You don't ne
 | `<locale>/promotional_text.txt` | App Store promotional text (you can change it without a new version) | 170 |
 | `<locale>/keywords.txt` | App Store keywords, comma-separated with no spaces after commas. The first 7 become Microsoft Store search terms (30 characters each) | 100 |
 | `<locale>/features.txt` | Microsoft Store product features, one per line | 20 × 200 |
-| `<locale>/release_notes.txt` | "What's new". If empty, the GitHub release text is used | 500 |
+| `<locale>/release_notes.txt` | "What's new". If empty, the GitHub release text is used, shortened to fit with a warning | 500 |
 | `<locale>/captions.txt` | Screenshot captions, one per line, in the same order as the screenshots | ~40 |
 | `screenshots/phone/` | Portrait phone captures (Android) | |
 | `screenshots/tablet/` | Portrait tablet captures (the phone captures are used if this is empty) | |
@@ -29,6 +29,10 @@ To change the store text, edit a `.txt` file and publish a release. You don't ne
 The build stops with an error if a field is over its limit, or if the name, subtitle or keywords contain
 "SmartMike" or "Sabinetek". Third-party trademarks are only allowed in the description. Apple rejects them
 in keywords, and Google flags them in titles.
+
+GitHub release bodies can be longer than the stores' shared 500-character limit. When used as the fallback for an
+empty `release_notes.txt`, they are shortened at a word boundary with `...` and a build warning. The GitHub release
+itself is unchanged. Explicitly authored `release_notes.txt` files still fail validation if they exceed the limit.
 
 ### Adding a language
 
@@ -113,15 +117,64 @@ file per Partner Center field.
 
 Version numbers come from the tag: `v1.2.3` gives version 1.2.3, Android versionCode / Apple build 1020300, and MSIX
 1.2.3.0. Running the workflow by hand (Actions → Release → Run workflow) builds everything as run artifacts without
-touching a release.
+touching a release or submitting to a store. GitHub prereleases also do not submit to Microsoft Store.
+
+## Microsoft Store publishing
+
+Stable GitHub releases automatically run the `microsoft-store` job after the Windows build and store assets succeed.
+It reuses any existing editable draft (`PendingCommit`), including a draft created in Partner Center. If no pending
+submission exists, it creates a new one. It never deletes submissions. An existing submission in certification or
+publishing cannot be edited: a rerun of the same release checks its status; a different release fails without changing it.
+
+Each submission replaces the Windows packages, localized names/descriptions, short descriptions, features, keywords,
+release notes, copyright, screenshots, Store logos and promotional art with the generated `windows/` assets. Marketing
+locale directories are authoritative for the listing languages; obsolete listing languages are removed.
+`store.toml` owns the category and `[microsoft.submission]` settings: free pricing, visibility, immediate publication,
+hardware preferences, declarations, and certification notes. Do not claim accessibility compliance without testing it.
+Age ratings, market availability and unsupported properties are retained from the existing submission.
+
+The job uploads a ZIP to the Store-provided Azure Blob URL, commits the submission, and waits up to 20 minutes for
+commit validation. Success means Microsoft accepted the submission for processing, **not** that certification passed.
+Microsoft publishes automatically after certification. The job summary records the submission ID and status; the
+`microsoft-submission` artifact contains the upload ZIP and JSON, with no credentials or SAS upload URLs.
+Missing credentials, missing screenshots, upload failures and commit errors fail the job rather than silently skipping it.
+
+### One-time Microsoft requirements
+
+The [MSIX submission API](https://learn.microsoft.com/en-us/windows/uwp/monetize/manage-app-submissions) cannot complete
+the age-rating questionnaire or bootstrap an app that has only a reserved name. Microsoft documents an initial
+completed Partner Center submission as a prerequisite. This workflow will try an existing initial draft, but Microsoft
+may reject its update or commit until the prerequisites are satisfied; it cannot bypass those service restrictions.
+If CI takes over a draft, do not also edit it in Partner Center while the job is running.
+
+The MSIX API also ignores the old `privacyPolicy`, `supportContact`, and `websiteUrl` listing fields. Set these once
+on Partner Center's Properties page to the `[app]` URLs in `store.toml`. Market selection and age ratings must likewise
+be configured in Partner Center; the workflow preserves them. Pricing Version 2 is not supported by this API's pricing
+module, so accounts using it must retain pricing in Partner Center instead of sending `[microsoft.submission.pricing]`.
+
+Associate an Entra tenant with the Partner Center account and add an Entra application with the **Manager** role
+(scope it to Plural where available). Add `MSSTORE_APP_ID`, `MSSTORE_TENANT_ID`, `MSSTORE_CLIENT_ID` as GitHub Actions
+variables and `MSSTORE_CLIENT_SECRET` as a secret. The app ID is the Store ID (for example `9N...`), not the package
+identity or Entra client ID. Use the client secret **value**, not its ID, and rotate it before expiry. The three package
+identity variables below remain required for the build. No signing certificate is needed for Store distribution.
+
+To prepare and inspect a submission without authentication or uploads:
+
+```sh
+python Tools/store/microsoft_store.py --assets out/store/windows --package out/dist/Plural-1.2.3.msixbundle --version 1.2.3 --prepare-only
+```
+
+Store tooling tests: `python -m unittest discover -s Tools/store -p test_store_assets.py -v`.
 
 ## Release workflow secrets
 
-Everything is optional. Without secrets, the workflow still builds every app, but the results can't go to a store.
+Signing secrets are optional for building. Stable releases require the Microsoft Store credentials for submission;
+without them the submission job fails, while the other jobs still produce their artifacts.
 Add secrets under Settings → Secrets and variables → Actions.
 
 | Secret | Needed for |
 |---|---|
+| `MSSTORE_CLIENT_SECRET` | Entra application client secret value for automated Microsoft Store submission |
 | `ANDROID_KEYSTORE_BASE64`, `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS`, `ANDROID_KEY_PASSWORD` | Signing the APK/AAB with your Play upload key (`base64 -w0 upload.keystore`) |
 | `WINDOWS_CERT_PFX_BASE64`, `WINDOWS_CERT_PASSWORD` | Signing the .msixbundle for sideloading. The Store signs it for you. The certificate subject must equal the publisher |
 | `MACOS_CERT_P12_BASE64`, `MACOS_CERT_PASSWORD`, `MACOS_SIGN_IDENTITY` | Developer ID signing of the macOS app (`Developer ID Application: Name (TEAMID)`) |
@@ -132,6 +185,8 @@ Add secrets under Settings → Secrets and variables → Actions.
 | Variable | Needed for |
 |---|---|
 | `MSSTORE_IDENTITY_NAME`, `MSSTORE_PUBLISHER`, `MSSTORE_PUBLISHER_DISPLAY_NAME` | The MSIX identity. Copy them from Partner Center → Product identity. They override `store.toml` |
+| `MSSTORE_APP_ID` | Microsoft Store ID of Plural, from Partner Center Product identity |
+| `MSSTORE_TENANT_ID`, `MSSTORE_CLIENT_ID` | Entra tenant and application IDs associated with Partner Center |
 
 ## Platform status
 
