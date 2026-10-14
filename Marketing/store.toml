@@ -47,7 +47,7 @@ windows = ["desktop", 3840, 2160]        # Microsoft Store, 16:9 4K
 # MSSTORE_IDENTITY_NAME, MSSTORE_PUBLISHER and MSSTORE_PUBLISHER_DISPLAY_NAME.
 identity_name = "Plural"
 publisher = "CN=Plural"
-publisher_display_name = "Plural"
+publisher_display_name = "zeal aps"
 
 [microsoft.submission]
 visibility = "Public"
