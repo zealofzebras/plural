@@ -129,6 +129,8 @@ publishing cannot be edited: a rerun of the same release checks its status; a di
 Each submission replaces the Windows packages, localized names/descriptions, short descriptions, features, keywords,
 release notes, copyright, screenshots, Store logos and promotional art with the generated `windows/` assets. Marketing
 locale directories are authoritative for the listing languages; obsolete listing languages are removed.
+API image uploads use `Screenshot`, `Icon`, `StoreLogoSquare` and `PromotionalArt16x9`. The generated 720x1080 portrait
+poster remains in the store assets but is not submitted: this API has no supported image type for that size.
 `store.toml` owns the category and `[microsoft.submission]` settings: free pricing, visibility, immediate publication,
 hardware preferences, declarations, and certification notes. Do not claim accessibility compliance without testing it.
 Age ratings, market availability and unsupported properties are retained from the existing submission.

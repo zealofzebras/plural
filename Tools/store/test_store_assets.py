@@ -106,6 +106,7 @@ class MicrosoftSubmissionTests(unittest.TestCase):
         (self.assets / "images").mkdir()
         for name in IMAGE_TYPES:
             (self.assets / "images" / name).write_bytes(b"image")
+        (self.assets / "images/Poster-720x1080.png").write_bytes(b"poster")
         self.template = {
             "id": "123", "fileUploadUrl": "https://example.invalid/?sig=secret", "status": "PendingCommit",
             "pricing": {"priceId": "Tier2"}, "enterpriseLicensing": "None",
@@ -132,7 +133,7 @@ class MicrosoftSubmissionTests(unittest.TestCase):
         self.assertNotIn("privacyPolicy", listing)
         for image in listing["images"][1:]:
             self.assertIn(image["fileName"], files)
-        self.assertEqual(len(files), 11)
+        self.assertEqual(len(files), 9)
 
     def test_uploaded_images_use_documented_api_types(self):
         body, files = prepare_submission(self.template, self.cfg, self.assets, self.package)
@@ -140,9 +141,9 @@ class MicrosoftSubmissionTests(unittest.TestCase):
             "desktop_01.png": "Screenshot",
             "StoreLogo-300x300.png": "Icon",
             "BoxArt-1080x1080.png": "StoreLogoSquare",
-            "Poster-720x1080.png": "PromotionalArtwork",
             "Hero-1920x1080.png": "PromotionalArt16x9",
         }
+        self.assertNotIn("Poster-720x1080.png", {path.name for path in files.values()})
         for locale, listing in body["listings"].items():
             with self.subTest(locale=locale):
                 uploaded = {files[image["fileName"]].name: image["imageType"]
@@ -156,14 +157,14 @@ class MicrosoftSubmissionTests(unittest.TestCase):
         body, files = prepare_submission(template, self.cfg, self.assets, self.package)
         self.assertEqual(len(body["applicationPackages"]), 1)
         self.assertEqual(body["pricing"]["marketSpecificPricings"], {"CA": "NotAvailable"})
-        self.assertEqual(len(files), 11)
+        self.assertEqual(len(files), 9)
 
     def test_retry_uses_fresh_paths_and_discards_unuploaded_entries_without_ids(self):
         first, files = prepare_submission(self.template, self.cfg, self.assets, self.package)
         second, retry_files = prepare_submission(first, self.cfg, self.assets, self.package)
         self.assertFalse(set(files) & set(retry_files))
         self.assertEqual(len(second["applicationPackages"]), 2)
-        self.assertEqual(len(second["listings"]["en-us"]["baseListing"]["images"]), 6)
+        self.assertEqual(len(second["listings"]["en-us"]["baseListing"]["images"]), 5)
 
     def test_real_generated_windows_listing_prepares_without_network(self):
         output = self.root / "generated"
