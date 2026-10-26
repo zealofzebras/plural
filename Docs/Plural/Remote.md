@@ -86,6 +86,11 @@ Frames over any duplex stream: `kind u8 · length u32 LE · payload` (JSON, or r
 | Discovery | UDP 47831: `PLURAL?<id>` to 255.255.255.255, each subnet broadcast and 239.255.47.31; JSON reply | Each **paired** phone/computer (class of device) is probed with a Hello, two at a time, 10 s timeout |
 | Windows | Firewall asks on first listen | Winsock `AF_BTH` server on any channel + `WSASetService` SDP record |
 | Android | `INTERNET`, Wi‑Fi multicast lock while listening/searching | `listenUsingInsecureRfcommWithServiceRecord`; needs `BLUETOOTH_CONNECT` |
+| macOS | Local-network access (`NSLocalNetworkUsageDescription`); same LAN as the phone | Remote Bluetooth service is not implemented; use Wi-Fi |
+
+LAN discovery advertises wire protocol **1**, with compatibility replies for legacy discovery values 2 and 3
+(older builds advertised their feature level and required an exact match). Receivers accept those three values and merge duplicate
+endpoints, so compatible apps can find each other across feature upgrades without updating both devices at once.
 
 Wi‑Fi is preferred. Bluetooth file transfer is slow (roughly 1–2 Mbit/s), so a video take can take minutes to sync. Pair devices
 in the OS Bluetooth settings first, as with SmartMikes; there is no in-app Bluetooth pairing.
@@ -93,13 +98,19 @@ in the OS Bluetooth settings first, as with SmartMikes; there is no in-app Bluet
 ## Testing
 - `Plural.Core.Tests/RemoteTests.cs`: two networks over loopback (approve, decline, clock, start, files + hash, manifest, zip,
   resend after reconnect, mixed immediate/deferred remotes, durable queues after restart, ownership, retry and missing-file
-  handling) and a real `LanTransport` discovery + TCP test.
+  handling), real `LanTransport` discovery + TCP, and legacy discovery values 1/2/3 (unknown values and self replies excluded).
 - Headless shared-UI regression: `dotnet run --project Src/Plural.Screenshots -c Release -- --page remote-downloads --profile phone`
   (also `--profile desktop`): post-Stop choices, independent remote downloads, restart, Restore and Undo.
 - CLI: `plural serve --input Microphone --name X` (auto-allows), `plural control --record 3 --peer X`, `plural search`;
   `control --connect-mics` and `control --pause AT:SECONDS` (repeatable).
 
-## Status (2026-10-13)
+## Status
+2026-10-26: packaged macOS arm64 app verified from a Windows LAN client: broadcast discovery returns compatibility replies 1/2/3,
+and a feature-level-1 discovery probe completes the TCP Hello exchange. Both LAN tests pass on macOS; all 40 focused remote tests
+pass on Windows. Pixel 8 ↔ Mac control/recording has not yet been verified. An iOS simulator copy of Plural on the same Mac shares
+the host's ports (UDP 47831, TCP 47830) and swallows unicast discovery probes meant for the Mac app; quit it when testing the Mac.
+
+### 2026-10-13
 Tier 1: Hello `level` = 2, Pause/Resume, RecordRequest and the "Doesn't support pause" flag are built. Pause/Resume verified between
 two devices (2026-10-13, below); RecordRequest not yet.
 2026-10-13, Surface (CLI) controls Pixel 8 over Wi‑Fi: start 3–19 ms after schedule, pause and resume on schedule, files received in

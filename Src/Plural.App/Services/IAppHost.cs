@@ -30,6 +30,9 @@ public interface IAppHost
     /// <summary>Opens a web page in the system browser.</summary>
     void OpenUrl(string url);
 
+    /// <summary>Shows the platform's own About panel (macOS); false when the app should show its About sheet instead.</summary>
+    bool ShowAbout(string version, string websiteUrl, string details, string copyright) => false;
+
     /// <summary>Opens <paramref name="folder"/> in the system file manager.</summary>
     void OpenFolder(string folder);
 

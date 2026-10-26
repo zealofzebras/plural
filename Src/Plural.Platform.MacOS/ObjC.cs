@@ -39,6 +39,15 @@ internal static unsafe partial class ObjC
     public static IntPtr Send(IntPtr obj, IntPtr sel, ushort a) =>
         ((delegate* unmanaged<IntPtr, IntPtr, ushort, IntPtr>)MsgSend)(obj, sel, a);
 
+    public static IntPtr Send(IntPtr obj, IntPtr sel, double a) =>
+        ((delegate* unmanaged<IntPtr, IntPtr, double, IntPtr>)MsgSend)(obj, sel, a);
+
+    public static IntPtr Send(IntPtr obj, IntPtr sel, IntPtr a, IntPtr b) =>
+        ((delegate* unmanaged<IntPtr, IntPtr, IntPtr, IntPtr, IntPtr>)MsgSend)(obj, sel, a, b);
+
+    public static void Send(IntPtr obj, IntPtr sel, IntPtr a, IntPtr b, NSRange c) =>
+        ((delegate* unmanaged<IntPtr, IntPtr, IntPtr, IntPtr, NSRange, void>)MsgSend)(obj, sel, a, b, c);
+
     public static IntPtr Send(IntPtr obj, IntPtr sel, void* a, uint b) =>
         ((delegate* unmanaged<IntPtr, IntPtr, void*, uint, IntPtr>)MsgSend)(obj, sel, a, b);
 
@@ -74,6 +83,13 @@ internal static unsafe partial class ObjC
         {
             Send(obj, SelRelease);
         }
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct NSRange(nuint location, nuint length)
+    {
+        public nuint Location = location;
+        public nuint Length = length;
     }
 
     /// <summary>NSString → string (null for nil).</summary>

@@ -54,6 +54,16 @@ public sealed class DesktopHost : IAppHost
     public void OpenUrl(string url) =>
         Process.Start(new ProcessStartInfo(url) { UseShellExecute = true });
 
+    public bool ShowAbout(string version, string websiteUrl, string details, string copyright)
+    {
+        if (!OperatingSystem.IsMacOS())
+        {
+            return false;
+        }
+        MacAbout.Show("Plural", version, websiteUrl, details, copyright);
+        return true;
+    }
+
     public void OpenFolder(string folder) =>
         Process.Start(new ProcessStartInfo(folder) { UseShellExecute = true });
 

@@ -10,11 +10,14 @@ It also records **without any SmartMike**: local mics of the device (built-in, U
   desktop settings are copied once from `%AppData%\SmartMike Hub\`; on Android the new package is a separate install.
 - "SmartMike" names the Sabinetek hardware and its protocol (`MikeSession`, `MikeHub`, `Docs/Protocol/`) and stays as is.
 - UI: the header has one menu (Connect all, Scan, Add a microphone, Record with other devices, Recording settings, About Plural);
-  the About sheet shows version, this device, the website and open-source credits.
+  the About sheet shows version, this device, the website and open-source credits. On macOS, the application menu is named
+  Plural and both About actions (menu and in-app) open the native macOS About panel with the same content instead of the sheet.
 
 ## Constraints
 - Native on **Windows ARM64 and x64**, and **Android** (arm64 phones, x64 emulator).
-- **macOS** (desktop head, `osx-arm64`/`osx-x64`) and **iOS** (own head) are built but not yet tested on Apple hardware; **Linux** later — nothing may block it.
+- **macOS** (desktop head, `osx-arm64`/`osx-x64`) is built for both architectures; the menu, About window and LAN discovery are
+  smoke-tested on Apple Silicon. Audio and Bluetooth remain untested. **iOS** (own head) has simulator builds but no physical-device tests;
+  **Linux** later — nothing may block it.
 - Stack: **C# / .NET 10**, UI in **Avalonia** (Windows, macOS, Linux, Android, iOS).
 
 ## Architecture
@@ -198,7 +201,7 @@ Native/lame/                    per-RID LAME 3.100 binaries (same four scripts)
 | `Plural.App` | UI redesign built: design system (dark/light, coral Record, blue accent), Audio/Video mode with camera preview, mic cards with status pill, battery, gradient level meter with peak hold, round Record button with format chip, settings sheet (format, Matroska codec, AAC/MP3 bitrate, video res/fps/bitrate, folder), persisted JSON settings. Tier 1 (2026-10-12): page navigation (Recorder, Takes, Player), Takes page, Player page with waveforms and synced video, recorder pause and warnings. Takes, Player, rename and delete verified on Pixel 8 (2026-10-13); desktop Takes and Player not yet tested with real takes |
 | `Plural.App.Desktop` | Runs on Windows with the shared UI (hosted as `MainView`); `OpenFolder` via `IAppHost`. Takes and Player not yet tested with real takes |
 | `Plural.App.Android` | Builds before Tier 1 (Debug and Release APKs, arm64 + x64, CELT and LAME included); the previous version ran on a Pixel 8 (Android 17). Tier 1 adds `RecordingService` (foreground service, notification, Pause/Stop actions) and the decoders. On a Pixel 8 (Android 17), 2026-10-13: service with notification, 118 s WAV incl. 30 s screen-off, MP4/MKV with pause, force-stop → Recovered, Takes/Player, front and rear video, remote control from a PC over Wi‑Fi. Lenovo Tab P10 (Android 9): landscape mixer and bottom bar. **Not yet: SmartMike auto-reconnect mid-take, Android 17 background video** |
-| `Plural.Platform.MacOS` / `.Apple` | Built 2026-10-11: IOBluetooth RFCOMM, Core Audio output/input, AudioQueue, AAC; the desktop head and CLI use it on macOS; cross-publish for `osx-arm64` works. **Never run on a Mac**: Bluetooth connect, audio and AAC untested. No camera |
+| `Plural.Platform.MacOS` / `.Apple` | IOBluetooth RFCOMM, Core Audio output/input, AudioQueue, AAC. Published `osx-arm64`/`osx-x64` and run on Apple Silicon (2026-10-26): Plural menu, native About panel from both entry points, LAN discovery and legacy-client Hello verified. Bluetooth connect, audio and AAC remain untested. No camera |
 | `Plural.App.iOS` / `Plural.Platform.iOS` | Built 2026-10-11; compiles on Windows, while linking, signing and running need a Mac. **Never run on a device.** SmartMike connection depends on MFi support (unknown); local mics, recording, share and Wi-Fi remote should work. No camera |
 | Virtual cable | Not installed yet; the output picker lists cables first when present |
 

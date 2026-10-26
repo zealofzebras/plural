@@ -15,6 +15,11 @@ public partial class MainViewModel
 
     public string AppVersionText => $"Version {Version}";
 
+    public string AboutDescriptionText =>
+        "Record every mic at once: Sabinetek SmartMike+ wireless mics, the microphones of this device, and other phones and computers running Plural, each on its own track.";
+
+    public string DisclaimerText => "Plural is not affiliated with Sabinetek. SmartMike is a trademark of its owner.";
+
     public string PlatformText =>
         $"{_host?.PlatformName ?? RuntimeInformation.OSDescription} · {RuntimeInformation.ProcessArchitecture.ToString().ToLowerInvariant()} · .NET {Environment.Version}";
 
@@ -36,7 +41,14 @@ public partial class MainViewModel
     }
 
     [RelayCommand]
-    private void OpenAbout() => IsAboutOpen = true;
+    private void OpenAbout()
+    {
+        var details = $"{AboutDescriptionText}\n\nTHIS DEVICE\n{ThisDeviceName}\n{PlatformText}\n\nOPEN SOURCE\n{CreditsText}\n\n{DisclaimerText}";
+        if (_host?.ShowAbout(Version, WebsiteUrl, details, CopyrightText) != true)
+        {
+            IsAboutOpen = true;
+        }
+    }
 
     [RelayCommand]
     private void CloseAbout() => IsAboutOpen = false;

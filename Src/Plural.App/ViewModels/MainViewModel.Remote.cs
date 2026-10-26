@@ -182,7 +182,9 @@ public partial class MainViewModel
         HasFoundPeers = FoundPeers.Count > 0;
         SearchStatus = FoundPeers.Count > 0
             ? ""
-            : "No other devices found. Open Plural on the other device, on the same Wi-Fi or paired over Bluetooth, and search again.";
+            : _remote.Transports.Any(t => t is BluetoothRemoteTransport)
+                ? "No other devices found. Open Plural on the other device, on the same Wi-Fi or paired over Bluetooth, and search again."
+                : "No other devices found. Open Plural on the other device, on the same Wi-Fi, and search again.";
     }
 
     private void OnPeerFound(DiscoveredPeer peer)

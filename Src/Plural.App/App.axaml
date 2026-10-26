@@ -4,8 +4,15 @@
              xmlns:local="using:Plural.App"
              xmlns:vm="using:Plural.App.ViewModels"
              xmlns:c="using:Plural.App.Controls"
+             Name="Plural"
              RequestedThemeVariant="Default">
     <!-- "Default" follows the system light/dark setting. -->
+
+    <NativeMenu.Menu>
+        <NativeMenu>
+            <NativeMenuItem Header="About Plural" Click="OnAboutMenuClick" />
+        </NativeMenu>
+    </NativeMenu.Menu>
 
     <Application.Resources>
         <ResourceDictionary>

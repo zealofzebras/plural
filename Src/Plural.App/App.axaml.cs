@@ -42,4 +42,7 @@ public partial class App : Application
 
         base.OnFrameworkInitializationCompleted();
     }
+
+    // macOS application menu (App.axaml); replaces Avalonia's default "About Avalonia".
+    private void OnAboutMenuClick(object? sender, EventArgs e) => MainViewModel?.OpenAboutCommand.Execute(null);
 }

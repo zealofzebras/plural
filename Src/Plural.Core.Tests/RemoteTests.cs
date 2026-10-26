@@ -1034,6 +1034,17 @@ public class LanTransportTests
         var ep = await found.Task.WaitAsync(TimeSpan.FromSeconds(1));
         Assert.Equal("Listener", ep.Name);
 
+        using var probe = new UdpClient(new IPEndPoint(IPAddress.Any, 0)) { EnableBroadcast = true };
+        await probe.SendAsync("PLURAL?version-probe"u8.ToArray(), new IPEndPoint(IPAddress.Broadcast, LanTransport.UdpPort), cts.Token);
+        var advertisedProtocols = new HashSet<int>();
+        while (advertisedProtocols.Count < 3)
+        {
+            var response = await probe.ReceiveAsync(cts.Token);
+            var advertised = JsonSerializer.Deserialize(response.Buffer, RemoteJson.Default.DiscoveryReply);
+            if (advertised?.Id == me.Id) { advertisedProtocols.Add(advertised.Protocol); }
+        }
+        Assert.Equal([RemoteProtocol.WireVersion, 2, 3], advertisedProtocols.Order().ToArray());
+
         await using var client = await lan.ConnectAsync(ep, cts.Token);
         await using var server = await accepted.Task.WaitAsync(TimeSpan.FromSeconds(5));
         await client.WriteAsync("hi"u8.ToArray());
@@ -1042,5 +1053,49 @@ public class LanTransportTests
         Assert.Equal("hi"u8.ToArray(), buf);
         cts.Cancel();
         await listen.ContinueWith(_ => { });
+    }
+
+    [Fact]
+    public async Task DiscoveryAcceptsLegacyFeatureLevelsAndRejectsUnknownProtocols()
+    {
+        var self = new RemoteIdentity(Guid.NewGuid().ToString("N"), "Searcher", "Test");
+        using var udp = new UdpClient(AddressFamily.InterNetwork);
+        udp.Client.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.ReuseAddress, true);
+        udp.Client.Bind(new IPEndPoint(IPAddress.Any, LanTransport.UdpPort));
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(4));
+        var responder = Task.Run(async () =>
+        {
+            try
+            {
+                while (!cts.IsCancellationRequested)
+                {
+                    var query = await udp.ReceiveAsync(cts.Token);
+                    if (System.Text.Encoding.UTF8.GetString(query.Buffer) != "PLURAL?" + self.Id) { continue; }
+                    for (var protocol = 0; protocol <= 4; protocol++)
+                    {
+                        var reply = new DiscoveryReply(protocol, $"protocol-{protocol}", "Peer", "Test", 47830);
+                        await udp.SendAsync(JsonSerializer.SerializeToUtf8Bytes(reply, RemoteJson.Default.DiscoveryReply),
+                            query.RemoteEndPoint, cts.Token);
+                    }
+                    var echo = new DiscoveryReply(RemoteProtocol.WireVersion, self.Id, self.Name, self.Platform, 47830);
+                    await udp.SendAsync(JsonSerializer.SerializeToUtf8Bytes(echo, RemoteJson.Default.DiscoveryReply),
+                        query.RemoteEndPoint, cts.Token);
+                }
+            }
+            catch (OperationCanceledException) when (cts.IsCancellationRequested) { }
+        });
+        var found = new HashSet<string>();
+        try
+        {
+            await new LanTransport().DiscoverAsync(self, ep => found.Add(ep.PeerId), cts.Token);
+            Assert.Equal(["protocol-1", "protocol-2", "protocol-3"],
+                found.Where(id => id.StartsWith("protocol-", StringComparison.Ordinal)).Order().ToArray());
+            Assert.DoesNotContain(self.Id, found);
+        }
+        finally
+        {
+            cts.Cancel();
+            await responder;
+        }
     }
 }

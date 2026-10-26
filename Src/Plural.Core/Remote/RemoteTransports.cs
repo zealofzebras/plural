@@ -42,6 +42,8 @@ public sealed class LanTransport(Func<IDisposable?>? acquireMulticastLock = null
     public const int UdpPort = 47831;
     private static readonly IPAddress Group = IPAddress.Parse("239.255.47.31");
     private const string Query = "PLURAL?";
+    // Old builds advertised feature levels 2/3 and required an exact match. Keep answering those searchers too.
+    private static readonly int[] DiscoveryProtocols = [RemoteProtocol.WireVersion, 2, 3];
 
     private int _tcpPort = TcpPort;
 
@@ -86,8 +88,8 @@ public sealed class LanTransport(Func<IDisposable?>? acquireMulticastLock = null
 
         async Task AnswerLoop()
         {
-            var reply = JsonSerializer.SerializeToUtf8Bytes(
-                new DiscoveryReply(RemoteProtocol.Version, self.Id, self.Name, self.Platform, _tcpPort), RemoteJson.Default.DiscoveryReply);
+            var replies = DiscoveryProtocols.Select(protocol => JsonSerializer.SerializeToUtf8Bytes(
+                new DiscoveryReply(protocol, self.Id, self.Name, self.Platform, _tcpPort), RemoteJson.Default.DiscoveryReply)).ToArray();
             while (!ct.IsCancellationRequested)
             {
                 UdpReceiveResult r;
@@ -97,7 +99,13 @@ public sealed class LanTransport(Func<IDisposable?>? acquireMulticastLock = null
                 var text = Encoding.UTF8.GetString(r.Buffer);
                 if (text.StartsWith(Query, StringComparison.Ordinal) && text[Query.Length..] != self.Id)
                 {
-                    try { await udp.SendAsync(reply, r.RemoteEndPoint, ct).ConfigureAwait(false); }
+                    try
+                    {
+                        foreach (var reply in replies)
+                        {
+                            await udp.SendAsync(reply, r.RemoteEndPoint, ct).ConfigureAwait(false);
+                        }
+                    }
                     catch (SocketException) { /* asker gone */ }
                 }
             }
@@ -147,7 +155,8 @@ public sealed class LanTransport(Func<IDisposable?>? acquireMulticastLock = null
                 try
                 {
                     var reply = JsonSerializer.Deserialize(r.Buffer, RemoteJson.Default.DiscoveryReply);
-                    if (reply is not null && reply.Id != self.Id && reply.Protocol == RemoteProtocol.Version)
+                    if (reply is not null && reply.Id != self.Id &&
+                        DiscoveryProtocols.Contains(reply.Protocol))
                     {
                         found(new RemoteEndpoint(Name, $"{r.RemoteEndPoint.Address}:{reply.Port}", reply.Id, reply.Name, reply.Platform));
                     }

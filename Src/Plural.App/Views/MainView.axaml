@@ -1384,8 +1384,7 @@
                                 </StackPanel>
                             </StackPanel>
 
-                            <TextBlock TextWrapping="Wrap"
-                                       Text="Record every mic at once: Sabinetek SmartMike+ wireless mics, the microphones of this device, and other phones and computers running Plural, each on its own track." />
+                            <TextBlock TextWrapping="Wrap" Text="{Binding AboutDescriptionText}" />
 
                             <Button Classes="tool" Command="{Binding OpenWebsiteCommand}" HorizontalAlignment="Left">
                                 <StackPanel Orientation="Horizontal" Spacing="8">
@@ -1405,8 +1404,7 @@
                                 <TextBlock Classes="muted" TextWrapping="Wrap" Text="{Binding CreditsText}" />
                             </StackPanel>
 
-                            <TextBlock Classes="muted" FontSize="12" TextWrapping="Wrap"
-                                       Text="Plural is not affiliated with Sabinetek. SmartMike is a trademark of its owner." />
+                            <TextBlock Classes="muted" FontSize="12" TextWrapping="Wrap" Text="{Binding DisclaimerText}" />
                             <TextBlock Classes="muted" FontSize="12" Text="{Binding CopyrightText}" />
                         </StackPanel>
                     </ScrollViewer>
