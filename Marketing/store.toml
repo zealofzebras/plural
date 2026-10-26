@@ -21,7 +21,7 @@ accent = "#EE4B55"                       # recording coral
 background_top = "#182321"               # screenshot / feature graphic gradient
 background_bottom = "#344A41"
 caption_color = "#FFFFFF"
-icon_background = "#FFFFFF"              # tile behind the logo on store icons
+icon_background = "#182321"              # tile behind the logo on app/store icons (the logo's own tile colour)
 logo = "brand/icon.png"                  # square transparent PNG, 1024 px or larger
 
 # Raw screenshots (real app captures) are framed with the captions in <locale>/captions.txt, in file-name order.

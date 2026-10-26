@@ -6,6 +6,7 @@
     <TargetFramework>net10.0</TargetFramework>
     <Nullable>enable</Nullable>
     <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationIcon>..\Plural.App\Assets\plural.ico</ApplicationIcon>
     <AssemblyName>Plural</AssemblyName>
     <RootNamespace>Plural.App.Desktop</RootNamespace>
   </PropertyGroup>

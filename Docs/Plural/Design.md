@@ -14,6 +14,10 @@ It also records **without any SmartMike**: local mics of the device (built-in, U
   Plural and both About actions (menu and in-app) open the native macOS About panel with the same content instead of the sheet.
   Also on macOS, the app background uses the system window background colour (read through AppKit for light and dark), so it
   blends with the title bar. Cards, tracks and strokes are derived from that colour: lighter in dark mode, darker in light mode.
+- On every platform, the main window has no product-name heading inside the app (the native title/application name remains Plural),
+  and the in-app menu sheet has no "Menu" title, only its close button. Switching between cards and mixer and opening Takes uses a
+  320 ms fade/slide; Takes/player changes cross-fade in 240 ms. The in-app menu
+  fades in with a short slide from the right (320 ms). Closing it remains immediate, including Escape/back and menu actions.
 
 ## Constraints
 - Native on **Windows ARM64 and x64**, and **Android** (arm64 phones, x64 emulator).
