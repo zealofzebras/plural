@@ -10,6 +10,7 @@ using Plural.App.Services;
 using Plural.App.ViewModels;
 using Plural.App.Views;
 using Plural.Core.Platform;
+using Plural.Core.Library;
 using Plural.Core.Remote;
 using Plural.Core.Session;
 using PluralApp = Plural.App.App;
@@ -77,6 +78,7 @@ internal static class Program
         }
 
         var profile = Profiles.Append(PhoneLandscape).Append(TabletLandscape).FirstOrDefault(p => p.Name == profileName);
+        if (profile?.Name == "phone" && Page == "remote-downloads") { profile = profile with { Width = 360, Scale = 3 }; }
         if (profile is null)
         {
             Console.Error.WriteLine($"Unknown profile '{profileName}'. Use all, {string.Join(", ", Profiles.Select(p => p.Name))}.");
@@ -100,10 +102,14 @@ internal static class Program
         Directory.CreateDirectory(work);
         var registry = new Dictionary<string, (RemoteIdentity, Func<Stream, Task>)>();
         var peers = profile.Mobile
-            ? new[] { new SimulatedPeer(new("peer-1", "Studio laptop", "Windows"), ["SmartMike+ 91C2", "USB microphone"], registry),
-                      new SimulatedPeer(new("peer-2", "Galaxy S24", "Android"), ["SmartMike+ 13B8"], registry) }
-            : new[] { new SimulatedPeer(new("peer-1", "Pixel 9", "Android"), ["SmartMike+ 91C2"], registry),
-                      new SimulatedPeer(new("peer-2", "Galaxy Tab S9", "Android"), ["SmartMike+ 13B8", "Built-in microphone"], registry) };
+            ? new[] { new SimulatedPeer(new("peer-1", "Studio laptop", "Windows"), ["SmartMike+ 91C2", "USB microphone"], registry,
+                          Page == "remote-downloads" ? Path.Combine(work, "peer-1") : null),
+                      new SimulatedPeer(new("peer-2", "Galaxy S24", "Android"), ["SmartMike+ 13B8"], registry,
+                          Page == "remote-downloads" ? Path.Combine(work, "peer-2") : null) }
+            : new[] { new SimulatedPeer(new("peer-1", "Pixel 9", "Android"), ["SmartMike+ 91C2"], registry,
+                          Page == "remote-downloads" ? Path.Combine(work, "peer-1") : null),
+                      new SimulatedPeer(new("peer-2", "Galaxy Tab S9", "Android"), ["SmartMike+ 13B8", "Built-in microphone"], registry,
+                          Page == "remote-downloads" ? Path.Combine(work, "peer-2") : null) };
 
         var host = new ScreenshotHost(profile.Mobile, work, registry);
         PluralApp.Host = host;
@@ -132,6 +138,14 @@ internal static class Program
             var path = Path.Combine(outDir, $"{++shot:00}.png");
             frame.Save(path, new PngBitmapEncoderOptions());
             Console.WriteLine($"{profile.Name}: {Path.GetFileName(path)} {frame.PixelSize.Width}x{frame.PixelSize.Height}  {what}");
+        }
+
+        if (Page == "remote-downloads")
+        {
+            RemoteDownloadsPage(vm, window, host, registry, peers, Shot);
+            try { Directory.Delete(work, true); } catch (IOException) { } catch (UnauthorizedAccessException) { }
+            Console.Out.Flush();
+            Environment.Exit(0);
         }
 
         if (Page == "takes")
@@ -247,6 +261,127 @@ internal static class Program
         try { Directory.Delete(work, true); } catch (IOException) { } catch (UnauthorizedAccessException) { }
         Console.Out.Flush();
         Environment.Exit(0);
+    }
+
+    private static void RemoteDownloadsPage(MainViewModel vm, Window window, ScreenshotHost host,
+        Dictionary<string, (RemoteIdentity, Func<Stream, Task>)> registry, SimulatedPeer[] peers, Action<string> shot)
+    {
+        Require(!new AppSettings().DownloadAfterRecording && !vm.DownloadAfterRecording, "downloads must default to pending");
+        vm.DownloadAfterRecording = true;
+        vm.OpenDevicesCommand.Execute(null);
+        Require(PumpUntil(() => vm.FoundPeers.Count == 2, 15), "remotes not discovered");
+        foreach (var peer in vm.FoundPeers.ToList()) { vm.ConnectPeer(peer); }
+        vm.CloseDevicesCommand.Execute(null);
+        Require(PumpUntil(() => vm.Remotes.Count == 2 && vm.Remotes.All(remote => remote.IsLive && remote.Device.ClockOffset is not null), 15),
+            "remotes not ready");
+        vm.ToggleRecordingCommand.Execute(null);
+        Require(PumpUntil(() => vm.IsRecording, 10), "remote-only take did not start");
+        Pump(TimeSpan.FromSeconds(1));
+        vm.ToggleRecordingCommand.Execute(null);
+        Require(PumpUntil(() => vm.IsDownloadChoiceOpen, 10), "download choice did not open");
+        Require(vm.DownloadChoices.Count == 2 && vm.DownloadChoices.All(choice => choice.IsSelected), "saved default not applied");
+        var folder = Directory.GetDirectories(host.RecordingRoot).Single(path => !Path.GetFileName(path).StartsWith('.'));
+        Require(TakeManifest.Load(folder)!.Devices.All(device => device.Status == "pending" && !device.DownloadRequested), "download requested before confirmation");
+        Require(!Directory.EnumerateFiles(folder, "*.wav", SearchOption.AllDirectories).Any(), "bytes transferred before confirmation");
+        shot("explicit per-remote download choice");
+        vm.PostponeDownloadsCommand.Execute(null);
+        var knownPeer = vm.FoundPeers.First();
+        foreach (var remote in vm.Remotes.ToList())
+        {
+            var disconnect = vm.DisconnectRemoteAsync(remote);
+            Require(PumpUntil(() => disconnect.IsCompleted, 10), "disconnect timed out");
+            disconnect.GetAwaiter().GetResult();
+        }
+        vm.OpenTakesCommand.Execute(null);
+        Require(PumpUntil(() => vm.Takes.Items.Count == 1, 10), "manifest-only take hidden");
+        var take = vm.Takes.Items.Single();
+        Require(take.Info.Tracks.Count == 0 && take.RemoteDownloads.Count == 2, "remote-only pending state incorrect");
+        vm.OpenPlayer(take.Info);
+        Require(vm.CurrentPage == AppPage.Takes, "empty take opened in player");
+        vm.DismissToastCommand.Execute(null);
+        var delete = vm.Takes.DeleteAsync([take]);
+        Require(PumpUntil(() => delete.IsCompleted, 10), "delete timed out");
+        delete.GetAwaiter().GetResult();
+        var dispose = vm.DisposeAsync().AsTask();
+        Require(PumpUntil(() => dispose.IsCompleted, 10), "shutdown timed out");
+        dispose.GetAwaiter().GetResult();
+        vm = new MainViewModel(host);
+        ((MainView)window.Content!).DataContext = vm;
+        Require(vm.DownloadAfterRecording, "saved preference lost after restart");
+        vm.OpenTakesCommand.Execute(null);
+        vm.Takes.OpenTrashCommand.Execute(null);
+        Require(PumpUntil(() => vm.Takes.Trash.Count == 1, 10), "trashed take missing after restart");
+        var restore = vm.Takes.RestoreAsync(vm.Takes.Trash.Single());
+        Require(PumpUntil(() => restore.IsCompleted, 10), "restore timed out");
+        restore.GetAwaiter().GetResult();
+        vm.Takes.CloseTrashCommand.Execute(null);
+        take = vm.Takes.Items.Single();
+        Require(take.RemoteDownloads.Count == 2 && take.Info.Tracks.Count == 0, "restoration downloaded postponed files");
+        delete = vm.Takes.DeleteAsync([take]);
+        Require(PumpUntil(() => delete.IsCompleted, 10), "second delete timed out");
+        delete.GetAwaiter().GetResult();
+        var undo = vm.UndoToastCommand.ExecuteAsync(null);
+        Require(PumpUntil(() => undo.IsCompleted, 10), "undo timed out");
+        undo.GetAwaiter().GetResult();
+        take = vm.Takes.Items.Single();
+        Require(take.RemoteDownloads.Count == 2 && take.Info.Tracks.Count == 0, "undo downloaded postponed files");
+        vm.OpenDevicesCommand.Execute(null);
+        Require(PumpUntil(() => vm.FoundPeers.Count == 2, 15), "remotes not rediscovered after restart");
+        knownPeer = vm.FoundPeers.Single(peer => peer.Peer.Id == knownPeer.Peer.Id);
+        vm.CloseDevicesCommand.Execute(null);
+        vm.ConnectPeer(knownPeer);
+        Require(PumpUntil(() => vm.Remotes.Any(remote => remote.Device.Id == knownPeer.Peer.Id && remote.IsLive), 10),
+            "ordinary reconnect failed: " + string.Join(", ", vm.Remotes.Select(remote => $"{remote.StateText}: {remote.Error}")));
+        Pump(TimeSpan.FromSeconds(1));
+        Require(TakeManifest.Load(folder)!.Devices.All(device => !device.DownloadRequested && device.Status == "pending"),
+            "ordinary reconnect requested postponed downloads");
+        Require(!Directory.EnumerateFiles(folder, "*.wav", SearchOption.AllDirectories).Any(), "ordinary reconnect transferred postponed files");
+        var ordinaryDisconnect = vm.DisconnectRemoteAsync(vm.Remotes.Single());
+        Require(PumpUntil(() => ordinaryDisconnect.IsCompleted, 10), "ordinary disconnect failed");
+        ordinaryDisconnect.GetAwaiter().GetResult();
+        shot("postponed disconnected remotes in Takes");
+        var first = take.RemoteDownloads.First();
+        first.DownloadCommand.Execute(null);
+        Require(PumpUntil(() => TakeManifest.Load(folder)!.Devices.Single(device => device.Id == first.DeviceId).Status == "synced", 25),
+            "explicit reconnect/download failed: " + first.Detail);
+        Require(PumpUntil(() => take.RemoteDownloads.Count == 1 && take.Info.Tracks.Count == 1, 10), "per-device completion did not refresh");
+        Require(TakeManifest.Load(folder)!.Devices.Count(device => device.Status == "pending" && !device.DownloadRequested) == 1,
+            "unselected remote downloaded");
+        shot("one remote downloaded, the other postponed");
+        var second = take.RemoteDownloads.Single();
+        var savedPeer = registry[second.DeviceId];
+        registry.Remove(second.DeviceId);
+        second.DownloadCommand.Execute(null);
+        Require(PumpUntil(() => !second.IsBusy, 25), "failed discovery did not finish");
+        Require(second.Detail.Contains("not found") && second.CanDownload, "discovery failure not retryable: " + second.Detail);
+        Require(TakeManifest.Load(folder)!.Devices.Single(device => device.Id == second.DeviceId).Status == "pending", "discovery failure lost metadata");
+        registry[second.DeviceId] = savedPeer;
+        var secondPeer = peers[second.DeviceId == "peer-1" ? 0 : 1];
+        secondPeer.ApproveControl = false;
+        second.DownloadCommand.Execute(null);
+        Require(PumpUntil(() => vm.FindRemote(second.DeviceId)?.State == RemoteDeviceState.Rejected, 25), "approval was not declined");
+        Require(PumpUntil(() => second.Detail.Contains("remote control") && second.CanDownload, 5), "decline not visible/retryable: " + second.Detail);
+        secondPeer.ApproveControl = true;
+        second.DownloadCommand.Execute(null);
+        Require(PumpUntil(() => take.RemoteDownloads.Count == 0 && take.Info.Tracks.Count == 2, 25), "retry did not collect second remote");
+        Require(take.Info.Status == TakeStatus.Complete, "completed take still pending");
+        shot("both remotes collected independently");
+        vm.DownloadAfterRecording = false;
+        using var settings = System.Text.Json.JsonDocument.Parse(File.ReadAllText(host.SettingsPath));
+        Require(settings.RootElement.GetProperty("DownloadAfterRecording").GetBoolean() == false, "download setting not persisted");
+        vm.CurrentPage = AppPage.Recorder;
+        Require(PumpUntil(() => vm.Remotes.All(remote => remote.Device.ClockOffset is not null), 10), "clocks not ready");
+        vm.ToggleRecordingCommand.Execute(null);
+        Require(PumpUntil(() => vm.IsRecording, 10), "second take did not start");
+        Pump(TimeSpan.FromSeconds(1));
+        vm.ToggleRecordingCommand.Execute(null);
+        Require(PumpUntil(() => vm.IsDownloadChoiceOpen, 10), "second prompt missing");
+        Require(vm.DownloadChoices.All(choice => !choice.IsSelected), "disabled preference not applied");
+        vm.DownloadChoices[0].IsSelected = true;
+        vm.DownloadSelectedCommand.Execute(null);
+        Require(PumpUntil(() => vm.Takes.Items.Count == 2 && vm.Takes.Items.Any(item => item.Info.Tracks.Count == 1 && item.RemoteDownloads.Count == 1), 15),
+            "prompt subset did not download independently");
+        Console.WriteLine("PASS: default pending, explicit choice, postpone, restart/trash restore, undo, no reconnect auto-download, empty player guard, targeted reconnect, independent downloads, missing/declined retry, settings, prompt subset");
     }
 
     /// <summary>Recorder reliability scenes (development; not part of the store set): warnings, pause, reconnecting, low space.</summary>

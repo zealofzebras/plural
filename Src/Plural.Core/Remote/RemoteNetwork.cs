@@ -11,6 +11,7 @@ public sealed class RemoteNetwork : IAsyncDisposable
 {
     private readonly object _lock = new();
     private readonly List<RemoteDevice> _devices = [];
+    private readonly List<Task> _retiredDisposals = [];
     private readonly Dictionary<string, (string Folder, long StartAt, Dictionary<string, string> DeviceFolders)> _takes = [];
     private CancellationTokenSource? _listen;
     private readonly Dictionary<string, string?> _listenErrors = [];
@@ -153,6 +154,7 @@ public sealed class RemoteNetwork : IAsyncDisposable
             if (device is not null && device.State is RemoteDeviceState.Disconnected or RemoteDeviceState.Rejected)
             {
                 _devices.Remove(device);
+                _retiredDisposals.Add(device.DisposeAsync().AsTask());
                 device = null;
             }
             if (device is null)
@@ -181,7 +183,51 @@ public sealed class RemoteNetwork : IAsyncDisposable
     /// <summary>Remembers where take <paramref name="takeId"/> lives and its scheduled start, so late files land in the right place.</summary>
     public void RegisterTake(string takeId, string folder, long startAt)
     {
-        lock (_lock) { _takes[takeId] = (folder, startAt, []); }
+        TakeManifest.Update(folder, manifest =>
+        {
+            manifest.TakeId = takeId;
+            manifest.ControllerId = Identity.Id;
+        });
+        var devices = TakeManifest.Load(folder)!.Devices
+            .Where(device => device.Role == "remote" && IsDeviceFolder(device.Folder))
+            .ToDictionary(device => device.Id, device => device.Folder);
+        lock (_lock) { _takes[takeId] = (folder, startAt, devices); }
+    }
+
+    /// <summary>Restores controller manifests and the responder queue. Repeated calls merge roots without discarding queued data.</summary>
+    public void RestoreTakes(string recordingRoot)
+    {
+        var root = Path.GetFullPath(recordingRoot);
+        Responder.RestoreTakes(root);
+        if (!Directory.Exists(root)) { return; }
+        foreach (var folder in Directory.EnumerateDirectories(root))
+        {
+            if (Path.GetFileName(folder).StartsWith('.')) { continue; }
+            var manifest = TakeManifest.Load(folder);
+            if (manifest is null || manifest.TakeId.Length == 0 ||
+                (manifest.ControllerId.Length > 0 && manifest.ControllerId != Identity.Id)) { continue; }
+            var devices = manifest.Devices.Where(device => device.Role == "remote" && IsDeviceFolder(device.Folder))
+                .ToDictionary(device => device.Id, device => device.Folder);
+            lock (_lock)
+            {
+                if (!_takes.TryGetValue(manifest.TakeId, out var existing) || !Directory.Exists(existing.Folder))
+                {
+                    _takes[manifest.TakeId] = (folder, 0, devices);
+                }
+            }
+        }
+        foreach (var device in Devices) { device.RequestDownloads(); }
+    }
+
+    internal static bool IsDeviceFolder(string folder) => folder.Length > 0 && folder != "." && folder != ".." &&
+        !Path.IsPathRooted(folder) && !folder.Contains('/') && !folder.Contains('\\');
+
+    internal IReadOnlyList<string> RequestedTakes(string deviceId)
+    {
+        List<(string Id, string Folder)> takes;
+        lock (_lock) { takes = _takes.Select(take => (take.Key, take.Value.Folder)).ToList(); }
+        return takes.Where(take => TakeManifest.Load(take.Folder)?.Devices.Any(device =>
+            device.Id == deviceId && device.DownloadRequested) == true).Select(take => take.Id).ToList();
     }
 
     internal string? FolderFor(string takeId)
@@ -191,7 +237,7 @@ public sealed class RemoteNetwork : IAsyncDisposable
 
     internal long? ScheduledStart(string takeId)
     {
-        lock (_lock) { return _takes.TryGetValue(takeId, out var t) ? t.StartAt : null; }
+        lock (_lock) { return _takes.TryGetValue(takeId, out var t) && t.StartAt != 0 ? t.StartAt : null; }
     }
 
     /// <summary>A sub-folder name for a device in a take, unique even when two devices share a name.</summary>
@@ -228,6 +274,9 @@ public sealed class RemoteNetwork : IAsyncDisposable
         {
             await d.DisposeAsync().ConfigureAwait(false);
         }
+        Task[] retired;
+        lock (_lock) { retired = [.. _retiredDisposals]; _retiredDisposals.Clear(); }
+        await Task.WhenAll(retired).ConfigureAwait(false);
         lock (_lock) { _devices.Clear(); }
     }
 }

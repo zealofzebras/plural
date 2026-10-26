@@ -15,6 +15,7 @@ public sealed class TakeManifest
     public string TakeId { get; set; } = "";
     public DateTime Created { get; set; }
     public string Controller { get; set; } = "";
+    public string ControllerId { get; set; } = "";
     public string Format { get; set; } = "";
     public List<ManifestDevice> Devices { get; set; } = [];
 
@@ -36,16 +37,25 @@ public sealed class TakeManifest
 
     /// <summary>Reads (or creates), changes and writes the manifest atomically; safe from several threads.</summary>
     public static void Update(string folder, Action<TakeManifest> change)
+        => Write(folder, change, create: true);
+
+    internal static bool UpdateExisting(string folder, Action<TakeManifest> change)
+        => Write(folder, change, create: false);
+
+    private static bool Write(string folder, Action<TakeManifest> change, bool create)
     {
         lock (Lock)
         {
-            var m = Load(folder) ?? new TakeManifest { Created = DateTime.Now };
+            var m = Load(folder);
+            if (m is null && !create) { return false; }
+            m ??= new TakeManifest { Created = DateTime.Now };
             change(m);
-            Directory.CreateDirectory(folder);
+            if (create) { Directory.CreateDirectory(folder); }
             var path = Path.Combine(folder, FileName);
             var tmp = path + ".tmp";
             File.WriteAllText(tmp, JsonSerializer.Serialize(m, RemoteJson.Default.TakeManifest));
             File.Move(tmp, path, overwrite: true);
+            return true;
         }
     }
 
@@ -82,7 +92,10 @@ public sealed class ManifestDevice
 
     public double Seconds { get; set; }
 
-    /// <summary>"recording", "syncing", "synced", "failed".</summary>
+    /// <summary>Whether the controller wants these files now; persisted for reconnects.</summary>
+    public bool DownloadRequested { get; set; }
+
+    /// <summary>"recording", "pending", "syncing", "synced", "failed".</summary>
     public string Status { get; set; } = "recording";
 
     public List<string> Errors { get; set; } = [];

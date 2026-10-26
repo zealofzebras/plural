@@ -104,7 +104,9 @@ macOS: AudioServerPlugIn (BlackHole-style). Linux: PipeWire virtual source per m
   Player does not open a take that is still recording.
 - **Takes** (`TakesView`, `TakesViewModel`): search (title, notes, mic and device names, date); sort Newest, Oldest, Longest, Largest;
   items show poster or mini waveform, title, date, duration, format, mics, devices, size and status (`recording`, `recovered`,
-  `syncing`). Rename, notes, share, open folder (desktop), delete with Undo; multi-select; "Recently deleted" with Restore and Delete now.
+  `syncing`, `pending`). Remote-only takes appear before any files arrive; pending remotes have individual Download or
+  Reconnect & download actions. After Stop, choose remotes to download now or Postpone; later downloads are explicit and
+  survive app restarts. Rename, notes, share, open folder (desktop), delete with Undo; multi-select; "Recently deleted" with Restore and Delete now.
 - **Player** (`PlayerView`, `PlayerViewModel`): header, video area, transport, one row per audio track (mute, solo, gain; waveform with
   dropouts and pause markers, shared timeline with zoom and minimap). Tap a video to spotlight it, double-tap or `F` for fullscreen.
   Keys: Space, ←/→ 5 s, Home/End, M and S on the focused row. Mute, solo and gain are saved per take (`playback` in `plural.json`).

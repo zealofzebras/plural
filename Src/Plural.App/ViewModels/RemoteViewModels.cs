@@ -51,6 +51,7 @@ public partial class RemoteDeviceViewModel(RemoteDevice device, MainViewModel ow
     [ObservableProperty] public partial string SyncText { get; set; } = "";
     [ObservableProperty] public partial bool IsSyncing { get; set; }
     [ObservableProperty] public partial bool CanChange { get; set; }
+    [ObservableProperty] public partial string DownloadNote { get; set; } = "";
 
     public string ModeText => IsVideo ? "Video" : "Audio";
 
@@ -72,6 +73,8 @@ public partial class RemoteDeviceViewModel(RemoteDevice device, MainViewModel ow
         var st = d.Status;
         Name = d.Name;
         IsLive = d.State == RemoteDeviceState.Connected;
+        DownloadNote = IsLive && !d.SupportsDeferredDownloads
+            ? "Older Plural version: recordings download automatically; postponing is unavailable." : "";
         IsConnecting = d.State is RemoteDeviceState.Connecting or RemoteDeviceState.AwaitingApproval;
         IsLost = d.State is RemoteDeviceState.Reconnecting or RemoteDeviceState.Rejected;
         IsRecording = IsLive && st?.Recording == true;

@@ -29,6 +29,23 @@ public partial class MainViewModel
     private ControllerTake? _ctrlTake;
     private readonly List<(RemoteDevice Device, string Folder)> _syncing = [];
     private CancellationTokenSource? _searchCts;
+    private ControllerTake? _downloadChoiceTake;
+
+    public ObservableCollection<RemoteDownloadChoice> DownloadChoices { get; } = [];
+    [ObservableProperty] public partial bool IsDownloadChoiceOpen { get; set; }
+    [ObservableProperty] public partial bool DownloadAfterRecording { get; set; }
+    [ObservableProperty] public partial string DownloadCompatibility { get; set; } = "";
+
+    partial void OnDownloadAfterRecordingChanged(bool value) => SaveSettings();
+
+    internal void RestoreRemoteTakes()
+    {
+        try { _remote?.RestoreTakes(RecordingRoot); }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException)
+        {
+            Status = "Cannot restore remote takes: " + ex.Message;
+        }
+    }
 
     /// <summary>A take this app started on itself and/or remotes.</summary>
     private sealed record ControllerTake(string TakeId, string Folder, string Stamp, long StartAt, bool Local, List<RemoteDevice> Remotes);
@@ -80,6 +97,7 @@ public partial class MainViewModel
                 AllowControl = AllowRemoteControl,
             };
             _remote.DevicesChanged += () => Dispatcher.UIThread.Post(SyncRemoteList);
+            RestoreRemoteTakes();
         }
         catch (Exception ex)
         {
@@ -228,8 +246,41 @@ public partial class MainViewModel
         foreach (var d in devices.Where(d => Remotes.All(r => r.Device != d)))
         {
             Remotes.Add(new RemoteDeviceViewModel(d, this));
+            d.TakeReceived += OnRemoteTakeReceived;
         }
         HasRemotes = Remotes.Count > 0;
+    }
+
+    private void OnRemoteTakeReceived(RemoteDevice device, RemoteTakeResult result) =>
+        Dispatcher.UIThread.Post(() => _ = LoadTakesAsync());
+
+    public RemoteDevice? FindRemote(string id) => _remote?.Devices.FirstOrDefault(device => device.Id == id);
+
+    public async Task RequestRemoteDownloadAsync(RemoteDownloadViewModel item)
+    {
+        if (_remote is null) { throw new InvalidOperationException("Remote mode is unavailable."); }
+        var device = FindRemote(item.DeviceId);
+        if (device is null || device.State != RemoteDeviceState.Connected)
+        {
+            if (_host is not null)
+            {
+                try { await _host.EnsurePermissionsAsync(); } catch (Exception) { }
+            }
+            DiscoveredPeer? target = null;
+            await _remote.SearchAsync(peer =>
+            {
+                if (peer.Id == item.DeviceId) { target = peer; }
+            }, TimeSpan.FromSeconds(12));
+            if (target is null)
+            {
+                throw new InvalidOperationException("Device not found. Open Plural on that device and retry.");
+            }
+            device = _remote.Connect(target);
+            SyncRemoteList();
+        }
+        var download = device.DownloadAsync(item.TakeId);
+        _ = CollectAsync(device, item.Folder, download);
+        await LoadTakesAsync();
     }
 
     /// <summary>Called from the UI timer.</summary>
@@ -265,19 +316,10 @@ public partial class MainViewModel
         {
             ControllerDetail = IsControllerConnected
                 ? (IsRecording ? "Recording for the controller" : "The controller starts and stops recording")
-                : (_remote.Responder.PendingTakes > 0 ? "Files are sent when it reconnects" : "Waiting for it to come back");
+                : (_remote.Responder.PendingTakes > 0 ? "Files saved here, waiting for the controller" : "Waiting for it to come back");
         }
 
-        if (_syncing.Count > 0)
-        {
-            var names = string.Join(", ", _syncing.Select(s => s.Device.Name).Distinct());
-            var progress = _syncing.Select(s => s.Device.SyncProgress ?? 0).Average();
-            ToastText = $"Collecting files from {names}";
-            ToastDetail = $"{progress:P0}";
-            ToastIsError = false;
-            IsToastVisible = true;
-            _toastCts?.Cancel();
-        }
+        Takes.RefreshRemoteDownloads();
     }
 
     // ---------------------------------------------------------------- recording with remotes (controller)
@@ -308,7 +350,8 @@ public partial class MainViewModel
         _remote!.RegisterTake(takeId, folder, startAt);
         _remote.ActiveTakeId = takeId;
         IsStopping = true; // blocks the button until everyone has answered
-        var starts = remotes.Select(r => (Device: r, Task: r.StartAsync(takeId, startAt, r.Status?.VideoMode == true))).ToList();
+        var starts = remotes.Select(r => (Device: r, Task: r.StartAsync(takeId, startAt, r.Status?.VideoMode == true,
+            downloadAfterRecording: !r.SupportsDeferredDownloads))).ToList();
 
         var wait = TimeSpan.FromTicks(startAt - MediaClock.Now);
         if (wait > TimeSpan.Zero)
@@ -389,8 +432,10 @@ public partial class MainViewModel
         _remote!.ActiveTakeId = null;
         foreach (var r in take.Remotes)
         {
-            _syncing.Add((r, take.Folder));
-            _ = CollectAsync(r, take);
+            if (!r.SupportsDeferredDownloads)
+            {
+                _ = CollectAsync(r, take.Folder, r.WaitForTakeAsync(take.TakeId));
+            }
             try { await r.StopAsync(take.TakeId); } catch (Exception) { /* lost: stopped by the status check after it reconnects */ }
         }
         RecordedTake? local = null;
@@ -423,6 +468,22 @@ public partial class MainViewModel
         }
         RequestCameraSync();
         await LoadTakesAsync();
+        DownloadChoices.Clear();
+        foreach (var device in take.Remotes.Where(device => device.SupportsDeferredDownloads))
+        {
+            DownloadChoices.Add(new RemoteDownloadChoice(device.Name, device.Id) { IsSelected = DownloadAfterRecording });
+        }
+        DownloadCompatibility = string.Join(", ", take.Remotes.Where(device => !device.SupportsDeferredDownloads).Select(device => device.Name));
+        if (DownloadCompatibility.Length > 0)
+        {
+            DownloadCompatibility += ": older Plural version; files transfer automatically and cannot be postponed.";
+        }
+        _downloadChoiceTake = take;
+        IsDownloadChoiceOpen = DownloadChoices.Count > 0;
+        if (!IsDownloadChoiceOpen && DownloadCompatibility.Length > 0)
+        {
+            ShowToast("Automatic download", DownloadCompatibility, false, Takes.Find(take.Folder));
+        }
         if (_stopReason is { } why)
         {
             _stopReason = null;
@@ -430,13 +491,37 @@ public partial class MainViewModel
         }
     }
 
-    /// <summary>Waits for one remote's files (across reconnects) and reports when the whole take is complete.</summary>
-    private async Task CollectAsync(RemoteDevice device, ControllerTake take)
+    [RelayCommand]
+    private async Task DownloadSelectedAsync()
     {
+        var take = _downloadChoiceTake;
+        IsDownloadChoiceOpen = false;
+        _downloadChoiceTake = null;
+        if (take is null) { return; }
+        foreach (var choice in DownloadChoices.Where(choice => choice.IsSelected))
+        {
+            var device = take.Remotes.First(device => device.Id == choice.DeviceId);
+            try { _ = CollectAsync(device, take.Folder, device.DownloadAsync(take.TakeId)); }
+            catch (Exception ex) { ShowToast("Download not started", $"{device.Name}: {ex.Message}", true, null); }
+        }
+        await LoadTakesAsync();
+    }
+
+    [RelayCommand]
+    private void PostponeDownloads()
+    {
+        IsDownloadChoiceOpen = false;
+        _downloadChoiceTake = null;
+    }
+
+    private async Task CollectAsync(RemoteDevice device, string folder, Task<RemoteTakeResult> download)
+    {
+        if (_syncing.Any(entry => entry.Device == device && entry.Folder == folder)) { return; }
+        _syncing.Add((device, folder));
         string? error = null;
         try
         {
-            var result = await device.WaitForTakeAsync(take.TakeId);
+            var result = await download;
             if (result.Errors.Count > 0)
             {
                 error = $"{device.Name}: {string.Join("; ", result.Errors)}";
@@ -445,7 +530,6 @@ public partial class MainViewModel
         catch (OperationCanceledException)
         {
             error = $"{device.Name} was disconnected before its files arrived; they stay on that device.";
-            TakeManifest.Update(take.Folder, m => m.Device(device.Id, device.Name).Status = "failed");
         }
         catch (Exception ex)
         {
@@ -453,15 +537,10 @@ public partial class MainViewModel
         }
         await Dispatcher.UIThread.InvokeAsync(async () =>
         {
-            _syncing.RemoveAll(s => s.Device == device && s.Folder == take.Folder);
-            if (_syncing.Any(s => s.Folder == take.Folder))
-            {
-                return;
-            }
+            _syncing.RemoveAll(s => s.Device == device && s.Folder == folder);
             await LoadTakesAsync();
-            var vm = Takes.Find(take.Folder);
-            var count = take.Remotes.Count + (take.Local ? 1 : 0);
-            ShowToast(error is null ? $"Take complete · {count} device{(count == 1 ? "" : "s")}" : "Take saved with problems",
+            var vm = Takes.Find(folder);
+            ShowToast(error is null ? $"Downloaded from {device.Name}" : "Download needs attention",
                 error ?? "", error is not null, vm);
         });
     }

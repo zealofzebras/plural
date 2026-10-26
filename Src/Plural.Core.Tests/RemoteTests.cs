@@ -52,6 +52,7 @@ public class RemoteTests
     {
         public RemoteNetwork? Net { get; set; }
         public bool Approve { get; set; } = true;
+        public TaskCompletionSource<bool>? ApprovalCompletion { get; set; }
         public int Approvals { get; private set; }
         public bool Recording { get; private set; }
         public string? TakeId { get; private set; }
@@ -60,6 +61,9 @@ public class RemoteTests
         public bool? Mode { get; private set; }
         public List<RemoteControllerInfo?> Controllers { get; } = [];
         public byte[] Content { get; } = MakeWav(300_000);
+        public IReadOnlyList<string> Errors { get; set; } = [];
+        public string? StartError { get; set; }
+        public TaskCompletionSource<long>? StartCompletion { get; set; }
 
         public StatusMsg GetStatus() => new([new RemoteMicStatus("Mic", true, 0.5f)], Recording, TakeId, 0, true, Mode == true, true, "WAV", IsPaused);
 
@@ -94,7 +98,7 @@ public class RemoteTests
         public Task<bool> ApproveAsync(HelloMsg controller)
         {
             Approvals++;
-            return Task.FromResult(Approve);
+            return ApprovalCompletion?.Task ?? Task.FromResult(Approve);
         }
 
         public Task SetModeAsync(bool video)
@@ -108,6 +112,8 @@ public class RemoteTests
         public async Task<long> StartAsync(string takeId, long startAt, bool video)
         {
             RequestedStart = startAt;
+            if (StartError is { } error) { throw new InvalidOperationException(error); }
+            if (StartCompletion is { } pending) { return await pending.Task; }
             while (MediaClock.Now < startAt) { await Task.Delay(1); }
             StartedAt = MediaClock.Now;
             Recording = true;
@@ -123,7 +129,7 @@ public class RemoteTests
             var b = Path.Combine(folder, "Video.mkv");
             File.WriteAllBytes(a, Content);
             File.WriteAllBytes(b, Content.AsSpan(0, 1000).ToArray());
-            Net!.Responder.TakeFinished(new RecordedTake(folder, RecordingFormat.Wav, [a, b], TimeSpan.FromSeconds(1.5)));
+            Net!.Responder.TakeFinished(new RecordedTake(folder, RecordingFormat.Wav, [a, b], TimeSpan.FromSeconds(1.5)) { Errors = Errors });
             TakeId = null;
             return Task.CompletedTask;
         }
@@ -287,6 +293,7 @@ public class RemoteTests
         public required RemoteDevice Dev;
         public required string Folder;
         public required long StartAt;
+        public required Dictionary<string, (RemoteIdentity Who, Func<Stream, Task> Accept)> Registry;
 
         public async ValueTask DisposeAsync()
         {
@@ -296,13 +303,15 @@ public class RemoteTests
         }
     }
 
-    private static async Task<Pair> RecordingPairAsync(string tag, int remoteProtocol)
+    private static async Task<Pair> RecordingPairAsync(string tag, int remoteProtocol, bool downloadAfterRecording = true)
     {
         var tmp = Path.Combine(Path.GetTempPath(), "plural_remote_" + Guid.NewGuid().ToString("N"));
         var registry = new Dictionary<string, (RemoteIdentity, Func<Stream, Task>)>();
         var remoteRec = new FakeRecorder(Path.Combine(tmp, "remote"));
         var remote = new RemoteNetwork(new RemoteIdentity("r-" + tag, "Phone", "Android"), [new LoopTransport(registry)], remoteRec) { ProtocolVersion = remoteProtocol };
         var ctrl = new RemoteNetwork(new RemoteIdentity("c-" + tag, "PC", "Windows"), [new LoopTransport(registry)], new FakeRecorder(tmp));
+        remote.RestoreTakes(Path.Combine(tmp, "remote-root"));
+        ctrl.RestoreTakes(tmp);
         remoteRec.Net = remote;
         remote.StartListening();
         await Until(() => registry.Count == 1);
@@ -313,8 +322,461 @@ public class RemoteTests
         var startAt = MediaClock.Now + TimeSpan.FromMilliseconds(100).Ticks;
         ctrl.RegisterTake("t", folder, startAt);
         ctrl.ActiveTakeId = "t";
-        await dev.StartAsync("t", startAt, false);
-        return new Pair { Remote = remote, Ctrl = ctrl, RemoteRec = remoteRec, Dev = dev, Folder = folder, StartAt = startAt };
+        await dev.StartAsync("t", startAt, false, downloadAfterRecording);
+        return new Pair { Remote = remote, Ctrl = ctrl, RemoteRec = remoteRec, Dev = dev, Folder = folder, StartAt = startAt, Registry = registry };
+    }
+
+    private static DiscoveredPeer Peer(RemoteNetwork network) => new(network.Identity.Id, network.Identity.Name, network.Identity.Platform,
+        [new RemoteEndpoint("Loop", network.Identity.Id, network.Identity.Id, network.Identity.Name, network.Identity.Platform)]);
+
+    [Fact]
+    public async Task DeferredTakeDownloadsLaterWithoutDisconnecting()
+    {
+        await using var pair = await RecordingPairAsync("defer", RemoteProtocol.Version, downloadAfterRecording: false);
+        Assert.True(pair.Dev.SupportsDeferredDownloads);
+        pair.Ctrl.ActiveTakeId = null;
+        var completion = pair.Dev.WaitForTakeAsync("t");
+        await pair.Dev.StopAsync("t");
+        await Until(() => TakeManifest.Load(pair.Folder)?.Devices.Single().Status == "pending");
+        Assert.False(completion.IsCompleted);
+        Assert.False(TakeManifest.Load(pair.Folder)!.Devices.Single().DownloadRequested);
+        Assert.False(Directory.Exists(Path.Combine(pair.Folder, "Phone")));
+        var result = await pair.Dev.DownloadAsync("t").WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.Equal(2, result.Files.Count);
+        Assert.Equal(pair.RemoteRec.Content, File.ReadAllBytes(result.Files.First(file => file.EndsWith(".wav"))));
+        Assert.Same(result, await completion);
+        Assert.Same(result, await pair.Dev.WaitForTakeAsync("t"));
+        Assert.Equal("synced", TakeManifest.Load(pair.Folder)!.Devices.Single().Status);
+        await Until(() => pair.Remote.Responder.PendingTakes == 0);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task TwoRemotesDownloadIndependentlyWithMixedPolicies(bool secondImmediate)
+    {
+        await using var pair = await RecordingPairAsync("mixed", RemoteProtocol.Version, downloadAfterRecording: false);
+        var tmp = Path.GetDirectoryName(pair.Folder)!;
+        var secondRecorder = new FakeRecorder(Path.Combine(tmp, "second"));
+        await using var second = new RemoteNetwork(new RemoteIdentity("r-second", "Phone", "Test"), [new LoopTransport(pair.Registry)], secondRecorder);
+        secondRecorder.Net = second;
+        second.RestoreTakes(Path.Combine(tmp, "second-root"));
+        second.StartListening();
+        await Until(() => pair.Registry.Count == 2);
+        var secondDevice = pair.Ctrl.Connect(Peer(second));
+        await Until(() => secondDevice.State == RemoteDeviceState.Connected && secondDevice.ClockOffset is not null);
+        await secondDevice.StartAsync("t", MediaClock.Now + TimeSpan.FromMilliseconds(80).Ticks, true, secondImmediate);
+        pair.Ctrl.ActiveTakeId = null;
+        await Task.WhenAll(pair.Dev.StopAsync("t"), secondDevice.StopAsync("t"));
+        if (!secondImmediate)
+        {
+            await Until(() => TakeManifest.Load(pair.Folder)!.Devices.All(device => device.Status == "pending"));
+            Assert.False(secondDevice.WaitForTakeAsync("t").IsCompleted);
+        }
+        var immediate = await (secondImmediate ? secondDevice.WaitForTakeAsync("t") : secondDevice.DownloadAsync("t")).WaitAsync(TimeSpan.FromSeconds(5));
+        await Until(() => TakeManifest.Load(pair.Folder)!.Devices.First(device => device.Id == pair.Dev.Id).Status == "pending");
+        Assert.False(pair.Dev.WaitForTakeAsync("t").IsCompleted);
+        Assert.Equal(Path.Combine(pair.Folder, "Phone (2)"), immediate.Folder);
+        var deferred = await pair.Dev.DownloadAsync("t").WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.Equal(Path.Combine(pair.Folder, "Phone"), deferred.Folder);
+        Assert.All(TakeManifest.Load(pair.Folder)!.Devices, device => Assert.Equal("synced", device.Status));
+    }
+
+    [Theory]
+    [InlineData("refused")]
+    [InlineData("timeout")]
+    [InlineData("disconnected")]
+    public async Task UnsuccessfulStartRemovesOnlyTheFailedDeviceFromMixedTake(string failure)
+    {
+        await using var pair = await RecordingPairAsync("failed-start", RemoteProtocol.Version, downloadAfterRecording: false);
+        var tmp = Path.GetDirectoryName(pair.Folder)!;
+        var recorder = new FakeRecorder(Path.Combine(tmp, "refused"))
+        {
+            StartError = failure == "refused" ? "Use Connect mics first." : null,
+            StartCompletion = failure == "refused" ? null : new(TaskCreationOptions.RunContinuationsAsynchronously)
+        };
+        await using var remote = new RemoteNetwork(new RemoteIdentity("r-refused", "Other phone", "Test"), [new LoopTransport(pair.Registry)], recorder);
+        recorder.Net = remote;
+        remote.StartListening();
+        await Until(() => pair.Registry.Count == 2);
+        var device = pair.Ctrl.Connect(Peer(remote));
+        await Until(() => device.State == RemoteDeviceState.Connected && device.ClockOffset is not null);
+        try
+        {
+            var start = device.StartAsync("t", MediaClock.Now, false, downloadAfterRecording: false);
+            await Until(() => recorder.RequestedStart != 0);
+            if (failure == "disconnected") { remote.Responder.Disconnect(); }
+            var error = await Assert.ThrowsAnyAsync<Exception>(() => start.WaitAsync(TimeSpan.FromSeconds(9)));
+            Assert.IsNotType<TimeoutException>(error);
+            var entry = Assert.Single(TakeManifest.Load(pair.Folder)!.Devices);
+            Assert.Equal(pair.Dev.Id, entry.Id);
+            Assert.Equal("recording", entry.Status);
+            await Assert.ThrowsAsync<InvalidOperationException>(() => device.DownloadAsync("t"));
+            pair.Ctrl.ActiveTakeId = null;
+            await pair.Dev.StopAsync("t");
+            Assert.Equal(2, (await pair.Dev.DownloadAsync("t").WaitAsync(TimeSpan.FromSeconds(5))).Files.Count);
+        }
+        finally { recorder.StartCompletion?.TrySetException(new IOException("Test finished.")); }
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task DeferredQueueAndRequestedIntentSurviveBothProcessRestartsAndRootChange(bool requestBeforeRestart)
+    {
+        await using var pair = await RecordingPairAsync("restart", RemoteProtocol.Version, downloadAfterRecording: false);
+        var root = Path.GetDirectoryName(pair.Folder)!;
+        var saved = TakeManifest.Load(pair.Folder)!.Devices.Single();
+        pair.Ctrl.ActiveTakeId = null;
+        await pair.Dev.StopAsync("t");
+        await Until(() => TakeManifest.Load(pair.Folder)!.Devices.Single().Status == "pending");
+        var remoteId = pair.Remote.Identity;
+        var controllerId = pair.Ctrl.Identity;
+        await pair.Remote.DisposeAsync();
+        await Until(() => pair.Dev.State == RemoteDeviceState.Reconnecting && pair.Registry.Count == 0);
+        if (requestBeforeRestart)
+        {
+            var requested = pair.Dev.DownloadAsync("t");
+            Assert.True(TakeManifest.Load(pair.Folder)!.Devices.Single().DownloadRequested);
+            Assert.False(requested.IsCompleted);
+        }
+        await pair.Ctrl.DisposeAsync();
+
+        var movedRoot = Path.Combine(root, "changed-root");
+        pair.Remote.RestoreTakes(movedRoot);
+        Assert.Empty(Directory.GetFiles(Path.Combine(root, "remote-root", ".remote"), "*.json"));
+        pair.RemoteRec = new FakeRecorder(Path.Combine(root, "remote"));
+        pair.Remote = new RemoteNetwork(remoteId with { Name = "Renamed" }, [new LoopTransport(pair.Registry)], pair.RemoteRec);
+        pair.RemoteRec.Net = pair.Remote;
+        pair.Remote.RestoreTakes(movedRoot);
+        pair.Remote.RestoreTakes(movedRoot);
+        Assert.Equal(1, pair.Remote.Responder.PendingTakes);
+        pair.Ctrl = new RemoteNetwork(controllerId, [new LoopTransport(pair.Registry)], new FakeRecorder(root));
+        pair.Ctrl.RestoreTakes(root);
+        pair.Ctrl.RestoreTakes(root);
+        pair.Ctrl.RegisterTake("t", pair.Folder, MediaClock.Now);
+        pair.Dev = pair.Ctrl.Connect(Peer(pair.Remote));
+        var downloaded = requestBeforeRestart ? pair.Dev.WaitForTakeAsync("t") : pair.Dev.DownloadAsync("t");
+        Assert.False(downloaded.IsCompleted);
+        pair.Remote.StartListening();
+        var result = await downloaded.WaitAsync(TimeSpan.FromSeconds(10));
+        Assert.Equal(Path.Combine(pair.Folder, "Phone"), result.Folder);
+        Assert.Equal(saved.StartOffsetMs, result.StartOffsetMs);
+        Assert.Equal(saved.ClockUncertaintyMs, result.UncertaintyMs);
+        Assert.Equal(2, result.Files.Count);
+        await Until(() => pair.Remote.Responder.PendingTakes == 0);
+        Assert.Empty(Directory.GetFiles(Path.Combine(movedRoot, ".remote"), "*.json"));
+    }
+
+    [Fact]
+    public async Task AnotherControllerCannotRetrieveOrAcknowledgeDeferredTake()
+    {
+        await using var pair = await RecordingPairAsync("owner", RemoteProtocol.Version, downloadAfterRecording: false);
+        pair.Ctrl.ActiveTakeId = null;
+        await pair.Dev.StopAsync("t");
+        await Until(() => pair.Remote.Responder.PendingTakes == 1);
+        await pair.Ctrl.DisconnectAsync(pair.Dev);
+        await Until(() => pair.Remote.Responder.Controller is { Connected: false });
+        pair.Remote.Responder.PendingLifetime = TimeSpan.Zero;
+        var transport = new LoopTransport(pair.Registry);
+        var endpoint = Peer(pair.Remote).Endpoints.Single();
+        await using (var stranger = new RemoteLink(await transport.ConnectAsync(endpoint, CancellationToken.None), "Loop"))
+        {
+            var accepted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var pong = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var received = 0;
+            stranger.Received += (_, kind, _) =>
+            {
+                if (kind == RemoteMsg.Accept) { accepted.TrySetResult(); }
+                if (kind == RemoteMsg.TakeReady) { Interlocked.Increment(ref received); }
+                if (kind == RemoteMsg.Pong) { pong.TrySetResult(); }
+            };
+            await RemoteLink.ExchangeHelloAsync(stranger, new HelloMsg(1, "stranger", "Other PC", "Test", false, true, 3), TimeSpan.FromSeconds(3));
+            await accepted.Task.WaitAsync(TimeSpan.FromSeconds(3));
+            await stranger.SendAsync(RemoteMsg.Download, new DownloadMsg("t"));
+            await stranger.SendAsync(RemoteMsg.TakeAck, new TakeAckMsg("t"));
+            await stranger.SendAsync(RemoteMsg.Ping, new PingMsg(MediaClock.Now));
+            await pong.Task.WaitAsync(TimeSpan.FromSeconds(3));
+            Assert.Equal(0, Volatile.Read(ref received));
+            Assert.Equal(1, pair.Remote.Responder.PendingTakes);
+        }
+        await Until(() => pair.Remote.Responder.Controller is not { Connected: true });
+        pair.Dev = pair.Ctrl.Connect(Peer(pair.Remote));
+        var result = await pair.Dev.DownloadAsync("t").WaitAsync(TimeSpan.FromSeconds(10));
+        Assert.Equal(2, result.Files.Count);
+        await Until(() => pair.Remote.Responder.PendingTakes == 0);
+    }
+
+    [Theory]
+    [InlineData(1)]
+    [InlineData(2)]
+    public async Task OlderRemoteRejectsDeferralButStillDownloadsImmediately(int level)
+    {
+        await using var pair = await RecordingPairAsync("legacy" + level, level);
+        Assert.False(pair.Dev.SupportsDeferredDownloads);
+        await Assert.ThrowsAsync<NotSupportedException>(() => pair.Dev.StartAsync("other", MediaClock.Now, true, false));
+        Assert.True(JsonSerializer.Deserialize<StartMsg>("{\"takeId\":\"t\",\"startAt\":1,\"video\":true}", RemoteJson.Default.StartMsg)!.DownloadAfterRecording);
+        pair.Ctrl.ActiveTakeId = null;
+        await pair.Dev.StopAsync("t");
+        Assert.Equal(2, (await pair.Dev.WaitForTakeAsync("t").WaitAsync(TimeSpan.FromSeconds(5))).Files.Count);
+    }
+
+    [Theory]
+    [InlineData(2)]
+    [InlineData(3)]
+    public async Task UnknownTakeIsNotAcknowledgedAndCanBeRestoredLater(int level)
+    {
+        await using var pair = await RecordingPairAsync("unknown", level);
+        var root = Path.GetDirectoryName(pair.Folder)!;
+        var identity = pair.Ctrl.Identity;
+        await pair.Ctrl.DisposeAsync();
+        await Until(() => pair.Remote.Responder.Controller is { Connected: false });
+        await pair.RemoteRec.StopAsync("t");
+        pair.Ctrl = new RemoteNetwork(identity, [new LoopTransport(pair.Registry)], new FakeRecorder(root));
+        pair.Dev = pair.Ctrl.Connect(Peer(pair.Remote));
+        await Until(() => pair.Dev.State == RemoteDeviceState.Connected);
+        await Task.Delay(200);
+        Assert.Equal(1, pair.Remote.Responder.PendingTakes);
+        Assert.False(Directory.Exists(Path.Combine(pair.Folder, "Phone")));
+        pair.Ctrl.RestoreTakes(root);
+        if (level < 3) { pair.Remote.Responder.Disconnect(); }
+        var result = await pair.Dev.WaitForTakeAsync("t").WaitAsync(TimeSpan.FromSeconds(10));
+        Assert.Equal(2, result.Files.Count);
+    }
+
+    [Fact]
+    public async Task RecorderErrorsDoNotFailOrResendAnIntactTransfer()
+    {
+        await using var pair = await RecordingPairAsync("warnings", RemoteProtocol.Version, downloadAfterRecording: false);
+        pair.RemoteRec.Errors = ["One mic disconnected during recording."];
+        pair.Ctrl.ActiveTakeId = null;
+        await pair.Dev.StopAsync("t");
+        await Until(() => TakeManifest.Load(pair.Folder)!.Devices.Single().Status == "pending");
+        var received = 0;
+        pair.Dev.TakeReceived += (_, _) => Interlocked.Increment(ref received);
+        var result = await pair.Dev.DownloadAsync("t").WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.Equal(2, result.Files.Count);
+        Assert.Equal(pair.RemoteRec.Errors, result.Errors);
+        Assert.Equal("synced", TakeManifest.Load(pair.Folder)!.Devices.Single().Status);
+        await Until(() => pair.Remote.Responder.PendingTakes == 0);
+        Assert.Equal(result.Files, (await pair.Dev.DownloadAsync("t")).Files.Select(Path.GetFullPath));
+        Assert.Equal(1, Volatile.Read(ref received));
+    }
+
+    [Fact]
+    public async Task CompletedUnacknowledgedTransferRetriesOnlyWhenExplicitlyRequested()
+    {
+        await using var pair = await RecordingPairAsync("unacknowledged", RemoteProtocol.Version, downloadAfterRecording: false);
+        pair.RemoteRec.Errors = ["Recorder warning"];
+        pair.Ctrl.ActiveTakeId = null;
+        await pair.Dev.StopAsync("t");
+        await Until(() => TakeManifest.Load(pair.Folder)!.Devices.Single().Status == "pending");
+        await pair.Ctrl.DisconnectAsync(pair.Dev);
+        await Until(() => pair.Remote.Responder.Controller is { Connected: false });
+        var transport = new LoopTransport(pair.Registry);
+        await using var receiver = new RemoteLink(await transport.ConnectAsync(Peer(pair.Remote).Endpoints.Single(), CancellationToken.None), "Loop");
+        var accepted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var ended = 0;
+        receiver.Received += (_, kind, _) =>
+        {
+            if (kind == RemoteMsg.Accept) { accepted.TrySetResult(); }
+            if (kind == RemoteMsg.FileEnd) { Interlocked.Increment(ref ended); }
+        };
+        await RemoteLink.ExchangeHelloAsync(receiver, new HelloMsg(1, pair.Ctrl.Identity.Id, "PC", "Test", false, true, 3), TimeSpan.FromSeconds(3));
+        await accepted.Task.WaitAsync(TimeSpan.FromSeconds(3));
+        await receiver.SendAsync(RemoteMsg.Download, new DownloadMsg("t"));
+        await Until(() => Volatile.Read(ref ended) == 2);
+        Assert.Equal(1, pair.Remote.Responder.PendingTakes);
+        await receiver.SendAsync(RemoteMsg.Download, new DownloadMsg("t"));
+        await receiver.SendAsync(RemoteMsg.Download, new DownloadMsg("t", Retry: true));
+        await Until(() => Volatile.Read(ref ended) >= 4);
+        await receiver.SendAsync(RemoteMsg.TakeAck, new TakeAckMsg("t"));
+        await Until(() => pair.Remote.Responder.PendingTakes == 0);
+        Assert.Equal(4, Volatile.Read(ref ended));
+    }
+
+    [Fact]
+    public async Task MissingQueuedFileIsReportedAsFailedWithoutAcknowledgement()
+    {
+        await using var pair = await RecordingPairAsync("missing", RemoteProtocol.Version, downloadAfterRecording: false);
+        pair.Ctrl.ActiveTakeId = null;
+        await pair.Dev.StopAsync("t");
+        await Until(() => pair.Remote.Responder.PendingTakes == 1 && TakeManifest.Load(pair.Folder)!.Devices.Single().Status == "pending");
+        var path = Path.Combine(Path.GetDirectoryName(pair.Folder)!, "remote", "Mic.wav");
+        File.Delete(path);
+        var result = await pair.Dev.DownloadAsync("t").WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.Contains(result.Errors, error => error.Contains("Missing file: Mic.wav"));
+        Assert.Equal("failed", TakeManifest.Load(pair.Folder)!.Devices.Single().Status);
+        Assert.Equal(1, pair.Remote.Responder.PendingTakes);
+        File.WriteAllBytes(path, pair.RemoteRec.Content);
+        Assert.Equal(2, (await pair.Dev.DownloadAsync("t").WaitAsync(TimeSpan.FromSeconds(5))).Files.Count);
+        await Until(() => pair.Remote.Responder.PendingTakes == 0);
+    }
+
+    [Fact]
+    public async Task SyncedManifestRecoversAnAcknowledgementLostBeforeRemoteRestart()
+    {
+        await using var pair = await RecordingPairAsync("ack-lost", RemoteProtocol.Version, downloadAfterRecording: false);
+        var root = Path.GetDirectoryName(pair.Folder)!;
+        var remoteRoot = Path.Combine(root, "remote-root");
+        pair.Ctrl.ActiveTakeId = null;
+        await pair.Dev.StopAsync("t");
+        await Until(() => pair.Remote.Responder.PendingTakes == 1);
+        var queuePath = Assert.Single(Directory.GetFiles(Path.Combine(remoteRoot, ".remote"), "*.json"));
+        var unacknowledged = File.ReadAllText(queuePath);
+        await pair.Dev.DownloadAsync("t").WaitAsync(TimeSpan.FromSeconds(5));
+        await Until(() => pair.Remote.Responder.PendingTakes == 0);
+        Assert.Equal("synced", TakeManifest.Load(pair.Folder)!.Devices.Single().Status);
+
+        var identity = pair.Remote.Identity;
+        await pair.Remote.DisposeAsync();
+        await Until(() => pair.Registry.Count == 0 && pair.Dev.State == RemoteDeviceState.Reconnecting);
+        File.WriteAllText(queuePath, unacknowledged);
+        pair.Remote = new RemoteNetwork(identity, [new LoopTransport(pair.Registry)], pair.RemoteRec);
+        pair.RemoteRec.Net = pair.Remote;
+        pair.Remote.RestoreTakes(remoteRoot);
+        Assert.Equal(1, pair.Remote.Responder.PendingTakes);
+        var receivedAgain = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        pair.Dev.TakeReceived += (_, _) => receivedAgain.TrySetResult();
+        pair.Remote.StartListening();
+        await receivedAgain.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        await Until(() => pair.Remote.Responder.PendingTakes == 0);
+        Assert.Empty(Directory.GetFiles(Path.Combine(remoteRoot, ".remote"), "*.json"));
+    }
+
+    [Fact]
+    public async Task DeclinedDownloadFaultsPendingWaitAndReplacementCanRetry()
+    {
+        await using var pair = await RecordingPairAsync("declined-download", RemoteProtocol.Version, downloadAfterRecording: false);
+        pair.Ctrl.ActiveTakeId = null;
+        await pair.Dev.StopAsync("t");
+        await Until(() => pair.Remote.Responder.PendingTakes == 1);
+        pair.Remote.Responder.Disconnect();
+        await pair.Ctrl.DisconnectAsync(pair.Dev);
+        await Until(() => pair.Remote.Responder.Controller is { Connected: false });
+        pair.RemoteRec.ApprovalCompletion = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        var declined = pair.Ctrl.Connect(Peer(pair.Remote));
+        var download = declined.DownloadAsync("t");
+        await Until(() => pair.RemoteRec.Approvals == 2);
+        Assert.False(download.IsCompleted);
+        pair.RemoteRec.ApprovalCompletion.SetResult(false);
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(() => download.WaitAsync(TimeSpan.FromSeconds(5)));
+        Assert.Contains("did not allow", error.Message);
+        await Until(() => declined.State == RemoteDeviceState.Rejected);
+        await Assert.ThrowsAsync<InvalidOperationException>(() => declined.WaitForTakeAsync("another").WaitAsync(TimeSpan.FromSeconds(3)));
+        pair.RemoteRec.ApprovalCompletion = null;
+        pair.Dev = pair.Ctrl.Connect(Peer(pair.Remote));
+        Assert.NotSame(declined, pair.Dev);
+        await Until(() => declined.State == RemoteDeviceState.Disconnected);
+        await declined.DisposeAsync();
+        Assert.Equal(2, (await pair.Dev.DownloadAsync("t").WaitAsync(TimeSpan.FromSeconds(5))).Files.Count);
+        await Until(() => pair.Remote.Responder.PendingTakes == 0);
+    }
+
+    [Fact]
+    public async Task DisposingWhileAwaitingApprovalClosesLinkAndCancelsDownload()
+    {
+        await using var pair = await RecordingPairAsync("dispose-approval", RemoteProtocol.Version, downloadAfterRecording: false);
+        pair.Ctrl.ActiveTakeId = null;
+        await pair.Dev.StopAsync("t");
+        await Until(() => pair.Remote.Responder.PendingTakes == 1);
+        await pair.Ctrl.DisconnectAsync(pair.Dev);
+        await pair.Remote.DisposeAsync();
+        await Until(() => pair.Registry.Count == 0);
+        var closed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        pair.Registry[pair.Remote.Identity.Id] = (pair.Remote.Identity, async stream =>
+        {
+            await using var link = new RemoteLink(stream, "Loop");
+            await RemoteLink.ExchangeHelloAsync(link, new HelloMsg(1, pair.Remote.Identity.Id, "Phone", "Test", false, false, 3), TimeSpan.FromSeconds(3));
+            await link.Completion;
+            closed.TrySetResult();
+        });
+        pair.Dev = pair.Ctrl.Connect(Peer(pair.Remote));
+        var download = pair.Dev.DownloadAsync("t");
+        await Until(() => pair.Dev.State == RemoteDeviceState.AwaitingApproval);
+        await pair.Dev.DisposeAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(3));
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => download.WaitAsync(TimeSpan.FromSeconds(3)));
+        await closed.Task.WaitAsync(TimeSpan.FromSeconds(3));
+        await pair.Dev.DisposeAsync();
+        Assert.Equal(RemoteDeviceState.Disconnected, pair.Dev.State);
+    }
+
+    [Fact]
+    public async Task DownloadRequestedWhileConnectingFailsClearlyIfPeerWasDowngraded()
+    {
+        await using var pair = await RecordingPairAsync("downgrade", RemoteProtocol.Version, downloadAfterRecording: false);
+        pair.Ctrl.ActiveTakeId = null;
+        await pair.Dev.StopAsync("t");
+        await Until(() => pair.Remote.Responder.PendingTakes == 1);
+        await pair.Ctrl.DisconnectAsync(pair.Dev);
+        await Until(() => pair.Remote.Responder.Controller is { Connected: false });
+        pair.Remote.ProtocolVersion = 2;
+        pair.Dev = pair.Ctrl.Connect(Peer(pair.Remote));
+        await Assert.ThrowsAsync<NotSupportedException>(() => pair.Dev.DownloadAsync("t").WaitAsync(TimeSpan.FromSeconds(5)));
+        Assert.False(pair.Dev.SupportsDeferredDownloads);
+        Assert.Equal(1, pair.Remote.Responder.PendingTakes);
+    }
+
+    [Theory]
+    [InlineData("hash")]
+    [InlineData("size")]
+    [InlineData("identity")]
+    public async Task InvalidTransferIsNeverAcknowledged(string fault)
+    {
+        var root = Path.Combine(Path.GetTempPath(), "plural_remote_" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            var registry = new Dictionary<string, (RemoteIdentity, Func<Stream, Task>)>();
+            var remoteIdentity = new RemoteIdentity("bad-remote", "Phone", "Test");
+            var acknowledgements = 0;
+            var closed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            registry[remoteIdentity.Id] = (remoteIdentity, async stream =>
+            {
+                await using var link = new RemoteLink(stream, "Loop");
+                link.Received += (_, kind, _) =>
+                {
+                    if (kind == RemoteMsg.TakeAck) { Interlocked.Increment(ref acknowledgements); }
+                };
+                await RemoteLink.ExchangeHelloAsync(link, new HelloMsg(1, remoteIdentity.Id, "Phone", "Test", false, false, 3), TimeSpan.FromSeconds(3));
+                await link.SendAsync(RemoteMsg.Accept);
+                await link.SendAsync(RemoteMsg.TakeReady, new TakeReadyMsg("t", [new RemoteFile("Mic.wav", fault == "size" ? 4 : 3)], 1, [], 0));
+                await link.SendAsync(RemoteMsg.FileBegin, new FileBeginMsg("t", "Mic.wav", fault == "size" ? 4 : 3));
+                await link.SendRawAsync(RemoteMsg.FileData, new byte[] { 1, 2, 3 });
+                var hash = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(new byte[] { 1, 2, 3 }));
+                await link.SendAsync(RemoteMsg.FileEnd, new FileEndMsg(fault == "identity" ? "other" : "t", "Mic.wav", fault == "hash" ? "bad" : hash));
+                await link.Completion;
+                closed.TrySetResult();
+            });
+            await using var controller = new RemoteNetwork(new RemoteIdentity("controller", "PC", "Test"), [new LoopTransport(registry)], new FakeRecorder(root));
+            var folder = Path.Combine(root, "take");
+            controller.RegisterTake("t", folder, 1);
+            TakeManifest.Update(folder, manifest =>
+            {
+                var device = manifest.Device(remoteIdentity.Id, "Phone");
+                device.Folder = "Phone";
+                device.DownloadRequested = true;
+            });
+            controller.Connect(new DiscoveredPeer(remoteIdentity.Id, "Phone", "Test", [new RemoteEndpoint("Loop", remoteIdentity.Id, remoteIdentity.Id, "Phone", "Test")]));
+            await closed.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            Assert.Equal(0, Volatile.Read(ref acknowledgements));
+            Assert.NotEqual("synced", TakeManifest.Load(folder)!.Devices.Single().Status);
+            Assert.Empty(Directory.GetFiles(folder, "*.part", SearchOption.AllDirectories));
+            Assert.False(File.Exists(Path.Combine(folder, "Phone", "Mic.wav")));
+        }
+        finally { try { Directory.Delete(root, true); } catch (IOException) { } }
+    }
+
+    [Fact]
+    public async Task DeletedTakeIsNotRecreatedOrAcknowledged()
+    {
+        await using var pair = await RecordingPairAsync("deleted", RemoteProtocol.Version);
+        Directory.Delete(pair.Folder, true);
+        pair.Ctrl.ActiveTakeId = null;
+        await pair.Dev.StopAsync("t");
+        await Until(() => pair.Remote.Responder.PendingTakes == 1);
+        await Task.Delay(300);
+        Assert.False(Directory.Exists(pair.Folder));
+        Assert.Equal(1, pair.Remote.Responder.PendingTakes);
     }
 
     [Fact]

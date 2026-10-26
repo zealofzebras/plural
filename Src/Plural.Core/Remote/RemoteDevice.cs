@@ -26,15 +26,19 @@ public sealed class RemoteDevice : IAsyncDisposable
 {
     private readonly RemoteNetwork _net;
     private readonly CancellationTokenSource _life = new();
+    private readonly Task _run;
+    private readonly TaskCompletionSource _disposed = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    private int _disposing;
     private readonly object _lock = new();
     private readonly List<(long Rtt, long Offset)> _samples = [];
     private readonly Dictionary<string, (double OffsetMs, double UncertaintyMs)> _startOffsets = [];
     private readonly Dictionary<string, TaskCompletionSource<StartedMsg>> _starting = [];
     private readonly Dictionary<string, TaskCompletionSource<RemoteTakeResult>> _takes = [];
+    private readonly HashSet<string> _explicitDownloads = [];
     private readonly Dictionary<(string TakeId, bool Paused), TaskCompletionSource<PausedMsg>> _pausing = [];
     private List<RemoteEndpoint> _endpoints;
     private RemoteLink? _link;
-    private TaskCompletionSource<bool>? _accepted;
+    private Task? _ping;
     private Incoming? _incoming;
 
     public string Id { get; }
@@ -50,6 +54,9 @@ public sealed class RemoteDevice : IAsyncDisposable
 
     /// <summary>False for a remote running an older Plural: it is never sent Pause and the UI shows "Doesn't support pause".</summary>
     public bool SupportsPause => Protocol >= RemoteProtocol.PauseVersion;
+
+    /// <summary>Whether the connected peer supports independently requested, deferred downloads (level 3).</summary>
+    public bool SupportsDeferredDownloads => Protocol >= RemoteProtocol.DeferredDownloadsVersion;
 
     /// <summary>The remote's mic button asked to toggle recording (also raised on <see cref="RemoteNetwork.RecordRequested"/>).</summary>
     public event Action<RemoteDevice>? RecordRequested;
@@ -76,7 +83,7 @@ public sealed class RemoteDevice : IAsyncDisposable
         Name = name;
         Platform = platform;
         _endpoints = Order(endpoints);
-        _ = Task.Run(RunAsync);
+        _run = Task.Run(RunAsync);
     }
 
     private List<RemoteEndpoint> Order(IEnumerable<RemoteEndpoint> eps) =>
@@ -118,7 +125,15 @@ public sealed class RemoteDevice : IAsyncDisposable
                 }
                 catch (RejectedException ex)
                 {
-                    SetState(RemoteDeviceState.Rejected, ex.Message);
+                    lock (_lock)
+                    {
+                        State = RemoteDeviceState.Rejected;
+                        Error = ex.Message;
+                        foreach (var pending in _takes.Values) { pending.TrySetException(new InvalidOperationException(ex.Message)); }
+                        foreach (var pending in _starting.Values) { pending.TrySetException(new InvalidOperationException(ex.Message)); }
+                        foreach (var pending in _pausing.Values) { pending.TrySetException(new InvalidOperationException(ex.Message)); }
+                    }
+                    Changed?.Invoke(this);
                     return;
                 }
                 catch (Exception ex) when (!ct.IsCancellationRequested)
@@ -153,18 +168,27 @@ public sealed class RemoteDevice : IAsyncDisposable
             ?? throw new InvalidOperationException($"No {ep.Transport} support.");
         var stream = await transport.ConnectAsync(ep, ct).ConfigureAwait(false);
         var link = new RemoteLink(stream, transport.Name);
-        _accepted = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        lock (_lock)
+        {
+            if (ct.IsCancellationRequested)
+            {
+                link.Close();
+                ct.ThrowIfCancellationRequested();
+            }
+            _link = link;
+        }
+        var accepted = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
         string? rejectReason = null;
         link.Received += (l, kind, payload) =>
         {
             if (kind == RemoteMsg.Reject)
             {
                 rejectReason = RemoteLink.Parse<RejectMsg>(payload).Reason;
-                _accepted?.TrySetResult(false);
+                accepted.TrySetResult(false);
             }
             else if (kind == RemoteMsg.Accept)
             {
-                _accepted?.TrySetResult(true);
+                accepted.TrySetResult(true);
             }
             else
             {
@@ -173,7 +197,7 @@ public sealed class RemoteDevice : IAsyncDisposable
         };
         link.Closed += (l, e) =>
         {
-            _accepted?.TrySetException(e ?? new IOException("Closed."));
+            accepted.TrySetException(e ?? new IOException("Closed."));
             AbortIncoming();
             lock (_lock)
             {
@@ -195,7 +219,7 @@ public sealed class RemoteDevice : IAsyncDisposable
             HasVideo = hello.HasVideo;
             Protocol = hello.EffectiveLevel;
             SetState(RemoteDeviceState.AwaitingApproval);
-            if (!await _accepted.Task.WaitAsync(TimeSpan.FromSeconds(90), ct).ConfigureAwait(false))
+            if (!await accepted.Task.WaitAsync(TimeSpan.FromSeconds(90), ct).ConfigureAwait(false))
             {
                 throw new RejectedException(rejectReason ?? $"{Name} did not allow remote control.");
             }
@@ -206,9 +230,10 @@ public sealed class RemoteDevice : IAsyncDisposable
             throw;
         }
         lock (_lock) { _samples.Clear(); }
-        _link = link;
+        ct.ThrowIfCancellationRequested();
         SetState(RemoteDeviceState.Connected);
-        _ = PingLoopAsync(link);
+        RequestDownloads();
+        _ping = PingLoopAsync(link);
     }
 
     private async Task PingLoopAsync(RemoteLink link)
@@ -321,40 +346,77 @@ public sealed class RemoteDevice : IAsyncDisposable
     /// <summary>
     /// Asks the remote to start take <paramref name="takeId"/> at <paramref name="startAt"/> (controller clock) and waits for it to begin.
     /// Returns the remote's actual start relative to <paramref name="startAt"/> in ms.
+    /// False <paramref name="downloadAfterRecording"/> requires level 3 and keeps files pending until <see cref="DownloadAsync"/>.
     /// </summary>
-    public async Task<double> StartAsync(string takeId, long startAt, bool video)
+    public async Task<double> StartAsync(string takeId, long startAt, bool video, bool downloadAfterRecording = true)
     {
         var link = _link;
         if (State != RemoteDeviceState.Connected || link is null || link.IsClosed)
         {
             throw new InvalidOperationException($"{Name} is not connected.");
         }
+        if (!downloadAfterRecording && !SupportsDeferredDownloads)
+        {
+            throw new NotSupportedException($"{Name} doesn't support deferred downloads.");
+        }
         var offset = ClockOffset ?? throw new InvalidOperationException($"{Name}: clock not synchronised yet.");
+        var takeFolder = _net.FolderFor(takeId) ?? throw new InvalidOperationException("Register the take before starting it.");
+        var sub = _net.DeviceFolder(takeId, Id, Name);
+        if (!TakeManifest.UpdateExisting(takeFolder, manifest =>
+        {
+            var device = manifest.Device(Id, Name);
+            device.Folder = sub;
+            device.DownloadRequested = downloadAfterRecording;
+            device.Status = "recording";
+        })) { throw new InvalidOperationException("The take was deleted."); }
         var tcs = new TaskCompletionSource<StartedMsg>(TaskCreationOptions.RunContinuationsAsynchronously);
         lock (_lock)
         {
             _starting[takeId] = tcs;
             _takes[takeId] = new TaskCompletionSource<RemoteTakeResult>(TaskCreationOptions.RunContinuationsAsynchronously);
         }
-        await link.SendAsync(RemoteMsg.Start, new StartMsg(takeId, startAt + offset, video)).ConfigureAwait(false);
-        var wait = TimeSpan.FromTicks(Math.Max(0, startAt - MediaClock.Now)) + TimeSpan.FromSeconds(6);
         StartedMsg started;
         try
         {
-            started = await tcs.Task.WaitAsync(wait).ConfigureAwait(false);
+            await link.SendAsync(RemoteMsg.Start, new StartMsg(takeId, startAt + offset, video, downloadAfterRecording)).ConfigureAwait(false);
+            var wait = TimeSpan.FromTicks(Math.Max(0, startAt - MediaClock.Now)) + TimeSpan.FromSeconds(6);
+            try
+            {
+                started = await tcs.Task.WaitAsync(wait).ConfigureAwait(false);
+            }
+            catch (TimeoutException)
+            {
+                throw new InvalidOperationException($"{Name} did not start in time.");
+            }
+            if (started.Error is { } error)
+            {
+                throw new InvalidOperationException($"{Name}: {error}");
+            }
         }
-        catch (TimeoutException)
+        catch
         {
-            lock (_lock) { _starting.Remove(takeId); _takes.Remove(takeId); }
-            throw new InvalidOperationException($"{Name} did not start in time.");
+            lock (_lock)
+            {
+                if (_takes.Remove(takeId, out var pending)) { pending.TrySetCanceled(); }
+            }
+            TakeManifest.UpdateExisting(takeFolder, manifest => manifest.Devices.RemoveAll(device => device.Id == Id));
+            throw;
         }
-        if (started.Error is { } e)
+        finally
         {
-            lock (_lock) { _takes.Remove(takeId); }
-            throw new InvalidOperationException($"{Name}: {e}");
+            lock (_lock)
+            {
+                if (_starting.TryGetValue(takeId, out var pending) && ReferenceEquals(pending, tcs)) { _starting.Remove(takeId); }
+            }
         }
         var ms = (started.T0 - offset - startAt) / 10_000.0;
         lock (_lock) { _startOffsets[takeId] = (ms, ClockRtt.TotalMilliseconds / 2); }
+        TakeManifest.UpdateExisting(takeFolder, manifest =>
+        {
+            var device = manifest.Device(Id, Name);
+            device.StartOffsetMs = ms;
+            device.ClockUncertaintyMs = ClockRtt.TotalMilliseconds / 2;
+        });
         return ms;
     }
 
@@ -419,7 +481,7 @@ public sealed class RemoteDevice : IAsyncDisposable
         if (_net.FolderFor(takeId) is { } folder && _net.ScheduledStart(takeId) is { } startAt)
         {
             var ms = (at - startAt) / 10_000.0;
-            TakeManifest.Update(folder, m =>
+            TakeManifest.UpdateExisting(folder, m =>
             {
                 var d = m.Device(Id, Name);
                 if (pause)
@@ -435,8 +497,96 @@ public sealed class RemoteDevice : IAsyncDisposable
         return (reply.At - offset - at) / 10_000.0;
     }
 
-    public Task StopAsync(string takeId) =>
-        _link is { IsClosed: false } link ? link.SendAsync(RemoteMsg.Stop, new StopMsg(takeId)) : Task.CompletedTask;
+    public Task StopAsync(string takeId)
+    {
+        if (_net.FolderFor(takeId) is { } folder)
+        {
+            TakeManifest.UpdateExisting(folder, manifest =>
+            {
+                var device = manifest.Devices.FirstOrDefault(device => device.Id == Id);
+                if (device is { Status: "recording" }) { device.Status = device.DownloadRequested ? "syncing" : "pending"; }
+            });
+        }
+        return _link is { IsClosed: false } link ? link.SendAsync(RemoteMsg.Stop, new StopMsg(takeId)) : Task.CompletedTask;
+    }
+
+    /// <summary>Persists download intent and completes when the take arrives. Connecting/reconnecting requests are sent after acceptance.</summary>
+    public Task<RemoteTakeResult> DownloadAsync(string takeId)
+    {
+        var folder = _net.FolderFor(takeId) ?? throw new InvalidOperationException("Unknown take.");
+        var manifest = TakeManifest.Load(folder) ?? throw new InvalidOperationException("The take was deleted.");
+        var device = manifest.Devices.FirstOrDefault(device => device.Id == Id && device.Role == "remote")
+            ?? throw new InvalidOperationException("This device did not record the take.");
+        if (device.Status == "synced" && device.Files.All(file => File.Exists(Path.Combine(folder, file))))
+        {
+            return Task.FromResult(StoredResult(takeId, folder, device));
+        }
+        if (State == RemoteDeviceState.Connected && !SupportsDeferredDownloads)
+        {
+            throw new NotSupportedException($"{Name} doesn't support deferred downloads.");
+        }
+        if (State is RemoteDeviceState.Disconnected or RemoteDeviceState.Rejected)
+        {
+            throw new InvalidOperationException($"{Name} is not connecting.");
+        }
+        bool retry;
+        lock (_lock)
+        {
+            _explicitDownloads.Add(takeId);
+            retry = _takes.TryGetValue(takeId, out var previous) && previous.Task.IsCompleted;
+            if (retry) { _takes.Remove(takeId); }
+        }
+        if (!TakeManifest.UpdateExisting(folder, current =>
+        {
+            var entry = current.Devices.First(entry => entry.Id == Id);
+            entry.DownloadRequested = true;
+            if (entry.Status != "recording") { entry.Status = "syncing"; }
+        })) { throw new InvalidOperationException("The take was deleted."); }
+        var completion = WaitForTakeAsync(takeId);
+        RequestDownloads(retry ? takeId : null);
+        return completion;
+    }
+
+    private RemoteTakeResult StoredResult(string takeId, string folder, ManifestDevice device) =>
+        new(takeId, Id, device.Name, Path.Combine(folder, device.Folder),
+            device.Files.Select(file => Path.Combine(folder, file)).ToList(), device.Seconds,
+            device.StartOffsetMs, device.ClockUncertaintyMs, device.Errors);
+
+    internal void RequestDownloads(string? retryTakeId = null)
+    {
+        if (State != RemoteDeviceState.Connected) { return; }
+        if (!SupportsDeferredDownloads)
+        {
+            lock (_lock)
+            {
+                foreach (var takeId in _explicitDownloads)
+                {
+                    if (_takes.TryGetValue(takeId, out var pending))
+                    {
+                        pending.TrySetException(new NotSupportedException($"{Name} doesn't support deferred downloads."));
+                    }
+                }
+            }
+            return;
+        }
+        if (_link is not { IsClosed: false } link) { return; }
+        _ = SendDownloadRequestsAsync(link, retryTakeId);
+    }
+
+    private async Task SendDownloadRequestsAsync(RemoteLink link, string? retryTakeId)
+    {
+        try
+        {
+            foreach (var takeId in _net.RequestedTakes(Id))
+            {
+                await link.SendAsync(RemoteMsg.Download, new DownloadMsg(takeId, Retry: takeId == retryTakeId)).ConfigureAwait(false);
+            }
+        }
+        catch (Exception ex) when (ex is IOException or OperationCanceledException or ObjectDisposedException)
+        {
+            link.Close(ex);
+        }
+    }
 
     /// <summary>Completes when every file of the take has arrived (possibly after a reconnect).</summary>
     public Task<RemoteTakeResult> WaitForTakeAsync(string takeId)
@@ -445,6 +595,14 @@ public sealed class RemoteDevice : IAsyncDisposable
         {
             if (!_takes.TryGetValue(takeId, out var tcs))
             {
+                if (State is RemoteDeviceState.Rejected or RemoteDeviceState.Disconnected || _life.IsCancellationRequested)
+                {
+                    return Task.FromException<RemoteTakeResult>(new InvalidOperationException(Error ?? $"{Name} is not connecting."));
+                }
+                if (_net.FolderFor(takeId) is { } folder && TakeManifest.Load(folder)?.Devices.FirstOrDefault(device => device.Id == Id) is { Status: "synced" } device)
+                {
+                    return Task.FromResult(StoredResult(takeId, folder, device));
+                }
                 tcs = new TaskCompletionSource<RemoteTakeResult>(TaskCreationOptions.RunContinuationsAsynchronously);
                 _takes[takeId] = tcs;
             }
@@ -462,16 +620,29 @@ public sealed class RemoteDevice : IAsyncDisposable
     {
         AbortIncoming();
         var takeFolder = _net.FolderFor(msg.TakeId);
-        if (takeFolder is null)
+        if (takeFolder is null || !Directory.Exists(takeFolder))
         {
-            // A take this controller does not know (e.g. the app restarted): acknowledge so the remote stops resending.
-            _ = link.SendAsync(RemoteMsg.TakeAck, new TakeAckMsg(msg.TakeId));
             return;
         }
+        var manifestDevice = TakeManifest.Load(takeFolder)?.Devices.FirstOrDefault(device => device.Id == Id && device.Role == "remote");
+        if (manifestDevice is null) { return; }
+        if (!msg.FilesFollow)
+        {
+            TakeManifest.UpdateExisting(takeFolder, manifest =>
+            {
+                var device = manifest.Device(Id, Name);
+                device.Seconds = msg.Seconds;
+                device.Errors = [.. msg.Errors];
+                if (device.Status != "synced") { device.Status = device.DownloadRequested ? "syncing" : "pending"; }
+            });
+            Changed?.Invoke(this);
+            return;
+        }
+        if (SupportsDeferredDownloads && !manifestDevice.DownloadRequested) { return; }
         var sub = _net.DeviceFolder(msg.TakeId, Id, Name);
         var folder = Path.Combine(takeFolder, sub);
         Directory.CreateDirectory(folder);
-        TakeManifest.Update(takeFolder, m =>
+        TakeManifest.UpdateExisting(takeFolder, m =>
         {
             var d = m.Device(Id, Name);
             d.Folder = sub;
@@ -502,16 +673,17 @@ public sealed class RemoteDevice : IAsyncDisposable
             startOffset = atStart.OffsetMs;
             uncertainty = atStart.UncertaintyMs;
         }
-        else if (ClockOffset is { } off && msg.T0 != 0 && _net.ScheduledStart(msg.TakeId) is { } startAt)
+        else if (_net.FolderFor(msg.TakeId) is { } storedFolder && TakeManifest.Load(storedFolder)?.Devices.FirstOrDefault(device => device.Id == Id) is { } stored)
         {
-            startOffset = (msg.T0 - off - startAt) / 10_000.0;
-            uncertainty = ClockRtt.TotalMilliseconds / 2;
+            startOffset = stored.StartOffsetMs;
+            uncertainty = stored.ClockUncertaintyMs;
         }
         var result = new RemoteTakeResult(msg.TakeId, Id, Name, inc.Folder, inc.Files, msg.Seconds, startOffset, uncertainty, msg.Errors);
+        var transferFailed = msg.Files.Count == 0 && msg.Errors.Count > 0;
         if (_net.FolderFor(msg.TakeId) is { } takeFolder)
         {
             var root = takeFolder;
-            TakeManifest.Update(root, m =>
+            if (!TakeManifest.UpdateExisting(root, m =>
             {
                 var d = m.Device(Id, Name);
                 d.Role = "remote";
@@ -521,12 +693,13 @@ public sealed class RemoteDevice : IAsyncDisposable
                 d.StartOffsetMs = startOffset ?? d.StartOffsetMs;
                 d.ClockUncertaintyMs = uncertainty ?? d.ClockUncertaintyMs;
                 d.Errors = [.. msg.Errors];
-                d.Status = "synced";
-            });
+                d.Status = transferFailed ? "failed" : "synced";
+            })) { return; }
         }
-        _ = link.SendAsync(RemoteMsg.TakeAck, new TakeAckMsg(msg.TakeId));
+        else { return; }
+        if (!transferFailed) { _ = link.SendAsync(RemoteMsg.TakeAck, new TakeAckMsg(msg.TakeId)); }
         TaskCompletionSource<RemoteTakeResult>? tcs;
-        lock (_lock) { _takes.Remove(msg.TakeId, out tcs); }
+        lock (_lock) { _takes.TryGetValue(msg.TakeId, out tcs); }
         tcs?.TrySetResult(result);
         TakeReceived?.Invoke(this, result);
         Changed?.Invoke(this);
@@ -547,6 +720,8 @@ public sealed class RemoteDevice : IAsyncDisposable
         private IncrementalHash? _hash;
         private string? _path;
         private long _done;
+        private long _fileBytes;
+        private RemoteFile? _expected;
 
         public TakeReadyMsg Take => take;
         public string Folder => folder;
@@ -555,6 +730,13 @@ public sealed class RemoteDevice : IAsyncDisposable
 
         public void Begin(FileBeginMsg m)
         {
+            if (_fs is not null || Files.Count >= take.Files.Count) { throw new InvalidDataException("Unexpected file."); }
+            _expected = take.Files[Files.Count];
+            if (m.TakeId != take.TakeId || m.Name != _expected.Name || m.Size != _expected.Size || m.Size < 0)
+            {
+                throw new InvalidDataException("File does not match the take manifest.");
+            }
+            _fileBytes = 0;
             Abort();
             // Never trust a path from the network; older remotes may send names that are invalid here (e.g. "Bluetooth: Mic.wav").
             var raw = m.Name.Replace('\\', '/');
@@ -585,9 +767,11 @@ public sealed class RemoteDevice : IAsyncDisposable
             {
                 throw new InvalidDataException("File data without a file.");
             }
+            if (data.Length > _expected!.Size - _fileBytes) { throw new InvalidDataException("File is larger than announced."); }
             _fs.Write(data);
             _hash!.AppendData(data);
             _done += data.Length;
+            _fileBytes += data.Length;
         }
 
         /// <summary>Returns true when this was the last file of the take.</summary>
@@ -596,6 +780,10 @@ public sealed class RemoteDevice : IAsyncDisposable
             if (_fs is null || _path is null)
             {
                 throw new InvalidDataException("File end without a file.");
+            }
+            if (m.TakeId != take.TakeId || m.Name != _expected!.Name || _fileBytes != _expected.Size)
+            {
+                throw new InvalidDataException("Incomplete or unexpected file.");
             }
             _fs.Dispose();
             _fs = null;
@@ -628,17 +816,33 @@ public sealed class RemoteDevice : IAsyncDisposable
 
     public async ValueTask DisposeAsync()
     {
-        _life.Cancel();
-        AbortIncoming();
-        if (_link is { } link)
+        if (Interlocked.Exchange(ref _disposing, 1) != 0)
         {
-            await link.DisposeAsync().ConfigureAwait(false);
+            await _disposed.Task.ConfigureAwait(false);
+            return;
         }
-        lock (_lock)
+        try
         {
-            foreach (var t in _takes.Values) { t.TrySetCanceled(); }
-            _takes.Clear();
+            _life.Cancel();
+            AbortIncoming();
+            lock (_lock)
+            {
+                _link?.Close();
+                foreach (var pending in _takes.Values) { pending.TrySetCanceled(); }
+                foreach (var pending in _starting.Values) { pending.TrySetCanceled(); }
+                foreach (var pending in _pausing.Values) { pending.TrySetCanceled(); }
+                _takes.Clear();
+                _starting.Clear();
+                _pausing.Clear();
+            }
+            await _run.ConfigureAwait(false);
+            if (_ping is { } ping) { await ping.ConfigureAwait(false); }
+            SetState(RemoteDeviceState.Disconnected);
         }
-        SetState(RemoteDeviceState.Disconnected);
+        finally
+        {
+            _life.Dispose();
+            _disposed.TrySetResult();
+        }
     }
 }

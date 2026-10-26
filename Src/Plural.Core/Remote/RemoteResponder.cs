@@ -1,4 +1,6 @@
 using System.Security.Cryptography;
+using System.Text.Json;
+using System.Text.Json.Serialization;
 using Plural.Core.Platform;
 using Plural.Core.Recording;
 
@@ -40,6 +42,13 @@ public interface IRemoteRecorder
 
 public sealed record RemoteControllerInfo(string Id, string Name, bool Connected);
 
+internal sealed record QueuedRemoteTake(string ControllerId, string TakeId, string Folder, RecordingFormat Format,
+    IReadOnlyList<string> Files, double Seconds, IReadOnlyList<string> Errors, long T0, DateTime QueuedUtc, bool Deferred)
+{
+    [JsonIgnore]
+    public string? StoragePath { get; set; }
+}
+
 /// <summary>
 /// The controlled side: accepts one controller at a time (after the user allows it), answers clock pings, reports status,
 /// starts and stops takes, and sends each finished take's files until the controller acknowledges them.
@@ -51,12 +60,54 @@ public sealed class RemoteResponder
     private readonly IRemoteRecorder _recorder;
     private readonly object _lock = new();
     private readonly HashSet<string> _allowedThisSession = [];
-    private readonly List<PendingTake> _pending = [];
+    private readonly List<QueuedRemoteTake> _pending = [];
+    private string? _queueFolder;
     private Connection? _current;
     private RemoteControllerInfo? _controller;
-    private (string TakeId, string ControllerId, long T0)? _active;
+    private (string TakeId, string ControllerId, long T0, bool Deferred)? _active;
 
-    private sealed record PendingTake(string ControllerId, string TakeId, RecordedTake Take, long T0, DateTime QueuedUtc);
+    internal void RestoreTakes(string root)
+    {
+        lock (_lock)
+        {
+            _queueFolder = Path.Combine(root, ".remote");
+            Directory.CreateDirectory(_queueFolder);
+            foreach (var path in Directory.EnumerateFiles(_queueFolder, "*.json"))
+            {
+                var queued = JsonSerializer.Deserialize(File.ReadAllText(path), RemoteJson.Default.QueuedRemoteTake)
+                    ?? throw new InvalidDataException($"Invalid remote queue metadata: {path}");
+                if (!_pending.Any(take => take.ControllerId == queued.ControllerId && take.TakeId == queued.TakeId))
+                {
+                    queued.StoragePath = path;
+                    _pending.Add(queued);
+                }
+            }
+            foreach (var queued in _pending) { Persist(queued); }
+        }
+        ScheduleExpiry();
+        if (_current is { } connection) { _ = SendPendingAsync(connection); }
+    }
+
+    private void Persist(QueuedRemoteTake take)
+    {
+        if (_queueFolder is null || (take.StoragePath is { } existing && Path.GetDirectoryName(existing) == _queueFolder)) { return; }
+        var key = Convert.ToHexString(SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(take.ControllerId + "\0" + take.TakeId)));
+        var path = Path.Combine(_queueFolder, key + ".json");
+        File.WriteAllText(path + ".tmp", JsonSerializer.Serialize(take, RemoteJson.Default.QueuedRemoteTake));
+        File.Move(path + ".tmp", path, overwrite: true);
+        var previous = take.StoragePath;
+        take.StoragePath = path;
+        if (previous is not null) { File.Delete(previous); }
+    }
+
+    private void RemovePending(Func<QueuedRemoteTake, bool> predicate)
+    {
+        foreach (var take in _pending.Where(predicate).ToList())
+        {
+            if (take.StoragePath is { } path) { File.Delete(path); }
+            _pending.Remove(take);
+        }
+    }
 
     /// <summary>
     /// How long finished takes wait for their controller to come back. They are only copies: the files stay in this device's library,
@@ -70,7 +121,7 @@ public sealed class RemoteResponder
     private void ScheduleExpiry()
     {
         DateTime? oldest;
-        lock (_lock) { oldest = _pending.Count == 0 ? null : _pending.Min(p => p.QueuedUtc); }
+        lock (_lock) { oldest = _pending.Where(take => !take.Deferred).Select(take => (DateTime?)take.QueuedUtc).Min(); }
         _expiry?.Dispose();
         _expiry = null;
         if (oldest is null || _current is not null)
@@ -98,7 +149,7 @@ public sealed class RemoteResponder
         var expired = DateTime.UtcNow - PendingLifetime;
         lock (_lock)
         {
-            _pending.RemoveAll(p => (controllerId is not null && p.ControllerId != controllerId) || p.QueuedUtc < expired);
+            RemovePending(p => !p.Deferred && ((controllerId is not null && p.ControllerId != controllerId) || p.QueuedUtc < expired));
         }
     }
 
@@ -123,12 +174,16 @@ public sealed class RemoteResponder
         _recorder = recorder;
     }
 
-    private sealed class Connection(RemoteLink link, HelloMsg hello)
+    private sealed class Connection(RemoteLink link, HelloMsg hello, int level)
     {
         public RemoteLink Link => link;
         public HelloMsg Hello => hello;
+        public int Level => level;
         public SemaphoreSlim Sending { get; } = new(1, 1);
         public Timer? StatusTimer { get; set; }
+        public HashSet<string> Requested { get; } = [];
+        public HashSet<string> Announced { get; } = [];
+        public HashSet<string> Sent { get; } = [];
     }
 
     internal async Task HandleAsync(Stream stream, string transport)
@@ -203,7 +258,7 @@ public sealed class RemoteResponder
             return;
         }
 
-        conn = new Connection(link, hello);
+        conn = new Connection(link, hello, Math.Min(hello.EffectiveLevel, _net.ProtocolVersion));
         Connection? replaced;
         lock (_lock)
         {
@@ -314,7 +369,7 @@ public sealed class RemoteResponder
                 break;
             case RemoteMsg.Stop:
                 var stop = RemoteLink.Parse<StopMsg>(payload);
-                if (_active?.TakeId == stop.TakeId)
+                if (_active is { } stopping && stopping.TakeId == stop.TakeId && stopping.ControllerId == c.Hello.Id)
                 {
                     _ = Run(() => _recorder.StopAsync(stop.TakeId));
                 }
@@ -329,11 +384,20 @@ public sealed class RemoteResponder
                 break;
             case RemoteMsg.TakeAck:
                 var ack = RemoteLink.Parse<TakeAckMsg>(payload);
-                lock (_lock) { _pending.RemoveAll(p => p.TakeId == ack.TakeId); }
+                lock (_lock) { RemovePending(p => p.TakeId == ack.TakeId && p.ControllerId == c.Hello.Id && c.Sent.Contains(p.TakeId)); }
                 if (_current is null && _active is null && PendingTakes == 0)
                 {
                     SetController(null);
                 }
+                break;
+            case RemoteMsg.Download when c.Level >= RemoteProtocol.DeferredDownloadsVersion:
+                var download = RemoteLink.Parse<DownloadMsg>(payload);
+                lock (_lock)
+                {
+                    c.Requested.Add(download.TakeId);
+                    if (download.Retry) { c.Sent.Remove(download.TakeId); }
+                }
+                _ = SendPendingAsync(c);
                 break;
         }
     }
@@ -343,7 +407,7 @@ public sealed class RemoteResponder
         PausedMsg reply;
         try
         {
-            if (_active?.TakeId != takeId)
+            if (_active is not { } active || active.TakeId != takeId || active.ControllerId != c.Hello.Id)
             {
                 throw new InvalidOperationException("Not recording this take.");
             }
@@ -392,7 +456,7 @@ public sealed class RemoteResponder
                 throw new InvalidOperationException("Already recording.");
             }
             var t0 = await _recorder.StartAsync(m.TakeId, m.StartAt, m.Video).ConfigureAwait(false);
-            _active = (m.TakeId, c.Hello.Id, t0);
+            _active = (m.TakeId, c.Hello.Id, t0, c.Level >= RemoteProtocol.DeferredDownloadsVersion && !m.DownloadAfterRecording);
             reply = new StartedMsg(m.TakeId, t0, _recorder.GetStatus().Format, null);
         }
         catch (Exception ex)
@@ -413,12 +477,16 @@ public sealed class RemoteResponder
         {
             return;
         }
-        _active = null;
         Connection? c;
         lock (_lock)
         {
-            _pending.Add(new PendingTake(a.ControllerId, a.TakeId, take, a.T0, DateTime.UtcNow));
+            var queued = new QueuedRemoteTake(a.ControllerId, a.TakeId, take.Folder, take.Format,
+                take.Files.Select(Path.GetFullPath).ToList(), take.Duration.TotalSeconds, take.Errors, a.T0, DateTime.UtcNow, a.Deferred);
+            _pending.Add(queued);
+            Persist(queued);
+            _active = null;
             c = _current;
+            if (!a.Deferred && c?.Hello.Id == a.ControllerId) { c.Requested.Add(a.TakeId); }
         }
         if (c is not null && c.Hello.Id == a.ControllerId)
         {
@@ -437,25 +505,37 @@ public sealed class RemoteResponder
         {
             while (!c.Link.IsClosed)
             {
-                PendingTake? p;
-                lock (_lock) { p = _pending.FirstOrDefault(x => x.ControllerId == c.Hello.Id); }
+                QueuedRemoteTake? p;
+                bool announce;
+                lock (_lock)
+                {
+                    p = _pending.FirstOrDefault(take => take.ControllerId == c.Hello.Id && !c.Sent.Contains(take.TakeId) &&
+                        (c.Requested.Contains(take.TakeId) || (!take.Deferred && c.Level < RemoteProtocol.DeferredDownloadsVersion) || !c.Announced.Contains(take.TakeId)));
+                    announce = p is not null && !c.Requested.Contains(p.TakeId) && (p.Deferred || c.Level >= RemoteProtocol.DeferredDownloadsVersion);
+                    if (announce) { c.Announced.Add(p!.TakeId); }
+                }
                 if (p is null)
                 {
                     return;
                 }
-                await SendTakeAsync(c, p).ConfigureAwait(false);
-                // Wait for the acknowledgement before the next take (resent after a reconnect otherwise).
-                for (var i = 0; i < 600 && !c.Link.IsClosed; i++)
+                if (announce)
                 {
-                    lock (_lock)
+                    if (c.Level >= RemoteProtocol.DeferredDownloadsVersion)
                     {
-                        if (!_pending.Contains(p)) { break; }
+                        await c.Link.SendAsync(RemoteMsg.TakeReady,
+                            new TakeReadyMsg(p.TakeId, [], p.Seconds, p.Errors, p.T0, FilesFollow: false)).ConfigureAwait(false);
                     }
-                    await Task.Delay(100).ConfigureAwait(false);
+                    continue;
                 }
-                lock (_lock)
+                try
                 {
-                    if (_pending.Contains(p)) { return; }
+                    await SendTakeAsync(c, p).ConfigureAwait(false);
+                }
+                catch (Exception ex) when (!c.Link.IsClosed && ex is IOException or UnauthorizedAccessException)
+                {
+                    lock (_lock) { c.Sent.Add(p.TakeId); }
+                    await c.Link.SendAsync(RemoteMsg.TakeReady,
+                        new TakeReadyMsg(p.TakeId, [], p.Seconds, p.Errors.Append(ex.Message).ToList(), p.T0)).ConfigureAwait(false);
                 }
             }
         }
@@ -475,15 +555,24 @@ public sealed class RemoteResponder
 
     private string WireName(string path) => WireNameOverride?.Invoke(path) ?? Path.GetFileName(path);
 
-    private async Task SendTakeAsync(Connection c, PendingTake p)
+    private async Task SendTakeAsync(Connection c, QueuedRemoteTake p)
     {
-        var files = p.Take.Files.Where(File.Exists).ToList();
+        var missing = p.Files.Where(file => !File.Exists(file)).Select(file => $"Missing file: {Path.GetFileName(file)}").ToList();
+        if (missing.Count > 0)
+        {
+            lock (_lock) { c.Sent.Add(p.TakeId); }
+            await c.Link.SendAsync(RemoteMsg.TakeReady,
+                new TakeReadyMsg(p.TakeId, [], p.Seconds, p.Errors.Concat(missing).ToList(), p.T0)).ConfigureAwait(false);
+            return;
+        }
+        var files = p.Files;
         var infos = files.Select(f => new RemoteFile(WireName(f), new FileInfo(f).Length)).ToList();
         var total = Math.Max(1, infos.Sum(f => f.Size));
         long sent = 0;
         SendProgress = 0;
+        lock (_lock) { c.Sent.Add(p.TakeId); }
         await c.Link.SendAsync(RemoteMsg.TakeReady,
-            new TakeReadyMsg(p.TakeId, infos, p.Take.Duration.TotalSeconds, p.Take.Errors, p.T0)).ConfigureAwait(false);
+            new TakeReadyMsg(p.TakeId, infos, p.Seconds, p.Errors, p.T0)).ConfigureAwait(false);
         var buf = new byte[RemoteProtocol.FileChunk];
         foreach (var f in files)
         {

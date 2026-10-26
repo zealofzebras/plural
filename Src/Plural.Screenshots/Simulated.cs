@@ -317,15 +317,19 @@ internal sealed class LoopTransport(Dictionary<string, (RemoteIdentity Who, Func
 /// <summary>Another device running Plural: accepts control and reports mics with moving levels.</summary>
 internal sealed class SimulatedPeer : IRemoteRecorder, IAsyncDisposable
 {
+    public bool ApproveControl { get => _net.AllowControl; set => _net.AllowControl = value; }
     private readonly string[] _mics;
     private readonly Stopwatch _clock = Stopwatch.StartNew();
     private readonly RemoteNetwork _net;
+    private readonly string? _recordingRoot;
     private bool _recording;
     private string? _takeId;
 
-    public SimulatedPeer(RemoteIdentity who, string[] mics, Dictionary<string, (RemoteIdentity, Func<Stream, Task>)> registry)
+    public SimulatedPeer(RemoteIdentity who, string[] mics, Dictionary<string, (RemoteIdentity, Func<Stream, Task>)> registry,
+        string? recordingRoot = null)
     {
         _mics = mics;
+        _recordingRoot = recordingRoot;
         _net = new RemoteNetwork(who, [new LoopTransport(registry)], this);
         _net.StartListening();
     }
@@ -338,7 +342,7 @@ internal sealed class SimulatedPeer : IRemoteRecorder, IAsyncDisposable
         return new StatusMsg(mics, _recording, _takeId, 0, false, false, false, "WAV");
     }
 
-    public Task<bool> ApproveAsync(HelloMsg controller) => Task.FromResult(true);
+    public Task<bool> ApproveAsync(HelloMsg controller) => Task.FromResult(ApproveControl);
     public Task SetModeAsync(bool video) => Task.CompletedTask;
     public Task ConnectMicsAsync() => Task.CompletedTask;
 
@@ -357,6 +361,14 @@ internal sealed class SimulatedPeer : IRemoteRecorder, IAsyncDisposable
     {
         _recording = false;
         _takeId = null;
+        if (_recordingRoot is not null)
+        {
+            var folder = Path.Combine(_recordingRoot, takeId);
+            Directory.CreateDirectory(folder);
+            var file = Path.Combine(folder, "Microphone.wav");
+            using (var writer = new WavWriter(file, 44100, 1)) { writer.Write(new short[44100]); }
+            _net.Responder.TakeFinished(new RecordedTake(folder, RecordingFormat.Wav, [file], TimeSpan.FromSeconds(1)));
+        }
         return Task.CompletedTask;
     }
 

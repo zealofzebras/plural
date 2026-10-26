@@ -652,6 +652,8 @@
                                             <c:LevelMeter Level="{Binding Level}" Peak="{Binding PeakHold}" />
 
                                             <TextBlock Classes="muted" Text="{Binding SyncText}" IsVisible="{Binding IsSyncing}" />
+                                            <TextBlock Classes="muted" Text="{Binding DownloadNote}" TextWrapping="Wrap"
+                                                       IsVisible="{Binding DownloadNote, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
 
                                             <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="8">
                                                 <Button Classes="tool" Command="{Binding ConnectMicsCommand}" IsEnabled="{Binding CanChange}"
@@ -1256,7 +1258,11 @@
                     <ScrollViewer Grid.Row="1">
                         <StackPanel Margin="20,8,20,28" Spacing="20">
                             <TextBlock Classes="muted" TextWrapping="Wrap"
-                                       Text="Control Plural on other phones and computers: they record their own mics and camera when you press Record here, and send the files back when you stop, into one take." />
+                                       Text="Control Plural on other phones and computers: record together, then choose which files to download now or later." />
+
+                            <CheckBox IsChecked="{Binding DownloadAfterRecording}" MinHeight="44">
+                                <TextBlock Text="Preselect downloads after recording (confirmation required)" TextWrapping="Wrap" />
+                            </CheckBox>
 
                             <StackPanel Spacing="8">
                                 <Grid ColumnDefinitions="*,Auto">
@@ -1301,6 +1307,38 @@
                         </StackPanel>
                     </ScrollViewer>
                 </Grid>
+            </Border>
+        </Grid>
+
+        <Grid Grid.RowSpan="4" IsVisible="{Binding IsDownloadChoiceOpen}">
+            <Border Background="{DynamicResource ScrimBrush}" />
+            <Border Classes="panel" Background="{DynamicResource SurfaceBrush}" MaxWidth="420" Margin="16" Padding="20"
+                    HorizontalAlignment="Center" VerticalAlignment="Center" MaxHeight="560">
+                <ScrollViewer HorizontalScrollBarVisibility="Disabled">
+                    <StackPanel Spacing="14">
+                        <TextBlock Text="Download remote recordings?" FontSize="20" FontWeight="Bold" TextWrapping="Wrap" />
+                        <ItemsControl ItemsSource="{Binding DownloadChoices}">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate x:DataType="vm:RemoteDownloadChoice">
+                                    <CheckBox IsChecked="{Binding IsSelected}" MinHeight="44" HorizontalAlignment="Stretch">
+                                        <TextBlock Text="{Binding Name}" TextWrapping="Wrap" />
+                                    </CheckBox>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                        <TextBlock Classes="muted" Text="{Binding DownloadCompatibility}" TextWrapping="Wrap"
+                                   IsVisible="{Binding DownloadCompatibility, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+                        <WrapPanel HorizontalAlignment="Right">
+                            <Button Classes="tool" Content="Postpone" Command="{Binding PostponeDownloadsCommand}" MinHeight="44" Margin="0,4,8,0" />
+                            <Button Classes="primary" Command="{Binding DownloadSelectedCommand}" MinHeight="44" Margin="0,4,0,0">
+                                <StackPanel Orientation="Horizontal" Spacing="8">
+                                    <c:Icon Data="{StaticResource IconDownload}" />
+                                    <TextBlock Text="Download now" VerticalAlignment="Center" />
+                                </StackPanel>
+                            </Button>
+                        </WrapPanel>
+                    </StackPanel>
+                </ScrollViewer>
             </Border>
         </Grid>
 

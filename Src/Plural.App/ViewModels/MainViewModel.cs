@@ -233,6 +233,7 @@ public partial class MainViewModel : ViewModelBase, IAsyncDisposable
         _savedInputs = s.LocalMics.Where(m => m.Id.Length > 0).ToList();
         _deviceId = s.DeviceId ?? "";
         AllowRemoteControl = s.AllowRemoteControl;
+        DownloadAfterRecording = s.DownloadAfterRecording;
         _trustedControllers = [.. s.TrustedControllers];
         LoadMixSettings(s);
         PlayerSplitter = Math.Clamp(s.PlayerSplitter, 0.15, 0.5);
@@ -270,6 +271,7 @@ public partial class MainViewModel : ViewModelBase, IAsyncDisposable
             LocalMics = _savedInputs,
             DeviceId = _deviceId.Length > 0 ? _deviceId : null,
             AllowRemoteControl = AllowRemoteControl,
+            DownloadAfterRecording = DownloadAfterRecording,
             TrustedControllers = _trustedControllers,
             PlayerSplitter = PlayerSplitter,
             MicButtonsControlRecording = MicButtonsControlRecording,
@@ -403,6 +405,7 @@ public partial class MainViewModel : ViewModelBase, IAsyncDisposable
     partial void OnRecordingRootChanged(string value)
     {
         SaveSettings();
+        if (!_loading) { RestoreRemoteTakes(); }
         if (!_loading && _initialized)
         {
             _ = LoadTakesAsync();

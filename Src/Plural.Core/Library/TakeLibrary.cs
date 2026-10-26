@@ -84,7 +84,7 @@ public sealed class TakeLibrary
         var manifest = TakeManifest.Load(folder);
         var transient = new List<TrackInfo>();
         dirty |= MergeRemote(folder, sc, manifest, transient);
-        if (sc.Tracks.Count + transient.Count == 0) { return null; }
+        if (sc.Tracks.Count + transient.Count == 0 && manifest?.Devices.Any(d => d.Role == "remote") != true) { return null; }
         if (dirty)
         {
             try { TakeSidecar.Save(folder, sc); }
@@ -161,7 +161,7 @@ public sealed class TakeLibrary
         {
             foreach (var d in manifest.Devices.Where(d => !string.IsNullOrEmpty(d.Folder)))
             {
-                devices.Add((d.Folder, d.StartOffsetMs, d.Status is not ("recording" or "syncing")));
+                devices.Add((d.Folder, d.StartOffsetMs, d.Status == "synced"));
             }
         }
         foreach (var sub in Directory.GetDirectories(folder))
@@ -237,6 +237,10 @@ public sealed class TakeLibrary
             if (!devices.Contains(d, StringComparer.OrdinalIgnoreCase)) { devices.Add(d); }
         }
         var status = sc.Status;
+        if (status != TakeStatus.Recording && manifest?.Devices.Any(d => d.Role == "remote" && d.Status is "pending" or "failed") == true)
+        {
+            status = TakeStatus.Pending;
+        }
         if (status != TakeStatus.Recording && manifest is not null
             && manifest.Devices.Any(d => d.Role != "controller" && d.Status is "recording" or "syncing"))
         {

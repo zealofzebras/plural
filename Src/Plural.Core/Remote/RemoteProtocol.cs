@@ -38,16 +38,21 @@ public enum RemoteMsg : byte
     Paused = 19,
     /// <summary>Remote → controller: the user pressed the record button on a mic of this device; the controller decides.</summary>
     RecordRequest = 20,
+    Download = 21,
 }
 
 public static class RemoteProtocol
 {
     /// <summary>
-    /// Feature level: 1 = first release. 2 = Pause / Resume / Paused, RecordRequest, <c>StatusMsg.Paused</c>. Announced in
+    /// Feature level: 1 = first release. 2 = Pause / Resume / Paused, RecordRequest, <c>StatusMsg.Paused</c>.
+    /// 3 = deferred downloads and metadata-only TakeReady. Announced in
     /// <see cref="HelloMsg.Level"/>; peers with a lower level are still accepted (down to <see cref="MinVersion"/>) but are never
     /// sent newer messages.
     /// </summary>
-    public const int Version = 2;
+    public const int Version = 3;
+
+    /// <summary>First feature level with deferred downloads.</summary>
+    public const int DeferredDownloadsVersion = 3;
 
     /// <summary>
     /// Wire format version sent in <see cref="HelloMsg.Protocol"/>. It stays 1 while new features are only additions: release-1 builds
@@ -94,7 +99,7 @@ public sealed record StatusMsg(
 public sealed record SetModeMsg(bool Video);
 
 /// <summary>Start a take at <see cref="StartAt"/> on the <em>remote's</em> clock (the controller converts with its offset estimate).</summary>
-public sealed record StartMsg(string TakeId, long StartAt, bool Video);
+public sealed record StartMsg(string TakeId, long StartAt, bool Video, bool DownloadAfterRecording = true);
 
 /// <summary>The take's actual start on the remote clock, or why it did not start.</summary>
 public sealed record StartedMsg(string TakeId, long T0, string? Format, string? Error);
@@ -118,7 +123,10 @@ public sealed record RecordRequestMsg(string? Source);
 public sealed record RemoteFile(string Name, long Size);
 
 /// <summary>Remote → controller after a take ends; the files follow as FileBegin / FileData… / FileEnd.</summary>
-public sealed record TakeReadyMsg(string TakeId, IReadOnlyList<RemoteFile> Files, double Seconds, IReadOnlyList<string> Errors, long T0);
+public sealed record TakeReadyMsg(string TakeId, IReadOnlyList<RemoteFile> Files, double Seconds, IReadOnlyList<string> Errors, long T0, bool FilesFollow = true);
+
+/// <summary>Level 3: request a queued take owned by this controller.</summary>
+public sealed record DownloadMsg(string TakeId, bool Retry = false);
 
 public sealed record FileBeginMsg(string TakeId, string Name, long Size);
 
@@ -145,6 +153,8 @@ public sealed record TakeAckMsg(string TakeId);
 [JsonSerializable(typeof(FileBeginMsg))]
 [JsonSerializable(typeof(FileEndMsg))]
 [JsonSerializable(typeof(TakeAckMsg))]
+[JsonSerializable(typeof(DownloadMsg))]
+[JsonSerializable(typeof(QueuedRemoteTake))]
 [JsonSerializable(typeof(DiscoveryReply))]
 [JsonSerializable(typeof(TakeManifest))]
 internal sealed partial class RemoteJson : JsonSerializerContext;

@@ -287,6 +287,60 @@ public class PosterTests
 
 public class LibraryTests
 {
+    [Fact]
+    public void RemoteOnlyPendingTake_AppearsWithoutTracks()
+    {
+        var root = NewRoot();
+        var folder = Path.Combine(root, "20261017_120000");
+        try
+        {
+            TakeManifest.Update(folder, manifest =>
+            {
+                manifest.TakeId = "pending-take";
+                manifest.Device("phone", "Phone").Status = "pending";
+            });
+            var take = Assert.Single(new TakeLibrary(root).Scan());
+            Assert.Empty(take.Tracks);
+            Assert.Equal(TakeStatus.Pending, take.Status);
+            Assert.Contains("Phone", take.Devices);
+        }
+        finally { Directory.Delete(root, true); }
+    }
+
+    [Theory]
+    [InlineData("pending", TakeStatus.Pending)]
+    [InlineData("failed", TakeStatus.Pending)]
+    [InlineData("syncing", TakeStatus.Syncing)]
+    public void MixedRemoteTake_PreservesSyncedTracksAndPendingNamesWithoutPersistingPartialTracks(string remoteStatus, string expectedStatus)
+    {
+        var root = NewRoot();
+        var folder = Path.Combine(root, "20261017_120000");
+        try
+        {
+            MakeWav(Path.Combine(folder, "Phone"), "audio");
+            MakeWav(Path.Combine(folder, "Tablet"), "partial");
+            TakeManifest.Update(folder, manifest =>
+            {
+                var phone = manifest.Device("phone", "Phone");
+                phone.Folder = "Phone";
+                phone.Status = "synced";
+                var tablet = manifest.Device("tablet", "Tablet");
+                tablet.Folder = "Tablet";
+                tablet.Status = remoteStatus;
+            });
+            var take = new TakeLibrary(root).Load(folder)!;
+            Assert.Equal(expectedStatus, take.Status);
+            Assert.Contains("Tablet", take.Devices);
+            Assert.Contains(take.Tracks, track => track.Device == "Phone");
+            Assert.Equal("Phone", Assert.Single(TakeSidecar.Load(folder)!.Tracks).Device);
+            TakeManifest.Update(folder, manifest => manifest.Device("tablet", "Tablet").Status = "synced");
+            var complete = new TakeLibrary(root).Load(folder)!;
+            Assert.Equal(TakeStatus.Complete, complete.Status);
+            Assert.Equal(2, TakeSidecar.Load(folder)!.Tracks.Count);
+        }
+        finally { Directory.Delete(root, true); }
+    }
+
     private static string NewRoot() => Path.Combine(Path.GetTempPath(), "plural_lib_" + Guid.NewGuid().ToString("N"));
 
     private static string MakeWav(string folder, string name, double seconds = 1, short amp = 5000)

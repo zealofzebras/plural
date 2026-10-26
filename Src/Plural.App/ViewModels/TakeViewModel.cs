@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Collections.ObjectModel;
 using System.Globalization;
 using System.IO;
 using System.Linq;
@@ -9,6 +10,7 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using Plural.Core.Library;
 using Plural.Core.Recording;
+using Plural.Core.Remote;
 
 namespace Plural.App.ViewModels;
 
@@ -41,6 +43,29 @@ public partial class TakeViewModel : ViewModelBase
     {
         Info = info;
         _owner = owner;
+        UpdateRemoteDownloads();
+    }
+
+    public ObservableCollection<RemoteDownloadViewModel> RemoteDownloads { get; } = [];
+
+    private void UpdateRemoteDownloads()
+    {
+        var manifest = TakeManifest.Load(Folder);
+        var pending = manifest?.Devices.Where(device => device.Role == "remote" && device.Status != "synced").ToList() ?? [];
+        foreach (var gone in RemoteDownloads.Where(item => pending.All(device => device.Id != item.DeviceId)).ToList())
+        {
+            RemoteDownloads.Remove(gone);
+        }
+        foreach (var device in pending)
+        {
+            var item = RemoteDownloads.FirstOrDefault(item => item.DeviceId == device.Id);
+            if (item is null)
+            {
+                item = new RemoteDownloadViewModel(_owner.Main, Folder, manifest!.TakeId, device.Id, device.Name);
+                RemoteDownloads.Add(item);
+            }
+            item.Update(device);
+        }
     }
 
     public string Folder => Info.Folder;
@@ -55,14 +80,15 @@ public partial class TakeViewModel : ViewModelBase
     public bool IsRecording => Info.Status == TakeStatus.Recording;
     public bool IsRecovered => Info.Status == TakeStatus.Recovered;
     public bool IsSyncing => Info.Status == TakeStatus.Syncing;
-    public bool HasStatus => IsRecording || IsRecovered || IsSyncing;
-    public bool IsIdle => !IsRecording;
+    public bool HasStatus => IsRecording || IsRecovered || IsSyncing || Info.Status == TakeStatus.Pending;
+    public bool IsIdle => !IsRecording && Info.Tracks.Count > 0;
 
     public string StatusText => Info.Status switch
     {
         TakeStatus.Recording => "Recording",
         TakeStatus.Recovered => "Recovered",
         TakeStatus.Syncing => "Syncing",
+        TakeStatus.Pending => "Download pending",
         _ => "",
     };
 
@@ -154,6 +180,7 @@ public partial class TakeViewModel : ViewModelBase
     {
         _searchText = null;
         Info = info;
+        UpdateRemoteDownloads();
         OnPropertyChanged(string.Empty);
     }
 

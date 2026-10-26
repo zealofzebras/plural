@@ -32,6 +32,13 @@ public partial class TakesViewModel : ViewModelBase
     public MainViewModel Main { get; }
 
     public ObservableCollection<TakeViewModel> Items { get; } = [];
+    public void RefreshRemoteDownloads()
+    {
+        foreach (var take in _all)
+        {
+            foreach (var device in take.RemoteDownloads) { device.Refresh(); }
+        }
+    }
     public ObservableCollection<TakeViewModel> Trash { get; } = [];
     public IReadOnlyList<Choice> SortOptions { get; }
 
@@ -641,6 +648,7 @@ public partial class TakesViewModel : ViewModelBase
                     catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException) { /* gone */ }
                 }
             });
+            Main.RestoreRemoteTakes();
             await RefreshAsync();
         });
     }
@@ -682,6 +690,7 @@ public partial class TakesViewModel : ViewModelBase
         Trash.Remove(take);
         TrashCount = Trash.Count;
         OnPropertyChanged(nameof(TrashEmpty));
+        Main.RestoreRemoteTakes();
         await RefreshAsync();
         Main.ShowToast($"Restored \"{take.Title}\"", "", false, null);
     }

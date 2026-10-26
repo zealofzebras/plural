@@ -135,6 +135,12 @@ public partial class MainViewModel
     /// <summary>Opens a take in the player. A take that is still recording cannot be played.</summary>
     public void OpenPlayer(TakeInfo take)
     {
+        if (take.Tracks.Count == 0)
+        {
+            CurrentPage = AppPage.Takes;
+            ShowToast("Download pending", "No tracks downloaded yet.", false, null);
+            return;
+        }
         if (take.Status == TakeStatus.Recording)
         {
             ShowToast("Still recording", "Stop the recording to play this take.", false, null);
@@ -150,6 +156,7 @@ public partial class MainViewModel
     /// </summary>
     public bool GoBack()
     {
+        if (IsDownloadChoiceOpen) { PostponeDownloads(); return true; }
         switch (CurrentPage)
         {
             case AppPage.Player:

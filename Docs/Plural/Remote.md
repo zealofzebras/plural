@@ -1,8 +1,8 @@
 # Remote mode
 
 One Plural app (the **controller**) starts and stops recording on others (**remotes**). Each remote records its own mics
-(SmartMikes and local mics) and camera locally; when the take stops, it sends its files to the controller, which keeps one take
-folder for everything. Every app can be either role; one app is never both at once.
+(SmartMikes and local mics) and camera locally. The controller explicitly downloads the files after recording or later,
+keeping one take folder for everything. Every app can be either role; one app is never both at once.
 
 Users see device names only. Wi‑Fi and Bluetooth are both searched and the best working path is used.
 
@@ -10,8 +10,14 @@ Users see device names only. Wi‑Fi and Bluetooth are both searched and the bes
 - **Devices** (header) opens a sheet: **Search** lists nearby apps (any transport, merged by app id); **Control** adds one.
 - The remote shows **Allow remote control?** with *Always allow this device*. Declined → the controller's card says so.
 - Controller: a card per remote (state pill, mics live, level meter, Audio/Video mode, Connect mics, disconnect). **Record** starts
-  this device (if a mic is live) and all connected remotes at one scheduled instant; **Stop** stops all, then a toast tracks
-  "Collecting files from …" until every remote's files are in.
+  this device (if a mic is live) and all connected remotes at one scheduled instant. **Stop** stops all, then offers a checkbox
+  per remote with **Download now** and **Postpone**. No files from a level-3 remote transfer before confirmation.
+- The Devices sheet's download preference preselects remotes in that prompt (default off); it does not bypass confirmation.
+- **Takes** lists each remote still awaiting download, including takes with no local files yet. **Download** or
+  **Reconnect & download** explicitly collects one remote; others can be collected at different times. Opening a connection
+  alone does not download postponed takes. Previously requested, interrupted downloads resume when reconnected.
+- Pending transfers and device folders survive app restarts on both sides. The remote must retain its original media files.
+  Older remotes still transfer automatically and show a warning that postponement requires an updated Plural.
 - Remote: a banner "Controlled by X" with Disconnect; its Record button belongs to the controller while connected.
 - Connect mics (card, or `ConnectMics`) connects SmartMikes first and skips a SmartMike's Bluetooth headset (HFP) input.
 - "Let other devices control this one" (Devices sheet, default on) makes the app findable and controllable.
@@ -26,7 +32,8 @@ Users see device names only. Wi‑Fi and Bluetooth are both searched and the bes
 ```
 Share/zip packs the whole folder (sub-folders kept) as `<take>.zip`. `take.json` lists, per device: role, folder, files,
 `startOffsetMs` (its first sample vs. the scheduled start, controller clock), `clockUncertaintyMs` (half the best ping RTT),
-seconds, status (`recording`, `syncing`, `synced`, `failed`) and errors. An editor lines tracks up by shifting each device by its offset.
+seconds, status (`recording`, `pending`, `syncing`, `synced`, `failed`), `downloadRequested` and errors.
+An editor lines tracks up by shifting each device by its offset.
 
 ## Protocol (`Plural.Core/Remote`)
 Frames over any duplex stream: `kind u8 · length u32 LE · payload` (JSON, or raw bytes for FileData; max 1 MiB).
@@ -38,15 +45,16 @@ Frames over any duplex stream: `kind u8 · length u32 LE · payload` (JSON, or r
 | Ping / Pong | controller → remote / back | T1 (controller clock), T2 (remote clock) |
 | Status | remote → controller, 2 Hz | mics (name, live, peak), recording, takeId, seconds, video mode, camera ready, format |
 | SetMode, ConnectMics | controller → remote | video |
-| Start / Started | controller → remote / back | takeId, startAt **in the remote's clock** / actual t0 or error |
+| Start / Started | controller → remote / back | takeId, startAt **in the remote's clock**, downloadAfterRecording (level 3) / actual t0 or error |
 | Stop | controller → remote | takeId |
 | TakeReady, FileBegin, FileData…, FileEnd | remote → controller | file list + remote t0; name, size; bytes; SHA‑256 |
 | TakeAck | controller → remote | takeId (all files intact) |
+| Download (level 3) | controller → remote | takeId; explicitly requests this controller's queued take |
 | Pause / Resume, Paused (level 2) | controller → remote / back | takeId, `at` **in the remote's clock** (like Start; the controller uses now + 0.3 s so all devices pause together) / takeId, paused flag, applied instant or error |
 | RecordRequest (level 2) | remote → controller | mic name. A mic button on the remote asks to toggle recording; the controller handles it like its own Record button |
 
 - **Versions**: Hello's `protocol` is the wire format and stays **1** (release-1 apps refuse anything else); the feature level goes in
-  a new `level` field (2 = Pause/Resume, RecordRequest, `Status.paused`), which release-1 apps ignore. A peer without `level` is
+  a new `level` field (2 = Pause/Resume, RecordRequest, `Status.paused`; 3 = deferred downloads), which release-1 apps ignore. A peer without `level` is
   level 1: it is accepted but flagged (`RemoteDevice.SupportsPause == false`, shown as "Doesn't support pause") and never sent
   Pause/Resume or RecordRequest. A higher level is accepted and used at our level; only a different wire `protocol` is refused
   ("different version").
@@ -62,12 +70,14 @@ Frames over any duplex stream: `kind u8 · length u32 LE · payload` (JSON, or r
   host `MediaClock`, and audio is clock-locked to it (`ClockLockedTrack`), so the residual offset in the manifest is what is left.
 - **Robustness**: links close after 12 s of silence; the controller reconnects through any endpoint (backoff 2→10 s). A remote keeps
   recording if the controller disappears; a remote still recording a take the controller has ended gets Stop when it reconnects.
-  Finished takes stay queued on the remote until TakeAck and are resent after a reconnect (a damaged file fails its hash and is resent).
+  Finished deferred takes stay queued on the remote until TakeAck and are sent only on an explicit download request;
+  interrupted requested downloads are resent after a reconnect (a damaged file fails its hash and is resent).
   Received files are written as `.part` and renamed when complete. Received names go through `FileNames.Sanitize`; a clash becomes `name_2.ext`.
-- **Pending takes**: a take queued for one controller is dropped when a different controller is accepted (one controller at a time; the files
-  stay in the remote's own library) and expires after 24 h (`RemoteResponder.PendingLifetime`, counted while no controller is connected).
-  The "lost controller" state clears with them. Before this, a controller that never came back (e.g. the CLI, new identity each run) kept
-  the remote showing a lost controller forever.
+- **Pending takes**: deferred queues are persisted under `<recording root>/.remote`, belong to the controller's stable ID,
+  and do not expire or disappear when another controller connects. Only their owner can request or acknowledge them.
+  Legacy immediate-transfer queues still expire after 24 h (`RemoteResponder.PendingLifetime`, while disconnected) and are
+  dropped when another controller is accepted; the original files stay in the remote's library. Unknown or deleted controller
+  takes are never acknowledged as downloaded.
 
 ## Transports
 | | Wi‑Fi (`LanTransport`, Core) | Bluetooth (`BluetoothRemoteTransport` + `IBluetoothServicePlatform`) |
@@ -82,7 +92,10 @@ in the OS Bluetooth settings first, as with SmartMikes; there is no in-app Bluet
 
 ## Testing
 - `Plural.Core.Tests/RemoteTests.cs`: two networks over loopback (approve, decline, clock, start, files + hash, manifest, zip,
-  resend after reconnect) and a real `LanTransport` discovery + TCP test.
+  resend after reconnect, mixed immediate/deferred remotes, durable queues after restart, ownership, retry and missing-file
+  handling) and a real `LanTransport` discovery + TCP test.
+- Headless shared-UI regression: `dotnet run --project Src/Plural.Screenshots -c Release -- --page remote-downloads --profile phone`
+  (also `--profile desktop`): post-Stop choices, independent remote downloads, restart, Restore and Undo.
 - CLI: `plural serve --input Microphone --name X` (auto-allows), `plural control --record 3 --peer X`, `plural search`;
   `control --connect-mics` and `control --pause AT:SECONDS` (repeatable).
 

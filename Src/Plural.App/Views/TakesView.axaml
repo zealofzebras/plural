@@ -69,12 +69,25 @@
     </UserControl.Styles>
 
     <UserControl.Resources>
+        <DataTemplate x:Key="RemoteDownloadRow" x:DataType="vm:RemoteDownloadViewModel">
+            <StackPanel Spacing="4" Margin="0,8,0,0">
+                <TextBlock Text="{Binding Name}" FontWeight="SemiBold" TextWrapping="Wrap" />
+                <TextBlock Classes="muted" Text="{Binding Detail}" TextWrapping="Wrap" />
+                <Button Classes="tool" Command="{Binding DownloadCommand}" IsEnabled="{Binding CanDownload}"
+                        HorizontalAlignment="Left" MinHeight="44">
+                    <StackPanel Orientation="Horizontal" Spacing="8">
+                        <c:Icon Data="{StaticResource IconDownload}" Size="18" />
+                        <TextBlock Text="{Binding ActionText}" VerticalAlignment="Center" />
+                    </StackPanel>
+                </Button>
+            </StackPanel>
+        </DataTemplate>
         <!-- One take as a card: thumbnail (poster or mini waveform of the loudest track), text, status, menu -->
         <DataTemplate x:Key="TakeCard" x:DataType="vm:TakeViewModel">
             <Border Classes="takecard" Classes.selected="{Binding IsSelected}" Classes.checked="{Binding IsChecked}"
                     Tapped="OnItemTapped" DoubleTapped="OnItemDoubleTapped" Holding="OnItemHolding"
                     ContextRequested="OnItemContextRequested">
-                <Grid ColumnDefinitions="Auto,Auto,*,Auto" ColumnSpacing="12">
+                <Grid ColumnDefinitions="Auto,Auto,*,Auto" RowDefinitions="Auto,Auto" ColumnSpacing="12">
                     <Border Classes="tick" Classes.on="{Binding IsChecked}" IsVisible="{Binding SelectMode}">
                         <c:Icon Data="{StaticResource IconCheck}" Size="16" Fill="White" IsVisible="{Binding IsChecked}" />
                     </Border>
@@ -107,6 +120,8 @@
                             ToolTip.Tip="More" IsVisible="{Binding !SelectMode}">
                         <c:Icon Data="{StaticResource IconMore}" />
                     </Button>
+                    <ItemsControl Grid.Row="1" Grid.ColumnSpan="4" ItemsSource="{Binding RemoteDownloads}"
+                                  ItemTemplate="{StaticResource RemoteDownloadRow}" />
                 </Grid>
             </Border>
         </DataTemplate>

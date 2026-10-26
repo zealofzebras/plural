@@ -37,6 +37,8 @@ public sealed class AppSettings
     /// <summary>Other devices may find this one and ask to control it.</summary>
     public bool AllowRemoteControl { get; set; } = true;
 
+    public bool DownloadAfterRecording { get; set; }
+
     /// <summary>Controllers the user chose to always allow.</summary>
     public List<string> TrustedControllers { get; set; } = [];
 

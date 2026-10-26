@@ -14,6 +14,8 @@ public static class TakeStatus
 
     /// <summary>Only on <see cref="TakeInfo"/>: a remote device is still recording or sending its files.</summary>
     public const string Syncing = "syncing";
+
+    public const string Pending = "pending";
 }
 
 public static class TrackKinds
