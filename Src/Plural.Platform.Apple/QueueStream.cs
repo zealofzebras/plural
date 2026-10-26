@@ -1,3 +1,4 @@
+using System.Runtime.InteropServices;
 using System.Threading.Channels;
 
 namespace Plural.Platform.Apple;
@@ -7,7 +8,7 @@ namespace Plural.Platform.Apple;
 /// pushes received bytes with <see cref="Enqueue"/> and ends the stream with <see cref="Complete"/>; writes go to a delegate.
 /// Supports blocking reads (MikeSession's reader thread) and async reads (remote links).
 /// </summary>
-internal sealed class QueueStream(Func<ReadOnlyMemory<byte>, Task> write, Action close) : Stream
+internal sealed partial class QueueStream(Func<ReadOnlyMemory<byte>, Task> write, Action close) : Stream
 {
     private readonly Channel<byte[]> _incoming = Channel.CreateUnbounded<byte[]>(new UnboundedChannelOptions { SingleReader = true });
     private byte[]? _current;
@@ -87,8 +88,19 @@ internal sealed class QueueStream(Func<ReadOnlyMemory<byte>, Task> write, Action
     public override void Write(ReadOnlySpan<byte> buffer)
     {
         ObjectDisposedException.ThrowIf(_closed != 0, this);
-        write(buffer.ToArray()).GetAwaiter().GetResult();
+        var task = write(buffer.ToArray());
+        // The transport writes on the main thread, so waiting there (a setting changed from the UI) would deadlock. Queued in order;
+        // a failure surfaces as the link closing.
+        if (pthread_main_np() != 0)
+        {
+            task.ContinueWith(t => _ = t.Exception, TaskContinuationOptions.OnlyOnFaulted);
+            return;
+        }
+        task.GetAwaiter().GetResult();
     }
+
+    [LibraryImport("/usr/lib/libSystem.B.dylib")]
+    private static partial int pthread_main_np();
 
     public override ValueTask WriteAsync(ReadOnlyMemory<byte> buffer, CancellationToken cancellationToken = default)
     {

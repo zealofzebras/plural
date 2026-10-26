@@ -21,6 +21,8 @@ internal static unsafe partial class CF
     [LibraryImport(Lib)] public static partial IntPtr CFStringCreateWithCharacters(IntPtr alloc, char* chars, nint length);
 
     [LibraryImport(Lib)] public static partial IntPtr CFRunLoopGetCurrent();
+    [LibraryImport(Lib)] public static partial IntPtr CFRunLoopGetMain();
+    [LibraryImport(Lib)] public static partial int CFRunLoopRunInMode(IntPtr mode, double seconds, byte returnAfterSourceHandled);
     [LibraryImport(Lib)] public static partial void CFRunLoopRun();
     [LibraryImport(Lib)] public static partial void CFRunLoopWakeUp(IntPtr runLoop);
     [LibraryImport(Lib)] public static partial IntPtr CFRunLoopSourceCreate(IntPtr alloc, nint order, CFRunLoopSourceContext* context);
@@ -32,6 +34,12 @@ internal static unsafe partial class CF
 
     /// <summary>kCFRunLoopDefaultMode (an exported CFStringRef variable).</summary>
     public static IntPtr RunLoopDefaultMode => DefaultMode.Value;
+
+    private static readonly Lazy<IntPtr> CommonModes = new(() =>
+        *(IntPtr*)NativeLibrary.GetExport(NativeLibrary.Load(Lib), "kCFRunLoopCommonModes"));
+
+    /// <summary>kCFRunLoopCommonModes: sources added here also run while a menu or window resize tracks the mouse.</summary>
+    public static IntPtr RunLoopCommonModes => CommonModes.Value;
 
     /// <summary>Copies a CFStringRef (or toll-free bridged NSString) to a managed string; null for NULL.</summary>
     public static string? ToManaged(IntPtr s)

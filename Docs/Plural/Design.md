@@ -136,9 +136,15 @@ macOS: AudioServerPlugIn (BlackHole-style). Linux: PipeWire virtual source per m
   `Packaging/macos/build-app.sh`; `DesktopHost` picks `Plural.Platform.MacOS` when `OperatingSystem.IsMacOS()`.
 - `Plural.Platform.MacOS` is plain `net10.0` with P/Invoke only (no Xamarin bindings, so the Avalonia desktop head stays one project):
   - `MacBluetooth`: IOBluetooth through the Objective-C runtime (`ObjC.cs`). Paired devices from `[IOBluetoothDevice pairedDevices]`;
-    connect = cached SDP record for the SPP UUID (or `performSDPQuery:`), then `openRFCOMMChannelAsync:` with a runtime-created delegate
-    class. All IOBluetooth calls and callbacks run on one CFRunLoop thread (`RunLoopThread`), so it also works in the CLI. Writes use
-    `writeSync:` in MTU-sized chunks. No RFCOMM server yet, so remote mode on macOS is Wi-Fi only.
+    connect = cached SDP record for the SPP UUID, else RFCOMM channel 14 directly (macOS leaves the SmartMike+'s SPP record out),
+    else `performSDPQuery:`; then `openRFCOMMChannelAsync:` with a runtime-created delegate class. IOBluetooth is backed by
+    CoreBluetooth on the main queue and calls back only while the main thread runs its loop, so every IOBluetooth call goes through
+    `MainRunLoop` (the app's main loop; the CLI runs it with `MainRunLoop.Run`). Writes use
+    `writeSync:` in MTU-sized chunks; a synchronous `QueueStream.Write` on the main thread (a setting changed from the UI) queues
+    without waiting, since waiting there would deadlock. No RFCOMM server yet, so remote mode on macOS is Wi-Fi only.
+    Hardware test 2026-10-26 (CLI `run`, normal path): connect, handshake, settings and a 10 s WAV take, 897 frames, 0 decode errors.
+    Normal discovery/callback handling still needs investigation; this does not validate the app connection end-to-end
+    (see [Protocol/README.md](../Protocol/README.md#real-smartmike-on-macos-2026-10-26)).
   - `MacAudio`: Core Audio HAL device list (IDs are device UIDs; hidden devices skipped; BlackHole/Loopback count as virtual devices
     and sort first), output and capture through AudioQueue (`kAudioQueueProperty_CurrentDevice`).
 - Shared with iOS in `Plural.Platform.Apple` (`net10.0`): `AudioQueueSink` (float, 3 × 512 frames), `AudioQueueInput` (44.1 kHz mono
@@ -154,7 +160,11 @@ macOS: AudioServerPlugIn (BlackHole-style). Linux: PipeWire virtual source per m
 - Head `Plural.App.iOS` (`net10.0-ios`, iOS 15+, iPhone and iPad, `AvaloniaAppDelegate<App>`), `IosHost`, platform `Plural.Platform.iOS`.
 - **Bluetooth: iOS has no public RFCOMM/SPP API.** A Classic Bluetooth accessory is reachable only through External Accessory, which
   requires an MFi (iAP2) accessory, its protocol string under `UISupportedExternalAccessoryProtocols` in `Info.plist`, and — for the
-  App Store — the accessory maker's approval with Apple. Whether the SmartMike+ is MFi is unknown. `IosAccessories` lists connected
+  App Store — the accessory maker's approval with Apple. The SmartMike+ firmware contains iAP and the protocol strings
+  `com.sabinetek.iisrecorder` and `com.sabinetek.iLoveSound`. MetAudio iOS declares only `com.sabinetek.iisrecorder`, and the symbol names
+  of its Swiss SDK (same frame parser/commands/QCELT decoder as Android, plus an `EASession`-based `Session` class) suggest the same
+  frames run over the EA streams; its code is encrypted, so that is an inference (see [Protocol/README.md](../Protocol/README.md)).
+  Plural declares that one string and runs `MikeSession` unchanged on the EA stream; untested on an iPhone. CoreBluetooth is no alternative (BLE only). `IosAccessories` lists connected
   EA accessories as paired devices (address = stable hash of the serial number with the locally administered bit set, since iOS hides
   MACs) and opens an `EASession` on the main run loop; if the mic's protocol is not declared, the error names the protocols it offers.
 - Local mics: the audio session's available inputs (built-in, wired/USB, Bluetooth HFP); one records at a time (`SetPreferredInput`).
@@ -164,7 +174,7 @@ macOS: AudioServerPlugIn (BlackHole-style). Linux: PipeWire virtual source per m
 - Remote mode: Wi-Fi only; subnet broadcast discovery needs Apple's `com.apple.developer.networking.multicast` entitlement.
 - Native libs: dynamic frameworks in `Native/{celt,lame}/runtimes/ios/*.xcframework` from `build-ios.sh` (via `Native/ios-framework.sh`);
   `NativeLibs` loads `Frameworks/<name>.framework/<name>`.
-- Not yet: camera; SmartMike connection (pending the MFi question).
+- Not yet: camera. SmartMike connection is built (External Accessory, both protocol strings declared) but untested on an iPhone.
 
 ## Recording
 `MikeHub.StartRecordingAll(root)` / `StopRecordingAllAsync()` start and stop every connected mic through `TakeRecorder`, at the same instant. Take folder: `<root>/<yyyyMMdd_HHmmss>/`. Formats: WAV, M4A, MP3, MKA, MKV, MP4 (see [Recording.md](Recording.md)); the default is WAV, 44.1 kHz mono 16-bit (the capsule is mono; L = R). Each mic is locked to `MediaClock`, so takes stay aligned over long recordings. Recording works with or without a virtual cable.
@@ -210,7 +220,7 @@ Native/lame/                    per-RID LAME 3.100 binaries (same four scripts)
 | `Plural.App.Desktop` | Runs on Windows with the shared UI (hosted as `MainView`); `OpenFolder` via `IAppHost`. Takes and Player not yet tested with real takes |
 | `Plural.App.Android` | Builds before Tier 1 (Debug and Release APKs, arm64 + x64, CELT and LAME included); the previous version ran on a Pixel 8 (Android 17). Tier 1 adds `RecordingService` (foreground service, notification, Pause/Stop actions) and the decoders. On a Pixel 8 (Android 17), 2026-10-13: service with notification, 118 s WAV incl. 30 s screen-off, MP4/MKV with pause, force-stop → Recovered, Takes/Player, front and rear video, remote control from a PC over Wi‑Fi. Lenovo Tab P10 (Android 9): landscape mixer and bottom bar. **Not yet: SmartMike auto-reconnect mid-take, Android 17 background video** |
 | `Plural.Platform.MacOS` / `.Apple` | IOBluetooth RFCOMM, Core Audio output/input, AudioQueue, AAC. Published `osx-arm64`/`osx-x64` and run on Apple Silicon (2026-10-26): Plural menu, native About panel from both entry points, LAN discovery and legacy-client Hello verified. Bluetooth connect, audio and AAC remain untested. No camera |
-| `Plural.App.iOS` / `Plural.Platform.iOS` | Built 2026-10-11; compiles on Windows, while linking, signing and running need a Mac. **Never run on a device.** SmartMike connection depends on MFi support (unknown); local mics, recording, share and Wi-Fi remote should work. No camera |
+| `Plural.App.iOS` / `Plural.Platform.iOS` | Built 2026-10-11; compiles on Windows, while linking, signing and running need a Mac. **Never run on a device.** SmartMike connection via External Accessory is built but untested on an iPhone (the firmware has iAP); local mics, recording, share and Wi-Fi remote should work. No camera |
 | Virtual cable | Not installed yet; the output picker lists cables first when present |
 
 ### Known open items (recording, library and playback)

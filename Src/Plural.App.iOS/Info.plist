@@ -46,11 +46,14 @@
     <string>external-accessory</string>
   </array>
 
-  <!-- MFi accessory protocols Plural may open (External Accessory). The SmartMike+'s protocol string is not known yet: when a
-       connected mic offers protocols not listed here, connecting fails with a message naming them; add the right one here.
+  <!-- MFi accessory protocols Plural may open (External Accessory). MetAudio iOS declares only this one (Docs/Protocol/README.md);
+       that it carries the same Swiss frames as SPP is inferred, not yet tested on an iPhone.
+       If a mic offers something else, connecting fails with a message naming it.
        Publishing an app that talks to an MFi accessory also needs the accessory maker's approval with Apple. -->
   <key>UISupportedExternalAccessoryProtocols</key>
-  <array/>
+  <array>
+    <string>com.sabinetek.iisrecorder</string>
+  </array>
 
   <key>NSBluetoothAlwaysUsageDescription</key><string>Plural connects to your wireless microphones over Bluetooth.</string>
   <key>NSMicrophoneUsageDescription</key><string>Plural records from the microphones you add.</string>

@@ -126,6 +126,7 @@ public sealed class IosAccessories : IBluetoothPlatform
             Stream = new QueueStream(WriteAsync, () => DispatchQueue.MainQueue.DispatchAsync(Close));
             _in.OnEvent += OnInputEvent;
             _out.OnEvent += OnOutputEvent;
+            // shortcut: main run loop (MetAudio appears to use its own stream thread), move to a dedicated run-loop thread if audio stalls while the UI is busy.
             _in.Schedule(NSRunLoop.Main, NSRunLoopMode.Common);
             _out.Schedule(NSRunLoop.Main, NSRunLoopMode.Common);
             _in.Open();

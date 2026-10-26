@@ -43,65 +43,71 @@ else
 }
 var cmd = args.FirstOrDefault() ?? "help";
 
-switch (cmd)
+// IOBluetooth needs the main thread to run its loop, so on macOS it does that while the command runs on the pool.
+return OperatingSystem.IsMacOS() ? MainRunLoop.Run(Commands) : await Commands();
+
+async Task<int> Commands()
 {
-    case "list":
-        foreach (var d in hub.Bluetooth.GetPairedDevices())
-        {
-            Console.WriteLine($"{d.Address}  {d.Name}{(d.LooksLikeSmartMike ? "   <-- SmartMike" : "")}");
-        }
-        return 0;
-    case "outputs":
-        foreach (var o in hub.Audio.GetOutputDevices())
-        {
-            Console.WriteLine($"{(o.IsVirtualCable ? "[cable] " : "        ")}{o.Name}");
-        }
-        return 0;
-    case "inputs":
-        foreach (var i in hub.FindInputs())
-        {
-            Console.WriteLine(i.Name);
-        }
-        return 0;
-    case "cameras":
-        foreach (var c in hub.Video?.GetCameras() ?? [])
-        {
-            Console.WriteLine($"{c.Name}{(c.IsFrontFacing ? " (front)" : "")}");
-        }
-        return 0;
-    case "formats":
-        foreach (var f in hub.AvailableFormats)
-        {
-            Console.WriteLine($"{f.ToString().ToLowerInvariant(),-4}  {f.DisplayName()}");
-        }
-        return 0;
-    case "run":
-        return await new RunCommand(hub, args.Skip(1).ToArray()).RunAsync();
-    case "mcp":
-        // stdout carries JSON-RPC only; everything else printed goes to stderr.
-        var mcpOut = Console.OpenStandardOutput();
-        Console.SetOut(Console.Error);
-        return await new RunCommand(hub, args.Skip(1).ToArray(), mcpOut).RunAsync();
-    case "serve":
-        return await Serve(args.Skip(1).ToArray());
-    case "control":
-        return await Control(args.Skip(1).ToArray());
-    case "search":
-        await using (var net = new RemoteNetwork(new RemoteIdentity(Guid.NewGuid().ToString("N"), "cli search", platform), Transports(), new CliRecorder(hub, Path.GetTempPath())))
-        {
-            var sw = System.Diagnostics.Stopwatch.StartNew();
-            await net.SearchAsync(p => Console.WriteLine($"{sw.ElapsedMilliseconds,6} ms  {p.Name} ({p.Platform})  {string.Join(", ", p.Endpoints.Select(e => $"{e.Transport} {e.Address}"))}"),
-                TimeSpan.FromSeconds(12));
-        }
-        return 0;
-    default:
-        Console.WriteLine("usage: plural list | outputs | inputs | cameras | formats | search");
-        Console.WriteLine("       plural serve [--input NAME]... [--name NAME] [--platform NAME]");
-        Console.WriteLine("       plural control [--record SECONDS] [--peer NAME] [--name NAME] [--platform NAME] [--video] [--connect-mics] [--pause AT:SECONDS]...");
-        Console.WriteLine("       plural " + RunCommand.Usage.TrimStart());
-        Console.WriteLine("       plural mcp [MAC...] [run options]   MCP server on stdin/stdout (logs on stderr) for AI clients");
-        Console.WriteLine(RunCommand.ConsoleHelp);
-        return cmd == "help" ? 0 : 1;
+    switch (cmd)
+    {
+        case "list":
+            foreach (var d in hub.Bluetooth.GetPairedDevices())
+            {
+                Console.WriteLine($"{d.Address}  {d.Name}{(d.LooksLikeSmartMike ? "   <-- SmartMike" : "")}");
+            }
+            return 0;
+        case "outputs":
+            foreach (var o in hub.Audio.GetOutputDevices())
+            {
+                Console.WriteLine($"{(o.IsVirtualCable ? "[cable] " : "        ")}{o.Name}");
+            }
+            return 0;
+        case "inputs":
+            foreach (var i in hub.FindInputs())
+            {
+                Console.WriteLine(i.Name);
+            }
+            return 0;
+        case "cameras":
+            foreach (var c in hub.Video?.GetCameras() ?? [])
+            {
+                Console.WriteLine($"{c.Name}{(c.IsFrontFacing ? " (front)" : "")}");
+            }
+            return 0;
+        case "formats":
+            foreach (var f in hub.AvailableFormats)
+            {
+                Console.WriteLine($"{f.ToString().ToLowerInvariant(),-4}  {f.DisplayName()}");
+            }
+            return 0;
+        case "run":
+            return await new RunCommand(hub, args.Skip(1).ToArray()).RunAsync();
+        case "mcp":
+            // stdout carries JSON-RPC only; everything else printed goes to stderr.
+            var mcpOut = Console.OpenStandardOutput();
+            Console.SetOut(Console.Error);
+            return await new RunCommand(hub, args.Skip(1).ToArray(), mcpOut).RunAsync();
+        case "serve":
+            return await Serve(args.Skip(1).ToArray());
+        case "control":
+            return await Control(args.Skip(1).ToArray());
+        case "search":
+            await using (var net = new RemoteNetwork(new RemoteIdentity(Guid.NewGuid().ToString("N"), "cli search", platform), Transports(), new CliRecorder(hub, Path.GetTempPath())))
+            {
+                var sw = System.Diagnostics.Stopwatch.StartNew();
+                await net.SearchAsync(p => Console.WriteLine($"{sw.ElapsedMilliseconds,6} ms  {p.Name} ({p.Platform})  {string.Join(", ", p.Endpoints.Select(e => $"{e.Transport} {e.Address}"))}"),
+                    TimeSpan.FromSeconds(12));
+            }
+            return 0;
+        default:
+            Console.WriteLine("usage: plural list | outputs | inputs | cameras | formats | search");
+            Console.WriteLine("       plural serve [--input NAME]... [--name NAME] [--platform NAME]");
+            Console.WriteLine("       plural control [--record SECONDS] [--peer NAME] [--name NAME] [--platform NAME] [--video] [--connect-mics] [--pause AT:SECONDS]...");
+            Console.WriteLine("       plural " + RunCommand.Usage.TrimStart());
+            Console.WriteLine("       plural mcp [MAC...] [run options]   MCP server on stdin/stdout (logs on stderr) for AI clients");
+            Console.WriteLine(RunCommand.ConsoleHelp);
+            return cmd == "help" ? 0 : 1;
+    }
 }
 
 List<IRemoteTransport> Transports() => hub.Bluetooth is IBluetoothServicePlatform bt

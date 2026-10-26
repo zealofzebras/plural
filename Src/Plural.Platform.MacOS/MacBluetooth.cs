@@ -9,18 +9,20 @@ namespace Plural.Platform.MacOS;
 /// <summary>
 /// macOS classic Bluetooth through IOBluetooth (Objective-C runtime calls, no bindings). Lists paired devices and opens an
 /// RFCOMM channel to the Serial Port Profile service, finding the channel number through SDP. Every IOBluetooth call and
-/// callback runs on one run-loop thread. Needs NSBluetoothAlwaysUsageDescription in the app bundle (macOS asks on first use).
+/// callback runs on the main run loop (<see cref="MainRunLoop"/>). Needs NSBluetoothAlwaysUsageDescription in the app bundle (macOS asks on first use).
 /// </summary>
 [SupportedOSPlatform("macos")]
 public sealed class MacBluetooth : IBluetoothPlatform
 {
     private static readonly Guid Spp = new("00001101-0000-1000-8000-00805F9B34FB");
     private const uint PowerOn = 1;
+    // SPP ("M_MIKE_SLV") channel of the SmartMike+ (Docs/Protocol/README.md).
+    private const byte SmartMikeSppChannel = 14;
 
-    private readonly Lazy<RunLoopThread> _loop = new(() =>
+    private readonly Lazy<MainRunLoop> _loop = new(() =>
     {
         NativeLibrary.Load("/System/Library/Frameworks/IOBluetooth.framework/IOBluetooth");
-        return new RunLoopThread("IOBluetooth");
+        return MainRunLoop.Instance;
     });
 
     public IReadOnlyList<PairedDevice> GetPairedDevices() => _loop.Value.Invoke(() =>
@@ -65,7 +67,7 @@ public sealed class MacBluetooth : IBluetoothPlatform
         private static readonly ConcurrentDictionary<IntPtr, RfcommConnection> ByDelegate = new();
         private static IntPtr _delegateClass;
 
-        private readonly RunLoopThread _loop;
+        private readonly MainRunLoop _loop;
         private readonly Guid _service;
         private readonly TaskCompletionSource<Stream> _opened = new(TaskCreationOptions.RunContinuationsAsynchronously);
         private IntPtr _delegate;
@@ -75,13 +77,13 @@ public sealed class MacBluetooth : IBluetoothPlatform
         private bool _queried;
         private QueueStream? _stream;
 
-        private RfcommConnection(RunLoopThread loop, Guid service)
+        private RfcommConnection(MainRunLoop loop, Guid service)
         {
             _loop = loop;
             _service = service;
         }
 
-        public static Task<Stream> OpenAsync(RunLoopThread loop, BluetoothAddress address, Guid service, CancellationToken ct)
+        public static Task<Stream> OpenAsync(MainRunLoop loop, BluetoothAddress address, Guid service, CancellationToken ct)
         {
             var c = new RfcommConnection(loop, service);
             loop.Post(() => c.Start(address));
@@ -113,10 +115,18 @@ public sealed class MacBluetooth : IBluetoothPlatform
                 {
                     throw new InvalidOperationException($"Unknown Bluetooth device {address}.");
                 }
-                // The SDP record cached at pairing time is usually there; query the device when it is not (or is stale).
+                // The SDP record cached at pairing time is usually there. macOS leaves the SmartMike+'s SPP record out of its list
+                // (and an SDP query never answers), so try the mic's SPP channel directly; a failed open falls back to a query.
                 if (!TryOpenFromRecord())
                 {
-                    Query();
+                    if (_service == Spp)
+                    {
+                        OpenChannel(SmartMikeSppChannel);
+                    }
+                    else
+                    {
+                        Query();
+                    }
                 }
             }
             catch (Exception ex)
@@ -148,6 +158,12 @@ public sealed class MacBluetooth : IBluetoothPlatform
             {
                 return false;
             }
+            OpenChannel(channelId);
+            return true;
+        }
+
+        private void OpenChannel(byte channelId)
+        {
             IntPtr channel = IntPtr.Zero;
             var status = ObjC.SendInt(_device, ObjC.Sel("openRFCOMMChannelAsync:withChannelID:delegate:"), &channel, channelId, _delegate);
             if (status != 0)
@@ -155,7 +171,6 @@ public sealed class MacBluetooth : IBluetoothPlatform
                 throw new IOException($"Could not open the Bluetooth connection (0x{status:X8}).");
             }
             _channel = ObjC.Retain(channel);
-            return true;
         }
 
         private static IntPtr SdpUuid(Guid service)

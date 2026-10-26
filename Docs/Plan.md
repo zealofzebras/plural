@@ -51,7 +51,9 @@
 - [ ] Test with 2+ SmartMikes simultaneously (Bluetooth bandwidth)
 - [ ] Packaging (self-contained win-arm64 / win-x64 builds), app icon
 - [x] macOS platform layer (IOBluetooth, Core Audio, AAC) and iOS head (External Accessory, audio session): built, compile-checked
-- [ ] Run macOS on a Mac with a SmartMike; find out whether the SmartMike+ is MFi (iOS needs its External Accessory protocol string)
+- [x] Run macOS on a Mac with a SmartMike (CLI and app, 2026-10-26)
+- [x] SmartMike+ is MFi: firmware has iAP; MetAudio iOS 1.4.5 declares only `com.sabinetek.iisrecorder` (its Swiss SDK symbols suggest the same frames over `EASession`; unverified, Protocol/README.md)
+- [ ] Test the iOS External Accessory connection on an iPhone
 - [ ] Camera on macOS/iOS (AVFoundation + VideoToolbox); RFCOMM server on macOS for Bluetooth remote mode
 - [ ] Own virtual-mic driver (later), Linux platform layer (later)
 
