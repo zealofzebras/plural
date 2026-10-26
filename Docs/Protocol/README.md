@@ -42,11 +42,13 @@ Class of device 0x240418 (audio / headphones).
     `SWDeviceTimeSync`, `SWSyncTimeHandler`, the parameter handlers), so it looks like a port of it. A `Session` class has
     `openSession:protocol:`, `eaSession`, `setupConnectionInputStream:outputStream:`, `stream:handleEvent:`, `writeData:`,
     `readInputStreamData` and a `streamThread` property; `SWDeviceManager` references `EAAccessoryDidConnect/DidDisconnectNotification`.
-  - **Inference, unverified**: the EA session carries the same Swiss frames as SPP, and the streams run on a dedicated thread. These
-    follow from the names above; no iOS-only handshake class is present, but encrypted code could still differ (order, timing, extra
-    steps).
+  - **Verified on an iPhone 13** (iOS, 2026-10-26, FW 0.4.37) — the frames differ from SPP: iAP2 replaces the `FF 5A` link layer.
+    Each EA message is a bare command frame `53 53 | len16 (= payload+6) | cmd16 | payload`, with no link header, `00 00` prefix or
+    checksum; several can share one read and one can span reads. No session-open is needed: on `EASession` open the mic sends its state
+    unprompted (`STATUS_INFO`, `CUR_VERSION`, `EFFECT_PARAM`, `MONITOR`, `ANS_PARAM`, `SN_AUTH_REPORT`, `BUTTON_PRESSED`); it ignores
+    `FF 5A` frames. Clock sync, settings, `AUDIO_BEGIN` and audio (`0x0104` frames, 204 bytes) then work as over SPP, with no heartbeats.
+    Plural's `AccessoryFraming` translates both ways so `MikeSession` runs unchanged.
   - `STBluetooth.framework` is a BLE SDK for Sabine gimbals (turnLeft/turnRight, face tracking), not for the mics.
-  - **Open**: the exact handshake order and timing (encrypted code); confirm on an iPhone.
 
 ## Protocol summary (from code)
 - Framing: `FF 5A` sync, 9-byte link header (seq/ack), "SS" sub-header with a 16-bit command, TLV payload, two's-complement checksums — [SPP-Framing.md](SPP-Framing.md)

@@ -25,6 +25,26 @@ public class ProtocolTests
     }
 
     [Fact]
+    public void AccessoryFraming_TranslatesBothWays()
+    {
+        // Captured from a SmartMike+ over iOS External Accessory: two bare "SS" frames in one read, the second split across reads.
+        var a = new AccessoryFraming();
+        var spp = a.FromAccessory(Convert.FromHexString("5353001E001100060001003C00060002000000060005005000060006000053"));
+        spp = [.. spp, .. a.FromAccessory(Convert.FromHexString("53000C000E000600020050"))];
+        var frames = new List<ReceivedFrame>();
+        new FrameReader().Feed(spp, frames);
+        Assert.Equal(2, frames.Count);
+        Assert.All(frames, f => Assert.True(f.BodyChecksumOk));
+        Assert.Equal((Command)0x11, frames[0].Command);
+        Assert.Equal(24, frames[0].Payload.Length);
+        Assert.Equal(Convert.FromHexString("000600020050"), frames[1].Payload.ToArray());
+
+        var cmd = Frame.BuildCommand(Command.AudioBegin, Frame.ParamTlv(4, 190), 3, 7);
+        Assert.Equal(Convert.FromHexString("5353000C00030006000400BE"),
+            a.ToAccessory([.. Frame.SessionOpen, .. cmd, .. Frame.BuildHeartbeat(1, 2)]));
+    }
+
+    [Fact]
     public void FrameReader_ResyncsAndHandlesSplitInput()
     {
         var cmd = Frame.BuildCommand(Command.AudioBegin, Frame.ParamTlv(4, 190), 3, 7);

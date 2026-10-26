@@ -2,6 +2,7 @@ using CoreFoundation;
 using ExternalAccessory;
 using Foundation;
 using Plural.Core.Platform;
+using Plural.Core.Protocol;
 using Plural.Platform.Apple;
 
 namespace Plural.Platform.iOS;
@@ -68,7 +69,15 @@ public sealed class IosAccessories : IBluetoothPlatform
         {
             throw new IOException($"Could not open {accessory.Name} ({protocol}).", ex);
         }
-        return new AccessoryStream(session).Stream;
+        try
+        {
+            return new AccessoryStream(session).Stream;
+        }
+        catch
+        {
+            session.Dispose(); // iOS allows one session per protocol; a leaked one blocks every later connect
+            throw;
+        }
     }
 
     private static string Describe(IEnumerable<string> protocols) =>
@@ -111,6 +120,8 @@ public sealed class IosAccessories : IBluetoothPlatform
         private readonly EASession _session;
         private readonly NSInputStream _in;
         private readonly NSOutputStream _out;
+        private readonly StreamEvents _events;
+        private readonly AccessoryFraming _framing = new();
         private readonly Queue<(byte[] Data, TaskCompletionSource Done)> _pending = new();
         private readonly byte[] _buffer = new byte[4096];
         private int _written;
@@ -124,8 +135,10 @@ public sealed class IosAccessories : IBluetoothPlatform
             _in = session.InputStream ?? throw new IOException("The accessory has no input stream.");
             _out = session.OutputStream ?? throw new IOException("The accessory has no output stream.");
             Stream = new QueueStream(WriteAsync, () => DispatchQueue.MainQueue.DispatchAsync(Close));
-            _in.OnEvent += OnInputEvent;
-            _out.OnEvent += OnOutputEvent;
+            // A stream is its own default delegate, so OnEvent would throw; NSStream.Delegate is weak, hence the field.
+            _events = new StreamEvents(this);
+            _in.Delegate = _events;
+            _out.Delegate = _events;
             // shortcut: main run loop (MetAudio appears to use its own stream thread), move to a dedicated run-loop thread if audio stalls while the UI is busy.
             _in.Schedule(NSRunLoop.Main, NSRunLoopMode.Common);
             _out.Schedule(NSRunLoop.Main, NSRunLoopMode.Common);
@@ -133,9 +146,24 @@ public sealed class IosAccessories : IBluetoothPlatform
             _out.Open();
         }
 
-        private void OnInputEvent(object? sender, NSStreamEventArgs e)
+        private sealed class StreamEvents(AccessoryStream owner) : NSStreamDelegate
         {
-            switch (e.StreamEvent)
+            public override void HandleEvent(NSStream stream, NSStreamEvent e)
+            {
+                if (stream.Handle == owner._in.Handle)
+                {
+                    owner.OnInputEvent(e);
+                }
+                else
+                {
+                    owner.OnOutputEvent(e);
+                }
+            }
+        }
+
+        private void OnInputEvent(NSStreamEvent e)
+        {
+            switch (e)
             {
                 case NSStreamEvent.HasBytesAvailable:
                     while (_in.HasBytesAvailable())
@@ -145,12 +173,12 @@ public sealed class IosAccessories : IBluetoothPlatform
                         {
                             break;
                         }
-                        Stream.Enqueue(_buffer.AsSpan(0, n));
+                        Stream.Enqueue(_framing.FromAccessory(_buffer.AsSpan(0, n)));
                     }
                     break;
                 case NSStreamEvent.ErrorOccurred:
                 case NSStreamEvent.EndEncountered:
-                    Stream.Complete(e.StreamEvent == NSStreamEvent.ErrorOccurred
+                    Stream.Complete(e == NSStreamEvent.ErrorOccurred
                         ? new IOException(_in.Error?.LocalizedDescription ?? "The accessory connection failed.")
                         : null);
                     Close();
@@ -158,13 +186,13 @@ public sealed class IosAccessories : IBluetoothPlatform
             }
         }
 
-        private void OnOutputEvent(object? sender, NSStreamEventArgs e)
+        private void OnOutputEvent(NSStreamEvent e)
         {
-            if (e.StreamEvent == NSStreamEvent.HasSpaceAvailable)
+            if (e == NSStreamEvent.HasSpaceAvailable)
             {
                 Drain();
             }
-            else if (e.StreamEvent is NSStreamEvent.ErrorOccurred or NSStreamEvent.EndEncountered)
+            else if (e is NSStreamEvent.ErrorOccurred or NSStreamEvent.EndEncountered)
             {
                 Close();
             }
@@ -181,7 +209,13 @@ public sealed class IosAccessories : IBluetoothPlatform
                     done.SetException(new IOException("The accessory connection is closed."));
                     return;
                 }
-                _pending.Enqueue((copy, done));
+                var bytes = _framing.ToAccessory(copy);
+                if (bytes.Length == 0)
+                {
+                    done.SetResult();
+                    return;
+                }
+                _pending.Enqueue((bytes, done));
                 Drain();
             });
             return done.Task;
@@ -222,8 +256,6 @@ public sealed class IosAccessories : IBluetoothPlatform
                 done.TrySetException(new IOException("The accessory connection closed."));
             }
             _pending.Clear();
-            _in.OnEvent -= OnInputEvent;
-            _out.OnEvent -= OnOutputEvent;
             _in.Close();
             _out.Close();
             _in.Unschedule(NSRunLoop.Main, NSRunLoopMode.Common);
