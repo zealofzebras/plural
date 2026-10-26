@@ -175,7 +175,7 @@ macOS: AudioServerPlugIn (BlackHole-style). Linux: PipeWire virtual source per m
 - Remote mode: Wi-Fi only; subnet broadcast discovery needs Apple's `com.apple.developer.networking.multicast` entitlement.
 - Native libs: dynamic frameworks in `Native/{celt,lame}/runtimes/ios/*.xcframework` from `build-ios.sh` (via `Native/ios-framework.sh`);
   `NativeLibs` loads `Frameworks/<name>.framework/<name>`.
-- Not yet: camera. SmartMike over External Accessory verified on an iPhone 13 (connect, clock sync, audio streaming).
+- Not yet: camera. SmartMike over External Accessory verified on an iPhone 13 (connect, clock sync, audio streaming, recording).
 
 ## Recording
 `MikeHub.StartRecordingAll(root)` / `StopRecordingAllAsync()` start and stop every connected mic through `TakeRecorder`, at the same instant. Take folder: `<root>/<yyyyMMdd_HHmmss>/`. Formats: WAV, M4A, MP3, MKA, MKV, MP4 (see [Recording.md](Recording.md)); the default is WAV, 44.1 kHz mono 16-bit (the capsule is mono; L = R). Each mic is locked to `MediaClock`, so takes stay aligned over long recordings. Recording works with or without a virtual cable.
@@ -221,7 +221,7 @@ Native/lame/                    per-RID LAME 3.100 binaries (same four scripts)
 | `Plural.App.Desktop` | Runs on Windows with the shared UI (hosted as `MainView`); `OpenFolder` via `IAppHost`. Takes and Player not yet tested with real takes |
 | `Plural.App.Android` | Builds before Tier 1 (Debug and Release APKs, arm64 + x64, CELT and LAME included); the previous version ran on a Pixel 8 (Android 17). Tier 1 adds `RecordingService` (foreground service, notification, Pause/Stop actions) and the decoders. On a Pixel 8 (Android 17), 2026-10-13: service with notification, 118 s WAV incl. 30 s screen-off, MP4/MKV with pause, force-stop → Recovered, Takes/Player, front and rear video, remote control from a PC over Wi‑Fi. Lenovo Tab P10 (Android 9): landscape mixer and bottom bar. **Not yet: SmartMike auto-reconnect mid-take, Android 17 background video** |
 | `Plural.Platform.MacOS` / `.Apple` | IOBluetooth RFCOMM, Core Audio output/input, AudioQueue, AAC. Published `osx-arm64`/`osx-x64` and run on Apple Silicon (2026-10-26): Plural menu, native About panel from both entry points, LAN discovery and legacy-client Hello verified. Bluetooth connect, audio and AAC remain untested. No camera |
-| `Plural.App.iOS` / `Plural.Platform.iOS` | Built 2026-10-11; compiles on Windows, while linking, signing and running need a Mac. Runs on an iPhone 13 (2026-10-26): SmartMike via External Accessory connects and streams; local mics, recording, share and Wi-Fi remote not yet tested on the device. No camera |
+| `Plural.App.iOS` / `Plural.Platform.iOS` | Built 2026-10-11; compiles on Windows, while linking, signing and running need a Mac. Runs on an iPhone 13 (2026-10-26): SmartMike via External Accessory connects, streams and records (WAV takes checked); local mics, share and Wi-Fi remote not yet tested on the device. No camera |
 | Virtual cable | Not installed yet; the output picker lists cables first when present |
 
 ### Known open items (recording, library and playback)
