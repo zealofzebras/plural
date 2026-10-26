@@ -33,6 +33,9 @@ public interface IAppHost
     /// <summary>Shows the platform's own About panel (macOS); false when the app should show its About sheet instead.</summary>
     bool ShowAbout(string version, string websiteUrl, string details, string copyright) => false;
 
+    /// <summary>The system window background as 0xRRGGBB (light, dark), so the app blends with the title bar (macOS); null keeps Plural's palette.</summary>
+    (uint Light, uint Dark)? WindowBackground => null;
+
     /// <summary>Opens <paramref name="folder"/> in the system file manager.</summary>
     void OpenFolder(string folder);
 

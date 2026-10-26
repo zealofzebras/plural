@@ -64,6 +64,8 @@ public sealed class DesktopHost : IAppHost
         return true;
     }
 
+    public (uint Light, uint Dark)? WindowBackground => OperatingSystem.IsMacOS() ? MacAppearance.WindowBackground() : null;
+
     public void OpenFolder(string folder) =>
         Process.Start(new ProcessStartInfo(folder) { UseShellExecute = true });
 

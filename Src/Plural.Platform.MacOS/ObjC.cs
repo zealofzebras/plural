@@ -75,6 +75,9 @@ internal static unsafe partial class ObjC
     public static nuint SendNUInt(IntPtr obj, IntPtr sel) =>
         ((delegate* unmanaged<IntPtr, IntPtr, nuint>)MsgSend)(obj, sel);
 
+    public static double SendDouble(IntPtr obj, IntPtr sel) =>
+        ((delegate* unmanaged<IntPtr, IntPtr, double>)MsgSend)(obj, sel);
+
     public static IntPtr Retain(IntPtr obj) => obj == IntPtr.Zero ? obj : Send(obj, SelRetain);
 
     public static void Release(IntPtr obj)

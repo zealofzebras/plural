@@ -12,6 +12,8 @@ It also records **without any SmartMike**: local mics of the device (built-in, U
 - UI: the header has one menu (Connect all, Scan, Add a microphone, Record with other devices, Recording settings, About Plural);
   the About sheet shows version, this device, the website and open-source credits. On macOS, the application menu is named
   Plural and both About actions (menu and in-app) open the native macOS About panel with the same content instead of the sheet.
+  Also on macOS, the app background uses the system window background colour (read through AppKit for light and dark), so it
+  blends with the title bar. Cards, tracks and strokes are derived from that colour: lighter in dark mode, darker in light mode.
 
 ## Constraints
 - Native on **Windows ARM64 and x64**, and **Android** (arm64 phones, x64 emulator).
