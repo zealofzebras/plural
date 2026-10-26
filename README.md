@@ -9,7 +9,7 @@ Plural started as a way to bring the discontinued **Sabinetek SmartMike+** wirel
 so Plural talks to the mics directly over Bluetooth. It also records the mics you already have (built-in, USB, wired or
 Bluetooth headset), and it can link several phones and computers so they record one take together.
 
-**Website:** [getplural.net](https://getplural.net) · **Android:** [Google Play](https://play.google.com/store/apps/details?id=net.getplural.app) · **Windows and other downloads:** [latest release](https://github.com/zealofzebras/plural/releases)
+**Website:** [getplural.net](https://getplural.net) · **Windows:** [Microsoft Store](https://apps.microsoft.com/detail/9NMT60QCF2TG) ([open in the Store app](ms-windows-store://pdp/?productid=9NMT60QCF2TG)) · **Android:** [Google Play](https://play.google.com/store/apps/details?id=net.getplural.app) · **Other downloads:** [latest release](https://github.com/zealofzebras/plural/releases)
 
 > Plural is an independent project. It is not made by, endorsed by or affiliated with Sabinetek. SmartMike is a trademark of its owner.
 
@@ -43,7 +43,7 @@ Bluetooth headset), and it can link several phones and computers so they record 
 
 | Device | Status |
 |---|---|
-| Windows 10 and 11 | Ready to use; tested with SmartMike+ mics |
+| Windows 10 and 11 | On the [Microsoft Store](https://apps.microsoft.com/detail/9NMT60QCF2TG); tested with SmartMike+ mics |
 | Android 8.0 and newer | On [Google Play](https://play.google.com/store/apps/details?id=net.getplural.app); newer features are still being tested |
 | Mac | Available, but not yet tested on a Mac |
 | iPhone and iPad | In progress; SmartMike+ support depends on Apple's accessory rules |
