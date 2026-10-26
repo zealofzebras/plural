@@ -25,7 +25,7 @@ public partial class MainViewModel
     /// <summary>Which page is on top. Recording and the mic UI keep running underneath other pages.</summary>
     [ObservableProperty] public partial AppPage CurrentPage { get; set; } = AppPage.Recorder;
 
-    /// <summary>The view model of the page on top (null on the recorder page); MainView picks the view with a DataTemplate per type.</summary>
+    /// <summary>The current or last page, retained during its closing animation; MainView picks its DataTemplate per type.</summary>
     [ObservableProperty] public partial ViewModelBase? PageViewModel { get; set; }
 
     public TakesViewModel Takes { get; private set; } = null!;
@@ -68,7 +68,7 @@ public partial class MainViewModel
         {
             AppPage.Takes => Takes,
             AppPage.Player => Player,
-            _ => null,
+            _ => PageViewModel,
         };
         OnPropertyChanged(nameof(IsRecorderPage));
         OnPropertyChanged(nameof(IsNotRecorderPage));

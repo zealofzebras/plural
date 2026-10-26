@@ -269,26 +269,6 @@
                 </Animation>
             </Style.Animations>
         </Style>
-        <Style Selector="Grid#MenuOverlay[IsVisible=True] > Border">
-            <Style.Animations>
-                <Animation Duration="0:0:0.28" Easing="CubicEaseOut">
-                    <KeyFrame Cue="0%"><Setter Property="Opacity" Value="0" /></KeyFrame>
-                    <KeyFrame Cue="100%"><Setter Property="Opacity" Value="1" /></KeyFrame>
-                </Animation>
-            </Style.Animations>
-        </Style>
-        <Style Selector="Border#MenuSheet">
-            <Setter Property="RenderTransform" Value="translateX(0px)" />
-        </Style>
-        <Style Selector="Grid#MenuOverlay[IsVisible=True] > Border#MenuSheet">
-            <Style.Animations>
-                <Animation Duration="0:0:0.32" Easing="CubicEaseOut">
-                    <KeyFrame Cue="0%"><Setter Property="TranslateTransform.X" Value="32" /></KeyFrame>
-                    <KeyFrame Cue="100%"><Setter Property="TranslateTransform.X" Value="0" /></KeyFrame>
-                </Animation>
-            </Style.Animations>
-        </Style>
-
         <!-- Mixer console -->
         <Style Selector="Border.console">
             <Setter Property="Background" Value="{DynamicResource SurfaceBrush}" />
@@ -1128,7 +1108,7 @@
         </Border>
 
         <!-- Pages above the recorder (Takes, Player). The recorder keeps running underneath; recording continues. -->
-        <Grid Name="Pages" Classes="reveal" Grid.RowSpan="4" IsVisible="{Binding IsNotRecorderPage}" Background="{DynamicResource BgBrush}">
+        <c:AnimatedPanel Name="Pages" Grid.RowSpan="4" IsOpen="{Binding IsNotRecorderPage}" Background="{DynamicResource BgBrush}">
             <TransitioningContentControl Content="{Binding PageViewModel}">
                 <TransitioningContentControl.PageTransition>
                     <CrossFade Duration="0:0:0.24" />
@@ -1144,7 +1124,7 @@
             </TransitioningContentControl>
             <ContentControl Content="{Binding}" ContentTemplate="{StaticResource ToastContent}" VerticalAlignment="Bottom"
                             Margin="0,0,0,56" />
-        </Grid>
+        </c:AnimatedPanel>
 
         <!-- Settings sheet -->
         <Grid Grid.RowSpan="4" IsVisible="{Binding IsSettingsOpen}">
@@ -1400,7 +1380,8 @@
         </Grid>
 
         <!-- About sheet -->
-        <Grid Grid.RowSpan="4" IsVisible="{Binding IsAboutOpen}">
+        <c:AnimatedPanel Name="AboutOverlay" Grid.RowSpan="4" IsOpen="{Binding IsAboutOpen}"
+                         SlideOffset="32,0" SlideTarget="{Binding #AboutSheet}">
             <Border Background="{DynamicResource ScrimBrush}" Tapped="OnAboutScrimTapped" />
             <Border Name="AboutSheet" Background="{DynamicResource SurfaceBrush}"
                     BorderBrush="{DynamicResource StrokeBrush}" BorderThickness="1,0,0,0">
@@ -1449,10 +1430,11 @@
                     </ScrollViewer>
                 </Grid>
             </Border>
-        </Grid>
+        </c:AnimatedPanel>
 
         <!-- Menu sheet (from the header's ⋮ button), laid out like the Takes sheet -->
-        <Grid Name="MenuOverlay" Grid.RowSpan="4" IsVisible="{Binding IsMenuOpen}">
+        <c:AnimatedPanel Name="MenuOverlay" Grid.RowSpan="4" IsOpen="{Binding IsMenuOpen}"
+                         SlideOffset="32,0" SlideTarget="{Binding #MenuSheet}">
             <Border Background="{DynamicResource ScrimBrush}" Tapped="OnMenuScrimTapped" />
             <Border Name="MenuSheet" Background="{DynamicResource SurfaceBrush}"
                     BorderBrush="{DynamicResource StrokeBrush}" BorderThickness="1,0,0,0">
@@ -1543,7 +1525,7 @@
                     </ScrollViewer>
                 </Grid>
             </Border>
-        </Grid>
+        </c:AnimatedPanel>
 
     </Grid>
     </ThemeVariantScope>

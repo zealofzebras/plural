@@ -70,17 +70,17 @@ public partial class TakesViewModel : ViewModelBase
     public bool CanShare => Main.CanShare;
     public bool CanOpenFolder => Main.CanOpenFolder;
     public bool IsFiltering => Search.Trim().Length > 0 || FilterAudio || FilterVideo || FilterRemote;
-    public bool ShowEmpty => !IsLoading && !HasAnyTakes && !ShowTrash;
-    public bool ShowNoMatches => HasAnyTakes && Items.Count == 0 && !ShowTrash;
-    public bool ShowList => !ShowTrash && HasAnyTakes;
-    public bool ShowDetail => IsWide && !ShowTrash && HasAnyTakes;
+    // Recently deleted is an animated overlay on top, so the list underneath stays as it is.
+    public bool ShowEmpty => !IsLoading && !HasAnyTakes;
+    public bool ShowNoMatches => HasAnyTakes && Items.Count == 0;
+    public bool ShowList => HasAnyTakes;
+    public bool ShowDetail => IsWide && HasAnyTakes;
     public bool HasSelectedTake => Selected is not null;
     public bool NoSelectedTake => Selected is null;
     public bool HasTrash => TrashCount > 0;
     public bool TrashEmpty => Trash.Count == 0;
     public bool HasChecked => CheckedCount > 0;
     public string CheckedText => CheckedCount == 1 ? "1 selected" : $"{CheckedCount} selected";
-    public bool ShowBottomBar => !ShowTrash;
 
     // ------------------------------------------------------------------ loading
 
@@ -245,7 +245,6 @@ public partial class TakesViewModel : ViewModelBase
 
     partial void OnHasAnyTakesChanged(bool value) => RaiseState();
     partial void OnIsLoadingChanged(bool value) => RaiseState();
-    partial void OnShowTrashChanged(bool value) => RaiseState();
     partial void OnTrashCountChanged(int value) => OnPropertyChanged(nameof(HasTrash));
 
     partial void OnSelectedChanged(TakeViewModel? oldValue, TakeViewModel? newValue)
@@ -273,7 +272,6 @@ public partial class TakesViewModel : ViewModelBase
         OnPropertyChanged(nameof(ShowNoMatches));
         OnPropertyChanged(nameof(ShowList));
         OnPropertyChanged(nameof(ShowDetail));
-        OnPropertyChanged(nameof(ShowBottomBar));
     }
 
     private void ApplyFilter()

@@ -2,10 +2,12 @@ using System.Diagnostics;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Headless;
+using Avalonia.Input;
 using Avalonia.Media.Imaging;
 using Avalonia.Styling;
 using Avalonia.Threading;
 using Avalonia.VisualTree;
+using Plural.App.Controls;
 using Plural.App.Services;
 using Plural.App.ViewModels;
 using Plural.App.Views;
@@ -23,6 +25,7 @@ namespace Plural.Screenshots;
 /// The scene order matches Marketing/&lt;locale&gt;/captions.txt.
 ///
 ///   dotnet run --project Plural.Screenshots -c Release [-- --profile all|phone|tablet|desktop] [--out DIR] [--theme dark|light]
+///   --page animations verifies overlay open/close transitions without writing screenshots.
 /// </summary>
 internal static class Program
 {
@@ -78,6 +81,7 @@ internal static class Program
         }
 
         var profile = Profiles.Append(PhoneLandscape).Append(TabletLandscape).FirstOrDefault(p => p.Name == profileName);
+        if (profile is not null && Page == "animations") { profile = profile with { Scale = 1 }; }
         if (profile?.Name == "phone" && Page == "remote-downloads") { profile = profile with { Width = 360, Scale = 3 }; }
         if (profile is null)
         {
@@ -115,7 +119,7 @@ internal static class Program
         PluralApp.Host = host;
         AppBuilder.Configure<PluralApp>()
             .UseSkia()
-            .UseHeadless(new AvaloniaHeadlessPlatformOptions { UseHeadlessDrawing = false })
+            .UseHeadless(new AvaloniaHeadlessPlatformOptions { UseHeadlessDrawing = Page == "animations" })
             .WithInterFont()
             .SetupWithoutStarting();
         Application.Current!.RequestedThemeVariant = theme;
@@ -129,6 +133,23 @@ internal static class Program
         var window = new Window { Width = profile.Width, Height = profile.Height, Content = new MainView { DataContext = vm } };
         window.Show();
         window.SetRenderScaling(profile.Scale);
+        if (Page == "animations")
+        {
+            try
+            {
+                VerifyAnimations(vm, window);
+            }
+            finally
+            {
+                var dispose = vm.DisposeAsync().AsTask();
+                Require(PumpUntil(() => dispose.IsCompleted, 10), "shutdown timed out");
+                dispose.GetAwaiter().GetResult();
+                window.Close();
+                Directory.Delete(work, true);
+            }
+            Console.WriteLine($"{profile.Name}: overlay animation checks passed");
+            return;
+        }
         Directory.CreateDirectory(outDir);
         var shot = 0;
         void Shot(string what)
@@ -550,11 +571,101 @@ internal static class Program
         shot("audio only");
     }
 
+    private static void VerifyAnimations(MainViewModel vm, Window window)
+    {
+        Pump(TimeSpan.FromMilliseconds(400));
+        var view = (MainView)window.Content!;
+        var menu = view.FindControl<AnimatedPanel>("MenuOverlay")!;
+        var about = view.FindControl<AnimatedPanel>("AboutOverlay")!;
+        var pages = view.FindControl<AnimatedPanel>("Pages")!;
+        Require(!menu.IsVisible && !about.IsVisible && !pages.IsVisible, "closed overlays must start hidden");
+
+        void CheckMotion(AnimatedPanel panel, Action open, Action close)
+        {
+            open();
+            Require(PumpUntil(() => panel.Opacity > 0, 1) &&
+                panel.IsVisible && panel.IsHitTestVisible && panel.Opacity < 1,
+                $"{panel.Name}: missing opening fade (visible={panel.IsVisible}, hitTest={panel.IsHitTestVisible}, opacity={panel.Opacity})");
+            var slide = (Avalonia.Media.TranslateTransform)(panel.SlideTarget ?? panel).RenderTransform!;
+            Require(panel.SlideOffset.X == 0 ? slide.Y > 0 && slide.Y < panel.SlideOffset.Y
+                : slide.X > 0 && slide.X < panel.SlideOffset.X, $"{panel.Name}: missing opening slide");
+            Pump(TimeSpan.FromMilliseconds(400));
+            Require(panel.Opacity == 1 && slide.X == 0 && slide.Y == 0,
+                $"{panel.Name}: opening did not finish (opacity={panel.Opacity}, x={slide.X}, y={slide.Y}, current={panel.RenderTransform})");
+            close();
+            Require(panel.IsVisible && !panel.IsHitTestVisible, $"{panel.Name}: close hid content immediately or kept input active");
+            Require(PumpUntil(() => panel.Opacity < 1, 1) && panel.IsVisible && panel.Opacity > 0,
+                $"{panel.Name}: missing closing fade (visible={panel.IsVisible}, opacity={panel.Opacity})");
+            Require(panel.SlideOffset.X == 0 ? slide.Y > 0 && slide.Y < panel.SlideOffset.Y
+                : slide.X > 0 && slide.X < panel.SlideOffset.X, $"{panel.Name}: missing closing slide");
+            Pump(TimeSpan.FromMilliseconds(400));
+            Require(!panel.IsVisible && panel.Opacity == 0, $"{panel.Name}: closing did not finish");
+
+            open();
+            Pump(TimeSpan.FromMilliseconds(400));
+            close();
+            Pump(TimeSpan.FromMilliseconds(80));
+            var opacity = panel.Opacity;
+            open();
+            Require(Math.Abs(panel.Opacity - opacity) < 0.1, $"{panel.Name}: reopening jumped");
+            Pump(TimeSpan.FromMilliseconds(400));
+            Require(panel.IsVisible && panel.IsHitTestVisible && panel.Opacity == 1,
+                $"{panel.Name}: stale close hid a reopened overlay");
+            close();
+            open();
+            close();
+            Pump(TimeSpan.FromMilliseconds(400));
+            Require(!panel.IsVisible, $"{panel.Name}: rapid toggles left overlay visible");
+        }
+
+        CheckMotion(menu, () => vm.OpenMenuCommand.Execute(null), () => vm.CloseMenuCommand.Execute(null));
+        vm.OpenMenuCommand.Execute(null);
+        Pump(TimeSpan.FromMilliseconds(400));
+        window.KeyPressQwerty(PhysicalKey.Escape, RawInputModifiers.None);
+        Require(!vm.IsMenuOpen && menu.IsVisible && !menu.IsHitTestVisible, "Escape did not animate menu dismissal");
+        Pump(TimeSpan.FromMilliseconds(400));
+        vm.OpenMenuCommand.Execute(null);
+        Pump(TimeSpan.FromMilliseconds(400));
+        vm.RunMenuItemCommand.Execute(vm.OpenAboutCommand);
+        Require(menu.IsVisible && !menu.IsHitTestVisible && about.IsOpen, "menu action did not animate menu close / About open");
+        Pump(TimeSpan.FromMilliseconds(400));
+        Require(!menu.IsVisible && about.Opacity == 1, "menu action transitions did not finish");
+        vm.CloseAboutCommand.Execute(null);
+        Pump(TimeSpan.FromMilliseconds(400));
+        CheckMotion(about, () => vm.OpenAboutCommand.Execute(null), () => Require(vm.GoBack(), "About back not handled"));
+
+        CheckMotion(pages, () => vm.CurrentPage = AppPage.Takes, () => Require(vm.GoBack(), "Takes back not handled"));
+        Require(ReferenceEquals(vm.PageViewModel, vm.Takes), "closing Takes discarded the animated content");
+        vm.CurrentPage = AppPage.Takes;
+        Pump(TimeSpan.FromMilliseconds(400));
+        var takes = pages.GetVisualDescendants().OfType<TakesView>().Single();
+        var trash = takes.FindControl<AnimatedPanel>("TrashPage")!;
+        CheckMotion(trash, () => vm.Takes.ShowTrash = true, () => Require(vm.GoBack(), "trash back not handled"));
+        Require(vm.CurrentPage == AppPage.Takes, "closing trash navigated away from Takes");
+
+        vm.OpenMenuCommand.Execute(null);
+        Pump(TimeSpan.FromMilliseconds(80));
+        window.Content = null;
+        window.Content = view;
+        Pump(TimeSpan.FromMilliseconds(400));
+        Require(menu.IsVisible && menu.Opacity == 1, "detach left a stale animation");
+        vm.CloseMenuCommand.Execute(null);
+        Pump(TimeSpan.FromMilliseconds(400));
+        Require(!menu.IsVisible, "reattached menu did not close");
+    }
+
     private static void AddInput(MainViewModel vm, string name) =>
         vm.AddInputCommand.Execute(new AudioInputDevice(SimulatedInputs.IdFor(name), name));
 
     private static void Pump(TimeSpan duration)
     {
+        if (Page == "animations")
+        {
+            var frame = new DispatcherFrame();
+            using var timer = DispatcherTimer.RunOnce(() => frame.Continue = false, duration);
+            Dispatcher.UIThread.PushFrame(frame);
+            return;
+        }
         var sw = Stopwatch.StartNew();
         do
         {

@@ -135,12 +135,10 @@
                 <c:Icon Data="{StaticResource IconBack}" Size="24" />
             </Button>
             <StackPanel Grid.Column="1" VerticalAlignment="Center" Margin="4,0,0,0">
-                <TextBlock Text="Takes" FontSize="22" FontWeight="Bold" IsVisible="{Binding !ShowTrash}" />
-                <TextBlock Text="Recently deleted" FontSize="22" FontWeight="Bold" IsVisible="{Binding ShowTrash}" />
-                <TextBlock Classes="muted" Text="{Binding CountText}" IsVisible="{Binding !ShowTrash}" />
-                <TextBlock Classes="muted" Text="Kept for 30 days, then removed for good" IsVisible="{Binding ShowTrash}" />
+                <TextBlock Text="Takes" FontSize="22" FontWeight="Bold" />
+                <TextBlock Classes="muted" Text="{Binding CountText}" />
             </StackPanel>
-            <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center" IsVisible="{Binding !ShowTrash}">
+            <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
                 <Button Classes="icon" Command="{Binding Main.OpenRecordingsFolderCommand}" IsVisible="{Binding CanOpenFolder}"
                         ToolTip.Tip="Open recordings folder">
                     <c:Icon Data="{StaticResource IconFolder}" />
@@ -238,41 +236,6 @@
                         </Button>
                     </StackPanel>
 
-                    <!-- Recently deleted -->
-                    <Grid IsVisible="{Binding ShowTrash}">
-                        <TextBlock Classes="muted" Text="Nothing deleted lately." HorizontalAlignment="Center" VerticalAlignment="Top"
-                                   Margin="24,32" IsVisible="{Binding TrashEmpty}" />
-                        <ScrollViewer HorizontalScrollBarVisibility="Disabled">
-                            <ItemsControl ItemsSource="{Binding Trash}" Margin="0,0,0,12">
-                                <ItemsControl.ItemTemplate>
-                                    <DataTemplate x:DataType="vm:TakeViewModel">
-                                        <Border Classes="takecard">
-                                            <StackPanel Spacing="10">
-                                                <StackPanel Spacing="2">
-                                                    <TextBlock Classes="title" Text="{Binding Title}" TextTrimming="CharacterEllipsis" />
-                                                    <TextBlock Classes="muted" Text="{Binding DeletedText}" TextTrimming="CharacterEllipsis" />
-                                                </StackPanel>
-                                                <Grid ColumnDefinitions="*,*" ColumnSpacing="8">
-                                                    <Button Classes="tool" Command="{Binding RestoreCommand}" HorizontalAlignment="Stretch">
-                                                        <StackPanel Orientation="Horizontal" Spacing="8">
-                                                            <c:Icon Data="{StaticResource IconUndo}" />
-                                                            <TextBlock Text="Restore" VerticalAlignment="Center" />
-                                                        </StackPanel>
-                                                    </Button>
-                                                    <Button Grid.Column="1" Classes="tool danger" Command="{Binding DeleteNowCommand}" HorizontalAlignment="Stretch">
-                                                        <StackPanel Orientation="Horizontal" Spacing="8">
-                                                            <c:Icon Data="{StaticResource IconDelete}" />
-                                                            <TextBlock Text="Delete now" VerticalAlignment="Center" />
-                                                        </StackPanel>
-                                                    </Button>
-                                                </Grid>
-                                            </StackPanel>
-                                        </Border>
-                                    </DataTemplate>
-                                </ItemsControl.ItemTemplate>
-                            </ItemsControl>
-                        </ScrollViewer>
-                    </Grid>
                 </Panel>
             </Grid>
 
@@ -372,7 +335,7 @@
 
         <!-- Bottom bar: Recently deleted, or the actions for the selected takes -->
         <Border Grid.Row="3" Background="{DynamicResource SurfaceBrush}" BorderBrush="{DynamicResource StrokeBrush}"
-                BorderThickness="0,1,0,0" Padding="12,6,12,8" IsVisible="{Binding ShowBottomBar}">
+                BorderThickness="0,1,0,0" Padding="12,6,12,8">
             <Panel>
                 <Button Classes="tool" Command="{Binding OpenTrashCommand}" HorizontalAlignment="Left" IsVisible="{Binding !IsSelecting}">
                     <StackPanel Orientation="Horizontal" Spacing="8">
@@ -402,6 +365,55 @@
                 </Grid>
             </Panel>
         </Border>
+
+        <!-- Recently deleted stays laid out while its closing animation runs. -->
+        <c:AnimatedPanel Name="TrashPage" Grid.RowSpan="4" IsOpen="{Binding ShowTrash}"
+                         Background="{DynamicResource BgBrush}" RowDefinitions="Auto,Auto,*">
+            <Grid ColumnDefinitions="Auto,*" Margin="12,10,12,8">
+                <Button Classes="icon" Command="{Binding CloseTrashCommand}" ToolTip.Tip="Back">
+                    <c:Icon Data="{StaticResource IconBack}" Size="24" />
+                </Button>
+                <StackPanel Grid.Column="1" VerticalAlignment="Center" Margin="4,0,0,0">
+                    <TextBlock Text="Recently deleted" FontSize="22" FontWeight="Bold" />
+                    <TextBlock Classes="muted" Text="Kept for 30 days, then removed for good" />
+                </StackPanel>
+            </Grid>
+            <views:RecordingBar Grid.Row="1" DataContext="{Binding Main}" />
+            <Grid Grid.Row="2">
+                <TextBlock Classes="muted" Text="Nothing deleted lately." HorizontalAlignment="Center" VerticalAlignment="Top"
+                           Margin="24,32" IsVisible="{Binding TrashEmpty}" />
+                <ScrollViewer HorizontalScrollBarVisibility="Disabled">
+                    <ItemsControl ItemsSource="{Binding Trash}" Margin="0,0,0,12">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate x:DataType="vm:TakeViewModel">
+                                <Border Classes="takecard">
+                                    <StackPanel Spacing="10">
+                                        <StackPanel Spacing="2">
+                                            <TextBlock Classes="title" Text="{Binding Title}" TextTrimming="CharacterEllipsis" />
+                                            <TextBlock Classes="muted" Text="{Binding DeletedText}" TextTrimming="CharacterEllipsis" />
+                                        </StackPanel>
+                                        <Grid ColumnDefinitions="*,*" ColumnSpacing="8">
+                                            <Button Classes="tool" Command="{Binding RestoreCommand}" HorizontalAlignment="Stretch">
+                                                <StackPanel Orientation="Horizontal" Spacing="8">
+                                                    <c:Icon Data="{StaticResource IconUndo}" />
+                                                    <TextBlock Text="Restore" VerticalAlignment="Center" />
+                                                </StackPanel>
+                                            </Button>
+                                            <Button Grid.Column="1" Classes="tool danger" Command="{Binding DeleteNowCommand}" HorizontalAlignment="Stretch">
+                                                <StackPanel Orientation="Horizontal" Spacing="8">
+                                                    <c:Icon Data="{StaticResource IconDelete}" />
+                                                    <TextBlock Text="Delete now" VerticalAlignment="Center" />
+                                                </StackPanel>
+                                            </Button>
+                                        </Grid>
+                                    </StackPanel>
+                                </Border>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </ScrollViewer>
+            </Grid>
+        </c:AnimatedPanel>
 
         <!-- Item menu -->
         <Grid Grid.RowSpan="4" IsVisible="{Binding IsMenuOpen}">
