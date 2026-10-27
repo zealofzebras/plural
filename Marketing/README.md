@@ -242,6 +242,11 @@ Store tooling tests: `python -m unittest discover -s Tools/store -p test_store_a
 
 ## Release workflow secrets
 
+For a quick macOS signing test, manually run the Release workflow with `signing_only` enabled (the default).
+Only the macOS job runs, using disposable arm64/x64 executables instead of building Plural. It tests Developer ID
+signing and, when its secrets are configured, Mac App Store signing and installer packaging. Notarization and all
+uploads are skipped. Disable `signing_only` for a full manual build; published releases still use the full pipeline.
+
 Android builds require all four upload-key secrets. Other platform signing secrets are optional for building.
 Stable Android submissions require the WIF variables below, not a service account key secret. Microsoft Store
 credentials will be required for stable submissions once that job is re-enabled.

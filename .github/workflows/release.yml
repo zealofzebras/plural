@@ -9,6 +9,10 @@ on:
     types: [published]
   workflow_dispatch:
     inputs:
+      signing_only:
+        description: "Test only macOS signing (no app builds, notarization or uploads)"
+        type: boolean
+        default: true
       version:
         description: "Version to build, e.g. 0.2.0 (manual runs keep the files as run artifacts only)"
         required: true
@@ -38,6 +42,7 @@ env:
 jobs:
   plan:
     name: Version
+    if: ${{ !inputs.signing_only }}
     runs-on: ubuntu-24.04
     outputs:
       version: ${{ steps.v.outputs.version }}
@@ -263,7 +268,7 @@ jobs:
   microsoft-store:
     name: Microsoft Store submission
     needs: [plan, windows, store-assets]
-    if: ${{ !cancelled() }}
+    if: ${{ !cancelled() && !inputs.signing_only }}
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     concurrency:
@@ -428,14 +433,15 @@ jobs:
   macos:
     name: macOS (arm64, x64)
     needs: [plan, store-assets]
-    if: ${{ !cancelled() && needs.store-assets.result == 'success' }}
+    if: ${{ !cancelled() && (inputs.signing_only || needs.store-assets.result == 'success') }}
     runs-on: macos-15
     env:
       VERSION: ${{ needs.plan.outputs.version }}
       BUILD: ${{ needs.plan.outputs.build }}
+      SIGNING_ONLY: ${{ inputs.signing_only == true }}
       # Each signing path runs only when all of its secrets are set; otherwise it is skipped.
       HAS_DEVID: ${{ secrets.MACOS_CERT_P12_BASE64 != '' && secrets.MACOS_CERT_PASSWORD != '' && secrets.MACOS_SIGN_IDENTITY != '' }}
-      HAS_NOTARY: ${{ secrets.APPLE_ID != '' && secrets.APPLE_TEAM_ID != '' && secrets.APPLE_APP_PASSWORD != '' }}
+      HAS_NOTARY: ${{ !inputs.signing_only && secrets.APPLE_ID != '' && secrets.APPLE_TEAM_ID != '' && secrets.APPLE_APP_PASSWORD != '' }}
       HAS_MAS: >-
         ${{ secrets.MAS_CERT_P12_BASE64 != '' && secrets.MAS_CERT_PASSWORD != '' && secrets.MAS_APP_IDENTITY != ''
         && secrets.MAS_INSTALLER_IDENTITY != '' && secrets.MAS_PROVISIONING_PROFILE_BASE64 != '' && secrets.APPLE_TEAM_ID != '' }}
@@ -443,13 +449,16 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-dotnet@v6
+        if: ${{ !inputs.signing_only }}
         with:
           dotnet-version: ${{ env.DOTNET_VERSION }}
       - uses: actions/download-artifact@v8
+        if: ${{ !inputs.signing_only }}
         with:
           name: store-assets
           path: out/store
       - name: Native libraries
+        if: ${{ !inputs.signing_only }}
         run: |
           mkdir -p "$RUNNER_TEMP/src"
           curl -fsSL -o celt.tar.gz "$CELT_URL"
@@ -461,6 +470,7 @@ jobs:
           CELT_SRC="$RUNNER_TEMP/src/celt-0.7.1" bash Native/celt/build-macos.sh
           LAME_SRC="$RUNNER_TEMP/src/lame-3.100" bash Native/lame/build-macos.sh
       - name: Publish and bundle
+        if: ${{ !inputs.signing_only }}
         run: |
           mkdir -p out/dist
           for rid in osx-arm64 osx-x64; do
@@ -468,6 +478,22 @@ jobs:
               -p:Version="$VERSION" -p:UseAppHost=true -o "out/publish/$rid"
             bash Packaging/macos/build-app.sh "out/publish/$rid" "$rid" "$VERSION" "$BUILD" \
               out/store/macos.iconset "out/app/$rid"
+          done
+      - name: Signing test bundles
+        if: inputs.signing_only
+        run: |
+          if [ "$HAS_DEVID" != "true" ]; then
+            echo "::error::Developer ID signing secrets are required for the signing test."
+            exit 1
+          fi
+          mkdir -p out/dist
+          for rid in osx-arm64 osx-x64; do
+            app="out/app/$rid/Plural.app"
+            mkdir -p "$app/Contents/MacOS"
+            printf 'int main(void) { return 0; }\n' | clang -x c -arch "${rid#osx-}" -o "$app/Contents/MacOS/Plural" -
+            sed -e 's/{{BUNDLE_ID}}/net.getplural.app/g' -e 's/{{VERSION}}/0.0.0/g' \
+              -e 's/{{BUILD}}/1/g' -e 's/{{COPYRIGHT}}/Signing test/g' \
+              Packaging/macos/Info.plist > "$app/Contents/Info.plist"
           done
       - name: Keychain
         if: env.HAS_DEVID == 'true' || env.HAS_MAS == 'true'
@@ -490,7 +516,7 @@ jobs:
           done
           security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$kp" "$kc" > /dev/null
           security list-keychains -d user -s "$kc" $(security list-keychains -d user | tr -d '"')
-            security find-identity -v -p codesigning "$kc"
+          security find-identity -v -p codesigning "$kc"
       - name: Developer ID signing and notarization
         if: env.HAS_DEVID == 'true'
         env:
@@ -517,6 +543,7 @@ jobs:
             fi
           done
       - name: Zip and disk images
+        if: ${{ !inputs.signing_only }}
         run: |
           for rid in osx-arm64 osx-x64; do
             arch="${rid#osx-}"
@@ -537,7 +564,11 @@ jobs:
           # The Mac App Store build is Apple silicon only (a .NET app can't be one universal bundle without lipo-ing the runtime).
           app="out/mas/Plural.app"
           rm -rf out/mas; mkdir -p out/mas
-          bash Packaging/macos/build-app.sh out/publish/osx-arm64 osx-arm64 "$VERSION" "$BUILD" out/store/macos.iconset out/mas
+          if [ "$SIGNING_ONLY" = "true" ]; then
+            cp -R out/app/osx-arm64/Plural.app "$app"
+          else
+            bash Packaging/macos/build-app.sh out/publish/osx-arm64 osx-arm64 "$VERSION" "$BUILD" out/store/macos.iconset out/mas
+          fi
           echo "$PROFILE_BASE64" | base64 -d > "$app/Contents/embedded.provisionprofile"
           ent="$RUNNER_TEMP/mas.entitlements"
           cp Packaging/macos/Entitlements.appstore.plist "$ent"
@@ -554,6 +585,7 @@ jobs:
         if: always()
         run: security delete-keychain "$RUNNER_TEMP/signing.keychain-db" 2>/dev/null || true
       - uses: actions/upload-artifact@v7
+        if: ${{ !inputs.signing_only }}
         with:
           name: macos
           path: out/dist
