@@ -258,6 +258,12 @@ Add secrets under Settings → Secrets and variables → Actions.
 | `IOS_CERT_P12_BASE64`, `IOS_CERT_PASSWORD`, `IOS_SIGN_IDENTITY`, `IOS_PROVISIONING_PROFILE_BASE64` | Signed App Store iOS `.ipa` (`Apple Distribution: Name (TEAMID)` and an App Store `.mobileprovision`) |
 | `APP_STORE_CONNECT_API_KEY` | Contents of the App Store Connect API `.p8` key (plain text or base64) for uploading to App Store Connect |
 
+If macOS signing reports `The specified item could not be found in the keychain` after a successful import,
+check the valid code-signing identities printed by the Keychain step. `MACOS_SIGN_IDENTITY` must match the
+Developer ID Application certificate's full name or SHA-1 fingerprint, not a team ID or an Apple Distribution
+certificate. The P12 must include its private key. If the certificate is not listed as valid, check its expiry
+and certificate trust chain before exporting it again. Signing explicitly uses the temporary CI keychain.
+
 | Variable | Needed for |
 |---|---|
 | `GCP_WORKLOAD_IDENTITY_PROVIDER` | Full WIF provider name: `projects/PROJECT_NUMBER/locations/global/workloadIdentityPools/POOL/providers/PROVIDER` |

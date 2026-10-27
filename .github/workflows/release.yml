@@ -263,7 +263,7 @@ jobs:
   microsoft-store:
     name: Microsoft Store submission
     needs: [plan, windows, store-assets]
-    if: ${{ false && !cancelled() }}
+    if: ${{ !cancelled() }}
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     concurrency:
@@ -490,6 +490,7 @@ jobs:
           done
           security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$kp" "$kc" > /dev/null
           security list-keychains -d user -s "$kc" $(security list-keychains -d user | tr -d '"')
+            security find-identity -v -p codesigning "$kc"
       - name: Developer ID signing and notarization
         if: env.HAS_DEVID == 'true'
         env:
@@ -503,10 +504,10 @@ jobs:
             # Inside-out: every Mach-O file, then the bundle.
             find "$app/Contents/MacOS" -type f | while read -r f; do
               if file "$f" | grep -q Mach-O; then
-                codesign --force --timestamp --options runtime --entitlements Packaging/macos/Entitlements.plist -s "$IDENTITY" "$f"
+                codesign --force --timestamp --options runtime --keychain "$RUNNER_TEMP/signing.keychain-db" --entitlements Packaging/macos/Entitlements.plist -s "$IDENTITY" "$f"
               fi
             done
-            codesign --force --timestamp --options runtime --entitlements Packaging/macos/Entitlements.plist -s "$IDENTITY" "$app"
+            codesign --force --timestamp --options runtime --keychain "$RUNNER_TEMP/signing.keychain-db" --entitlements Packaging/macos/Entitlements.plist -s "$IDENTITY" "$app"
             codesign --verify --strict --deep "$app"
             if [ "$HAS_NOTARY" = "true" ]; then
               ditto -c -k --keepParent "$app" "$RUNNER_TEMP/notarize.zip"
@@ -544,11 +545,11 @@ jobs:
           /usr/libexec/PlistBuddy -c "Add :com.apple.developer.team-identifier string $APPLE_TEAM_ID" "$ent"
           find "$app/Contents/MacOS" -type f ! -name Plural | while read -r f; do
             if file "$f" | grep -q Mach-O; then
-              codesign --force --timestamp --entitlements Packaging/macos/Entitlements.inherit.plist -s "$APP_IDENTITY" "$f"
+              codesign --force --timestamp --keychain "$RUNNER_TEMP/signing.keychain-db" --entitlements Packaging/macos/Entitlements.inherit.plist -s "$APP_IDENTITY" "$f"
             fi
           done
-          codesign --force --timestamp --entitlements "$ent" -s "$APP_IDENTITY" "$app"
-          productbuild --component "$app" /Applications --sign "$INSTALLER_IDENTITY" "out/dist/Plural-$VERSION-macos-appstore.pkg"
+          codesign --force --timestamp --keychain "$RUNNER_TEMP/signing.keychain-db" --entitlements "$ent" -s "$APP_IDENTITY" "$app"
+          productbuild --component "$app" /Applications --keychain "$RUNNER_TEMP/signing.keychain-db" --sign "$INSTALLER_IDENTITY" "out/dist/Plural-$VERSION-macos-appstore.pkg"
       - name: Clean up keychain
         if: always()
         run: security delete-keychain "$RUNNER_TEMP/signing.keychain-db" 2>/dev/null || true
