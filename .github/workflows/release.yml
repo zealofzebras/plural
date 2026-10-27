@@ -444,6 +444,7 @@ jobs:
       HAS_NOTARY: ${{ !inputs.signing_only && secrets.APPLE_ID != '' && secrets.APPLE_TEAM_ID != '' && secrets.APPLE_APP_PASSWORD != '' }}
       HAS_MAS: >-
         ${{ secrets.MAS_CERT_P12_BASE64 != '' && secrets.MAS_CERT_PASSWORD != '' && secrets.MAS_APP_IDENTITY != ''
+        && secrets.IOS_CERT_P12_BASE64 != '' && secrets.IOS_CERT_PASSWORD != ''
         && secrets.MAS_INSTALLER_IDENTITY != '' && secrets.MAS_PROVISIONING_PROFILE_BASE64 != '' && secrets.APPLE_TEAM_ID != '' }}
       MACOSX_DEPLOYMENT_TARGET: "12.0"
     steps:
@@ -504,12 +505,14 @@ jobs:
           DEVID_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
           MAS_P12: ${{ secrets.MAS_CERT_P12_BASE64 }}
           MAS_PASSWORD: ${{ secrets.MAS_CERT_PASSWORD }}
+          DISTRIBUTION_P12: ${{ secrets.IOS_CERT_P12_BASE64 }}
+          DISTRIBUTION_PASSWORD: ${{ secrets.IOS_CERT_PASSWORD }}
         run: |
           kc="$RUNNER_TEMP/signing.keychain-db"; kp="$(uuidgen)"
           security create-keychain -p "$kp" "$kc"
           security set-keychain-settings -lut 21600 "$kc"
           security unlock-keychain -p "$kp" "$kc"
-          for pair in DEVID_P12:DEVID_PASSWORD:HAS_DEVID MAS_P12:MAS_PASSWORD:HAS_MAS; do
+          for pair in DEVID_P12:DEVID_PASSWORD:HAS_DEVID MAS_P12:MAS_PASSWORD:HAS_MAS DISTRIBUTION_P12:DISTRIBUTION_PASSWORD:HAS_MAS; do
             IFS=: read -r data_var pass_var flag_var <<< "$pair"
             [ "${!flag_var}" = "true" ] || continue
             echo "${!data_var}" | base64 -d > "$RUNNER_TEMP/cert.p12"

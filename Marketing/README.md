@@ -152,7 +152,9 @@ but never submits it. Leave it off for the very first version until the app reco
 2. **API key:** Users and Access → Integrations → App Store Connect API → Team Keys → generate a key with the
    **App Manager** role. Download the `.p8` (only possible once). Copy the key ID and the issuer ID.
 3. **Mac App Store certificates:** create an **Apple Distribution** and a **Mac Installer Distribution** certificate,
-   export both from Keychain Access into one `.p12`, then `base64 -i mas.p12 | pbcopy`. Identity names are shown by
+   export each with its private key into a separate `.p12`. Store the installer in `MAS_CERT_P12_BASE64` and its
+   password in `MAS_CERT_PASSWORD`; the app uses the Apple Distribution export in `IOS_CERT_P12_BASE64` and
+   `IOS_CERT_PASSWORD`, shared with iOS. Use `base64 -i certificate.p12 | pbcopy`. Identity names are shown by
    `security find-identity -v` (for example `Apple Distribution: Your Name (TEAMID)` and
    `3rd Party Mac Developer Installer: Your Name (TEAMID)`).
 4. **Mac provisioning profile:** Profiles → + → **Mac App Store Connect**, App ID `net.getplural.app`, the Apple
@@ -259,8 +261,8 @@ Add secrets under Settings → Secrets and variables → Actions.
 | `WINDOWS_CERT_PFX_BASE64`, `WINDOWS_CERT_PASSWORD` | Signing the .msixbundle for sideloading. The Store signs it for you. The certificate subject must equal the publisher |
 | `MACOS_CERT_P12_BASE64`, `MACOS_CERT_PASSWORD`, `MACOS_SIGN_IDENTITY` | Developer ID signing of the direct-download macOS app (`Developer ID Application: Name (TEAMID)`) |
 | `APPLE_ID`, `APPLE_TEAM_ID`, `APPLE_APP_PASSWORD` | Notarizing the macOS app (app-specific password). `APPLE_TEAM_ID` (10 characters) is also needed for the Mac App Store `.pkg` |
-| `MAS_CERT_P12_BASE64`, `MAS_CERT_PASSWORD`, `MAS_APP_IDENTITY`, `MAS_INSTALLER_IDENTITY`, `MAS_PROVISIONING_PROFILE_BASE64` | Mac App Store `.pkg` (`Apple Distribution` and `Mac Installer Distribution` identities in one .p12, plus the Mac App Store provisioning profile) |
-| `IOS_CERT_P12_BASE64`, `IOS_CERT_PASSWORD`, `IOS_SIGN_IDENTITY`, `IOS_PROVISIONING_PROFILE_BASE64` | Signed App Store iOS `.ipa` (`Apple Distribution: Name (TEAMID)` and an App Store `.mobileprovision`) |
+| `MAS_CERT_P12_BASE64`, `MAS_CERT_PASSWORD`, `MAS_APP_IDENTITY`, `MAS_INSTALLER_IDENTITY`, `MAS_PROVISIONING_PROFILE_BASE64` | Mac App Store `.pkg`: installer P12 and password, app/installer identity names, and Mac provisioning profile. App signing also requires the separate Apple Distribution P12 in `IOS_CERT_*` |
+| `IOS_CERT_P12_BASE64`, `IOS_CERT_PASSWORD`, `IOS_SIGN_IDENTITY`, `IOS_PROVISIONING_PROFILE_BASE64` | Apple Distribution P12 and password shared by iOS and Mac App Store app signing; iOS identity and profile are required only for the iOS `.ipa` |
 | `APP_STORE_CONNECT_API_KEY` | Contents of the App Store Connect API `.p8` key (plain text or base64) for uploading to App Store Connect |
 
 If macOS signing reports `The specified item could not be found in the keychain` after a successful import,
