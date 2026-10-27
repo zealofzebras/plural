@@ -1,0 +1,9 @@
+require "deliver/upload_metadata"
+
+module PluralReviewAttachments
+  def review_attachment_file(version)
+    super if options[:app_review_attachment_file]
+  end
+end
+
+Deliver::UploadMetadata.prepend(PluralReviewAttachments)

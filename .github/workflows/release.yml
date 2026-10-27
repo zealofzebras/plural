@@ -13,6 +13,10 @@ on:
         description: "Test only macOS signing (no app builds, notarization or uploads)"
         type: boolean
         default: true
+      listing_run_id:
+        description: "Retry only Apple listings from this run's store-assets artifact (no binary uploads)"
+        type: string
+        default: ""
       version:
         description: "Version to build, e.g. 0.2.0 (manual runs keep the files as run artifacts only)"
         required: true
@@ -42,7 +46,7 @@ env:
 jobs:
   plan:
     name: Version
-    if: ${{ !inputs.signing_only }}
+    if: ${{ !inputs.signing_only && !inputs.listing_run_id }}
     runs-on: ubuntu-24.04
     outputs:
       version: ${{ steps.v.outputs.version }}
@@ -433,7 +437,7 @@ jobs:
   macos:
     name: macOS (arm64, x64)
     needs: [plan, store-assets]
-    if: ${{ !cancelled() && (inputs.signing_only || needs.store-assets.result == 'success') }}
+    if: ${{ !cancelled() && !inputs.listing_run_id && (inputs.signing_only || needs.store-assets.result == 'success') }}
     runs-on: macos-15
     env:
       VERSION: ${{ needs.plan.outputs.version }}
@@ -684,15 +688,19 @@ jobs:
     needs: [plan, store-assets, macos, ios]
     # Stable releases only (build numbers can't be reused); the whole job is skipped until the API key IDs are set.
     if: >-
-      ${{ !cancelled() && github.event_name == 'release' && !github.event.release.prerelease
-      && needs.plan.result == 'success' && vars.APP_STORE_CONNECT_KEY_ID != '' && vars.APP_STORE_CONNECT_ISSUER_ID != '' }}
+      ${{ !cancelled() && ((github.event_name == 'release' && !github.event.release.prerelease
+      && needs.plan.result == 'success') || inputs.listing_run_id != '')
+      && vars.APP_STORE_CONNECT_KEY_ID != '' && vars.APP_STORE_CONNECT_ISSUER_ID != '' }}
     runs-on: macos-15
     timeout-minutes: 60
+    permissions:
+      contents: read
+      actions: read
     concurrency:
       group: app-store-publishing
       cancel-in-progress: false
     env:
-      VERSION: ${{ needs.plan.outputs.version }}
+      VERSION: ${{ needs.plan.outputs.version || inputs.version }}
       BUILD: ${{ needs.plan.outputs.build }}
       KEY_ID: ${{ vars.APP_STORE_CONNECT_KEY_ID }}
       ISSUER_ID: ${{ vars.APP_STORE_CONNECT_ISSUER_ID }}
@@ -718,6 +726,8 @@ jobs:
         with:
           name: store-assets
           path: in/store-assets
+          run-id: ${{ inputs.listing_run_id || github.run_id }}
+          github-token: ${{ github.token }}
       - name: Install API key
         if: env.HAS_KEY == 'true'
         env:
@@ -734,7 +744,7 @@ jobs:
             '{key_id: $k, issuer_id: $i, key: $p, in_house: false}' > "$RUNNER_TEMP/asc-api-key.json"
       - name: Upload to App Store Connect
         id: upload
-        if: env.HAS_KEY == 'true'
+        if: env.HAS_KEY == 'true' && !inputs.listing_run_id
         run: |
           upload() {  # upload <type> <file>
             if [ ! -f "$2" ]; then
@@ -749,13 +759,14 @@ jobs:
           upload macos "in/macos/Plural-$VERSION-macos-appstore.pkg"
           upload ios "in/ios/Plural-$VERSION-ios.ipa"
       - name: Upload App Store listing
-        if: env.HAS_KEY == 'true' && env.UPLOAD_LISTING == 'true' && (steps.upload.outputs.macos == 'true' || steps.upload.outputs.ios == 'true')
+        if: env.HAS_KEY == 'true' && env.UPLOAD_LISTING == 'true' && (inputs.listing_run_id != '' || steps.upload.outputs.macos == 'true' || steps.upload.outputs.ios == 'true')
         env:
-          IOS: ${{ steps.upload.outputs.ios }}
-          MACOS: ${{ steps.upload.outputs.macos }}
+          IOS: ${{ inputs.listing_run_id != '' && 'true' || steps.upload.outputs.ios }}
+          MACOS: ${{ inputs.listing_run_id != '' && 'true' || steps.upload.outputs.macos }}
         run: |
           command -v fastlane > /dev/null || brew install fastlane
-          touch Deliverfile
+          ruby Tools/store/test_deliver.rb
+          cp Tools/store/Deliverfile Deliverfile
           deliver() {  # deliver <fastlane platform> <store-assets folder>
             fastlane deliver --api_key_path "$RUNNER_TEMP/asc-api-key.json" --app_identifier net.getplural.app \
               --platform "$1" --app_version "$VERSION" \

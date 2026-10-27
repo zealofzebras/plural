@@ -126,7 +126,7 @@ remain available as workflow artifacts; Windows release uploads and Microsoft St
 ## App Store and Mac App Store publishing
 
 Stable GitHub releases upload the Mac App Store `.pkg` and the iOS `.ipa` to App Store Connect (job `app-store`).
-Manual workflow runs and prereleases don't upload, because a build number can't be uploaded twice. Each part is
+Normal manual workflow runs and prereleases don't upload binaries, because a build number can't be uploaded twice. Each part is
 skipped, not failed, while its secrets are missing:
 
 | Missing | Effect |
@@ -143,6 +143,16 @@ You still choose the build and press **Submit for Review** in App Store Connect.
 text, URLs, categories, screenshots) with fastlane `deliver`. This creates the version in App Store Connect if needed
 but never submits it. Leave it off for the very first version until the app record is set up by hand, because
 "What's New" can't be set on a first version.
+
+To retry both Apple listings after a partial failure, reuse the release run's `store-assets` artifact:
+
+```powershell
+gh workflow run release.yml --ref main -f version=0.10.2 -f listing_run_id=40577475950
+```
+
+Use the matching version and run ID. This mode skips builds and binary uploads, requires
+`APP_STORE_UPLOAD_LISTING=true`, and never submits for review. Review attachments are left unchanged
+unless explicitly supplied; Fastlane otherwise crashes when a new platform has no review-detail record.
 
 ### One-time Apple setup
 
