@@ -539,9 +539,7 @@ jobs:
           for rid in osx-arm64 osx-x64; do
             app="out/app/$rid/Plural.app"
             find "$app/Contents/MacOS" -type f ! -name Plural | while read -r f; do
-              if [[ "$f" == *.dll ]] || file "$f" | grep -q Mach-O; then
-                codesign --force --timestamp --options runtime --keychain "$RUNNER_TEMP/signing.keychain-db" --entitlements Packaging/macos/Entitlements.plist -s "$IDENTITY" "$f"
-              fi
+              codesign --force --timestamp --options runtime --keychain "$RUNNER_TEMP/signing.keychain-db" --entitlements Packaging/macos/Entitlements.plist -s "$IDENTITY" "$f"
             done
             codesign --force --timestamp --options runtime --keychain "$RUNNER_TEMP/signing.keychain-db" --entitlements Packaging/macos/Entitlements.plist -s "$IDENTITY" "$app"
             codesign --verify --strict --deep "$app"
@@ -585,9 +583,7 @@ jobs:
           /usr/libexec/PlistBuddy -c "Add :com.apple.application-identifier string $APPLE_TEAM_ID.net.getplural.app" "$ent"
           /usr/libexec/PlistBuddy -c "Add :com.apple.developer.team-identifier string $APPLE_TEAM_ID" "$ent"
           find "$app/Contents/MacOS" -type f ! -name Plural | while read -r f; do
-            if [[ "$f" == *.dll ]] || file "$f" | grep -q Mach-O; then
-              codesign --force --timestamp --keychain "$RUNNER_TEMP/signing.keychain-db" --entitlements Packaging/macos/Entitlements.inherit.plist -s "$APP_IDENTITY" "$f"
-            fi
+            codesign --force --timestamp --keychain "$RUNNER_TEMP/signing.keychain-db" --entitlements Packaging/macos/Entitlements.inherit.plist -s "$APP_IDENTITY" "$f"
           done
           codesign --force --timestamp --keychain "$RUNNER_TEMP/signing.keychain-db" --entitlements "$ent" -s "$APP_IDENTITY" "$app"
           productbuild --component "$app" /Applications --keychain "$RUNNER_TEMP/signing.keychain-db" --sign "$INSTALLER_IDENTITY" "out/dist/Plural-$VERSION-macos-appstore.pkg"
