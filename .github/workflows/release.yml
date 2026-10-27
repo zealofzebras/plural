@@ -518,6 +518,8 @@ jobs:
           done
           security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$kp" "$kc" > /dev/null
           security list-keychains -d user -s "$kc" $(security list-keychains -d user | tr -d '"')
+          security find-identity "$kc"
+          security find-identity -p codesigning "$kc"
           security find-identity -v -p codesigning "$kc"
       - name: Developer ID signing and notarization
         if: env.HAS_DEVID == 'true'
