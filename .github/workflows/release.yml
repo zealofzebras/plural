@@ -538,9 +538,8 @@ jobs:
         run: |
           for rid in osx-arm64 osx-x64; do
             app="out/app/$rid/Plural.app"
-            # Inside-out: every Mach-O file, then the bundle.
-            find "$app/Contents/MacOS" -type f | while read -r f; do
-              if file "$f" | grep -q Mach-O; then
+            find "$app/Contents/MacOS" -type f ! -name Plural | while read -r f; do
+              if [[ "$f" == *.dll ]] || file "$f" | grep -q Mach-O; then
                 codesign --force --timestamp --options runtime --keychain "$RUNNER_TEMP/signing.keychain-db" --entitlements Packaging/macos/Entitlements.plist -s "$IDENTITY" "$f"
               fi
             done
@@ -586,7 +585,7 @@ jobs:
           /usr/libexec/PlistBuddy -c "Add :com.apple.application-identifier string $APPLE_TEAM_ID.net.getplural.app" "$ent"
           /usr/libexec/PlistBuddy -c "Add :com.apple.developer.team-identifier string $APPLE_TEAM_ID" "$ent"
           find "$app/Contents/MacOS" -type f ! -name Plural | while read -r f; do
-            if file "$f" | grep -q Mach-O; then
+            if [[ "$f" == *.dll ]] || file "$f" | grep -q Mach-O; then
               codesign --force --timestamp --keychain "$RUNNER_TEMP/signing.keychain-db" --entitlements Packaging/macos/Entitlements.inherit.plist -s "$APP_IDENTITY" "$f"
             fi
           done
@@ -760,6 +759,7 @@ jobs:
           MACOS: ${{ steps.upload.outputs.macos }}
         run: |
           command -v fastlane > /dev/null || brew install fastlane
+          touch Deliverfile
           deliver() {  # deliver <fastlane platform> <store-assets folder>
             fastlane deliver --api_key_path "$RUNNER_TEMP/asc-api-key.json" --app_identifier net.getplural.app \
               --platform "$1" --app_version "$VERSION" \
