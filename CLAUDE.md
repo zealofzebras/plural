@@ -17,7 +17,7 @@ Src/Plural.slnx
   Plural.Core.Tests/         xUnit, incl. decoding a real capture (TestData/)
   Plural.Platform.Windows/   AF_BTH RFCOMM socket, paired devices from registry, WASAPI sink (NAudio 3.1)
   Plural.Platform.Android/   BluetoothSocket RFCOMM, bonded devices, AudioTrack sink
-  Plural.Platform.Apple/     macOS+iOS (net10.0, P/Invoke): AudioQueue sink/input, AudioConverter AAC, QueueStream
+  Plural.Platform.Apple/     macOS+iOS (net10.0, P/Invoke): AudioQueue sink/input, AudioConverter AAC, QueueStream, AVFoundation camera, VideoToolbox H.264
   Plural.Platform.MacOS/     IOBluetooth RFCOMM via ObjC runtime (RunLoopThread), Core Audio devices (MacAudio)
   Plural.Platform.iOS/       External Accessory (MFi only; no RFCOMM on iOS), AVAudioSession routes
   Plural.App/                shared UI: Views/MainView.axaml, ViewModels/, Services/IAppHost.cs

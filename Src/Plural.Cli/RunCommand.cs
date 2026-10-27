@@ -310,6 +310,11 @@ sealed partial class RunCommand(MikeHub hub, string[] a, Stream? mcpOut = null)
         }
         try
         {
+            if (OperatingSystem.IsMacOS() && !await Plural.Platform.Apple.AppleCameraAccess.EnsureAsync())
+            {
+                Say("camera access denied (System Settings > Privacy & Security > Camera)");
+                return;
+            }
             hub.Camera = await hub.Video.OpenAsync(camera, _video with { CameraId = camera.Id }, _cts.Token);
             Say($"camera: {camera.Name} {hub.Camera.Width}x{hub.Camera.Height}@{hub.Camera.FrameRate}");
         }

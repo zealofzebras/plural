@@ -54,7 +54,9 @@
 - [x] Run macOS on a Mac with a SmartMike (CLI and app, 2026-10-26)
 - [x] SmartMike+ is MFi: firmware has iAP; MetAudio iOS 1.4.5 declares only `com.sabinetek.iisrecorder`; over EA the mic sends bare "SS" frames (no `FF 5A` link layer, Protocol/README.md)
 - [x] Test the iOS External Accessory connection on an iPhone (iPhone 13: connects, streams and records a SmartMike take)
-- [ ] Camera on macOS/iOS (AVFoundation + VideoToolbox); RFCOMM server on macOS for Bluetooth remote mode
+- [x] Camera on macOS/iOS (AVFoundation + VideoToolbox): implemented, compiled only
+- [ ] Test the camera on a Mac (built-in, USB webcam) and an iPhone (main, front; rotation)
+- [ ] RFCOMM server on macOS for Bluetooth remote mode
 - [ ] Own virtual-mic driver (later), Linux platform layer (later)
 
 ## Phase 3c — Tier 1: take library, player, recording reliability → [Plural/Recording.md](Plural/Recording.md)
@@ -84,7 +86,7 @@ Built (2026-10-12); hardware tests and fixes 2026-10-13. 350 Core tests pass on 
 - [ ] Free-space auto-stop at 200 MB (dry run on a small disk)
 - [ ] Remote: 3-video take on phone portrait, phone landscape and desktop shows the expected layout; Pause between two devices (verified PC → Pixel 8 over Wi‑Fi, 2026-10-13); "Doesn't support pause" with a level-1 peer
 - [ ] Tablet and desktop Takes and Player layouts with real takes
-- [ ] macOS and iOS: playback decodes compiled only; video needs VideoToolbox (not started)
+- [ ] macOS and iOS: playback decodes (audio + VideoToolbox video) compiled only
 - [x] 2026-10-13 fixes (tested): Android video orientation (Pixel 8, front and rear), key frame after resume, MKA/MKV duration, file-name sanitizing, remote pending takes expire after 24 h, Connect mics skips HFP inputs, landscape and mixer layouts (Tab P10, Pixel 8)
 
 ## Phase 4 — Firmware (stretch, risk of bricking)

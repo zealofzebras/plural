@@ -1,5 +1,6 @@
 using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
+using Plural.Platform.Apple;
 
 namespace Plural.Platform.MacOS;
 

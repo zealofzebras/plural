@@ -57,6 +57,7 @@
 
   <key>NSBluetoothAlwaysUsageDescription</key><string>Plural connects to your wireless microphones over Bluetooth.</string>
   <key>NSMicrophoneUsageDescription</key><string>Plural records from the microphones you add.</string>
+  <key>NSCameraUsageDescription</key><string>Plural records video when you turn on the camera.</string>
   <key>NSLocalNetworkUsageDescription</key><string>Plural finds and controls other Plural devices on your network to record together.</string>
 </dict>
 </plist>

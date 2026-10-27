@@ -16,13 +16,14 @@ public sealed class IosHost : IAppHost
 {
     /// <summary>
     /// SmartMikes through External Accessory (MFi only, see <see cref="IosAccessories"/>), local mics and monitoring through the
-    /// audio session, AAC through AudioToolbox. No camera yet (AVFoundation + VideoToolbox): the UI hides video without one.
+    /// audio session, AAC through AudioToolbox, the main and front camera through AVFoundation with VideoToolbox H.264.
     /// </summary>
     public MikeHub CreateHub()
     {
         OnMain(IosAudio.ConfigureSession);
         var audio = new IosAudio();
-        return new MikeHub(new IosAccessories(), audio, new AppleAacEncoderFactory(), null, audio, new AppleAudioDecoderFactory(), null);
+        return new MikeHub(new IosAccessories(), audio, new AppleAacEncoderFactory(), IosVideo.CreatePlatform(), audio,
+            new AppleAudioDecoderFactory(), new AppleVideoDecoderFactory());
     }
 
     /// <summary>Documents/Recordings: visible in the Files app (UIFileSharingEnabled + LSSupportsOpeningDocumentsInPlace).</summary>
@@ -67,8 +68,8 @@ public sealed class IosHost : IAppHost
     /// <summary>External Accessory needs no runtime permission; the mic must be connected in Settings › Bluetooth.</summary>
     public Task<bool> EnsurePermissionsAsync() => Task.FromResult(true);
 
-    /// <summary>No camera support on iOS yet (the hub has no video platform, so this is never asked).</summary>
-    public Task<bool> EnsureCameraPermissionAsync() => Task.FromResult(false);
+    /// <summary>System prompt on first use (NSCameraUsageDescription in Info.plist).</summary>
+    public Task<bool> EnsureCameraPermissionAsync() => IosVideo.EnsurePermissionAsync();
 
     public Task<bool> EnsureMicrophonePermissionAsync()
     {

@@ -26,9 +26,9 @@ public sealed class DesktopHost : IAppHost
         }
         if (OperatingSystem.IsMacOS())
         {
-            // No camera on macOS yet (AVFoundation + VideoToolbox): the UI hides video when the hub has none.
             var audio = new MacAudio();
-            return new MikeHub(new MacBluetooth(), audio, new AppleAacEncoderFactory(), null, audio, new AppleAudioDecoderFactory(), null);
+            return new MikeHub(new MacBluetooth(), audio, new AppleAacEncoderFactory(), new AppleVideoPlatform(), audio, new AppleAudioDecoderFactory(),
+                new AppleVideoDecoderFactory());
         }
         throw new PlatformNotSupportedException("Plural desktop supports Windows and macOS.");
     }
@@ -72,8 +72,12 @@ public sealed class DesktopHost : IAppHost
     /// <summary>macOS asks for Bluetooth access itself on first use (NSBluetoothAlwaysUsageDescription in Info.plist).</summary>
     public Task<bool> EnsurePermissionsAsync() => Task.FromResult(true);
 
-    /// <summary>Windows has no runtime prompt for desktop apps; denied access surfaces as an error when opening the camera.</summary>
-    public Task<bool> EnsureCameraPermissionAsync() => Task.FromResult(true);
+    /// <summary>
+    /// Windows has no runtime prompt for desktop apps; denied access surfaces as an error when opening the camera.
+    /// macOS shows its prompt on first use (NSCameraUsageDescription).
+    /// </summary>
+    public Task<bool> EnsureCameraPermissionAsync() =>
+        OperatingSystem.IsMacOS() ? AppleCameraAccess.EnsureAsync() : Task.FromResult(true);
 
     /// <summary>Same as the camera: a blocked microphone shows as an error when the mic is opened (macOS prompts on first capture).</summary>
     public Task<bool> EnsureMicrophonePermissionAsync() => Task.FromResult(true);

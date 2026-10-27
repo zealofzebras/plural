@@ -154,7 +154,15 @@ macOS: AudioServerPlugIn (BlackHole-style). Linux: PipeWire virtual source per m
   `NSMicrophoneUsageDescription` in `Packaging/macos/Info.plist`); an unbundled `dotnet run` attributes them to the terminal.
 - Recordings: `~/Documents/Plural Recordings`; settings: `~/Library/Application Support/Plural/settings.json`.
 - Native libs: `Native/celt/build-macos.sh`, `Native/lame/build-macos.sh` (built in the release workflow).
-- Not yet: camera (AVFoundation + VideoToolbox), own virtual device (AudioServerPlugIn; use BlackHole meanwhile).
+- Camera (shared with iOS, `Plural.Platform.Apple`, raw objc_msgSend/P/Invoke): `AppleVideoPlatform` lists every video device through
+  `AVCaptureDeviceDiscoverySession` (built-in FaceTime, USB/external, Continuity Camera, Desk View). `AppleVideoCapture` runs an
+  `AVCaptureSession` with a BGRA `AVCaptureVideoDataOutput` (preset = largest of 4K/1080p/720p/480p not above the requested height;
+  the frame rate is clamped to the active format's ranges, which UVC webcams report as e.g. 30.00003 fps), previews at ~15 fps
+  (≤ 640 px) and encodes with `VtH264Encoder` (VideoToolbox, real-time, no B-frames, 1 s GOP, AVCC → Annex-B with SPS/PPS before
+  key frames). Capture PTS are host time (= `Stopwatch`, mach absolute time). `AppleVideoDecoder` (VideoToolbox, BGRA) plays takes
+  back. Permission: `AppleCameraAccess` (`NSCameraUsageDescription`), also asked by `Plural.Cli run --camera`.
+  Compiled only — not yet run on Apple hardware.
+- Not yet: own virtual device (AudioServerPlugIn; use BlackHole meanwhile).
 
 ## iOS
 - Head `Plural.App.iOS` (`net10.0-ios`, iOS 15+, iPhone and iPad, `AvaloniaAppDelegate<App>`), `IosHost`, platform `Plural.Platform.iOS`.
@@ -175,7 +183,10 @@ macOS: AudioServerPlugIn (BlackHole-style). Linux: PipeWire virtual source per m
 - Remote mode: Wi-Fi only; subnet broadcast discovery needs Apple's `com.apple.developer.networking.multicast` entitlement.
 - Native libs: dynamic frameworks in `Native/{celt,lame}/runtimes/ios/*.xcframework` from `build-ios.sh` (via `Native/ios-framework.sh`);
   `NativeLibs` loads `Frameworks/<name>.framework/<name>`.
-- Not yet: camera. SmartMike over External Accessory verified on an iPhone 13 (connect, clock sync, audio streaming, recording).
+- Camera: the shared AVFoundation/VideoToolbox code (see macOS) with the main (back) and front wide-angle camera. While not recording,
+  frames follow the interface orientation (`IosVideo` samples `UIWindowScene` on the main thread); the orientation is fixed for a
+  take. `NSCameraUsageDescription` in `Info.plist`. Compiled only — not yet run on an iPhone.
+- Not yet tested: camera. SmartMike over External Accessory verified on an iPhone 13 (connect, clock sync, audio streaming, recording).
 
 ## Recording
 `MikeHub.StartRecordingAll(root)` / `StopRecordingAllAsync()` start and stop every connected mic through `TakeRecorder`, at the same instant. Take folder: `<root>/<yyyyMMdd_HHmmss>/`. Formats: WAV, M4A, MP3, MKA, MKV, MP4 (see [Recording.md](Recording.md)); the default is WAV, 44.1 kHz mono 16-bit (the capsule is mono; L = R). Each mic is locked to `MediaClock`, so takes stay aligned over long recordings. Recording works with or without a virtual cable.
@@ -194,7 +205,7 @@ Src/
   Plural.Core.Tests/         xUnit — frames, headers, decode of Captures/*
   Plural.Platform.Windows/   RFCOMM, discovery, WASAPI sink
   Plural.Platform.Android/   RFCOMM (BluetoothSocket), bonded devices, AudioTrack sink
-  Plural.Platform.Apple/     macOS + iOS: AudioQueue output/input, AudioConverter AAC, QueueStream
+  Plural.Platform.Apple/     macOS + iOS: AudioQueue output/input, AudioConverter AAC, QueueStream, AVFoundation camera + VideoToolbox H.264
   Plural.Platform.MacOS/     IOBluetooth RFCOMM (ObjC runtime), Core Audio devices
   Plural.Platform.iOS/       External Accessory, AVAudioSession inputs/outputs
   Plural.Cli/                headless runner
@@ -220,8 +231,8 @@ Native/lame/                    per-RID LAME 3.100 binaries (same four scripts)
 | `Plural.App` | UI redesign built: design system (dark/light, coral Record, blue accent), Audio/Video mode with camera preview, mic cards with status pill, battery, gradient level meter with peak hold, round Record button with format chip, settings sheet (format, Matroska codec, AAC/MP3 bitrate, video res/fps/bitrate, folder), persisted JSON settings. Tier 1 (2026-10-12): page navigation (Recorder, Takes, Player), Takes page, Player page with waveforms and synced video, recorder pause and warnings. Takes, Player, rename and delete verified on Pixel 8 (2026-10-13); desktop Takes and Player not yet tested with real takes |
 | `Plural.App.Desktop` | Runs on Windows with the shared UI (hosted as `MainView`); `OpenFolder` via `IAppHost`. Takes and Player not yet tested with real takes |
 | `Plural.App.Android` | Builds before Tier 1 (Debug and Release APKs, arm64 + x64, CELT and LAME included); the previous version ran on a Pixel 8 (Android 17). Tier 1 adds `RecordingService` (foreground service, notification, Pause/Stop actions) and the decoders. On a Pixel 8 (Android 17), 2026-10-13: service with notification, 118 s WAV incl. 30 s screen-off, MP4/MKV with pause, force-stop → Recovered, Takes/Player, front and rear video, remote control from a PC over Wi‑Fi. Lenovo Tab P10 (Android 9): landscape mixer and bottom bar. **Not yet: SmartMike auto-reconnect mid-take, Android 17 background video** |
-| `Plural.Platform.MacOS` / `.Apple` | IOBluetooth RFCOMM, Core Audio output/input, AudioQueue, AAC. Published `osx-arm64`/`osx-x64` and run on Apple Silicon (2026-10-26): Plural menu, native About panel from both entry points, LAN discovery and legacy-client Hello verified. Bluetooth connect, audio and AAC remain untested. No camera |
-| `Plural.App.iOS` / `Plural.Platform.iOS` | Built 2026-10-11; compiles on Windows, while linking, signing and running need a Mac. Runs on an iPhone 13 (2026-10-26): SmartMike via External Accessory connects, streams and records (WAV takes checked); local mics, share and Wi-Fi remote not yet tested on the device. No camera |
+| `Plural.Platform.MacOS` / `.Apple` | IOBluetooth RFCOMM, Core Audio output/input, AudioQueue, AAC. Published `osx-arm64`/`osx-x64` and run on Apple Silicon (2026-10-26): Plural menu, native About panel from both entry points, LAN discovery and legacy-client Hello verified. Bluetooth connect, audio and AAC remain untested. Camera (any webcam) and VideoToolbox playback compiled only |
+| `Plural.App.iOS` / `Plural.Platform.iOS` | Built 2026-10-11; compiles on Windows, while linking, signing and running need a Mac. Runs on an iPhone 13 (2026-10-26): SmartMike via External Accessory connects, streams and records (WAV takes checked); local mics, share and Wi-Fi remote not yet tested on the device. Camera (main/front) and VideoToolbox playback compiled only |
 | Virtual cable | Not installed yet; the output picker lists cables first when present |
 
 ### Known open items (recording, library and playback)
@@ -230,7 +241,7 @@ Native/lame/                    per-RID LAME 3.100 binaries (same four scripts)
 - fMP4 (MP4/M4A): forced kill verified on Surface (MP4 killed at 8.0 s plays) and force-stop on Pixel 8 (Recovered); playback in VLC, QuickTime, WMP/Photos, Resolve, Premiere untested.
 - Android: background video (Android 17) untested.
 - SmartMike auto-reconnect (mic switched off mid-take) and the mic Record button's record path are untested. Pause with real mics and camera was verified (video gap after resume 34 ms Surface, 42 ms Pixel 8); track alignment after resume is not measured.
-- macOS and iOS: no VideoToolbox, so video shows the poster with "Video playback is not available on this device yet"; audio decode is compiled only.
+- macOS and iOS: H.264 video plays through VideoToolbox (`AppleVideoDecoder`); video and audio decode are compiled only.
 - Camera privacy-denied path untested.
 
 ### Build notes

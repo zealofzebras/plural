@@ -32,4 +32,14 @@
     <ProjectReference Include="..\Plural.App\Plural.App.csproj" />
     <ProjectReference Include="..\Plural.Platform.iOS\Plural.Platform.iOS.csproj" />
   </ItemGroup>
+
+  <!-- Plural.Core copies the desktop natives (Native/*/runtimes/<rid>/) to every app; on a Mac with the osx dylibs built, the iOS
+       build would try to bundle and relink them. iOS uses the xcframeworks above instead. -->
+  <Target Name="PluralDropDesktopNatives" BeforeTargets="_ComputeDynamicLibrariesToReidentify">
+    <ItemGroup>
+      <_PluralDesktopNative Include="@(_FileNativeReference)"
+                            Condition="$([System.String]::Copy('%(_FileNativeReference.RelativePath)').Replace('\','/').StartsWith('runtimes/'))" />
+      <_FileNativeReference Remove="@(_PluralDesktopNative)" />
+    </ItemGroup>
+  </Target>
 </Project>

@@ -32,8 +32,8 @@ if (OperatingSystem.IsWindows())
 else if (OperatingSystem.IsMacOS())
 {
     var audio = new MacAudio();
-    // No camera layer on macOS yet.
-    hub = new MikeHub(new MacBluetooth(), audio, new AppleAacEncoderFactory(), null, audio);
+    hub = new MikeHub(new MacBluetooth(), audio, new AppleAacEncoderFactory(), new AppleVideoPlatform(), audio, new AppleAudioDecoderFactory(),
+        new AppleVideoDecoderFactory());
     platform = "macOS";
 }
 else
