@@ -13,7 +13,8 @@ To change the store text, edit a `.txt` file and publish a release. You don't ne
 | `store.toml` | URLs, categories, brand colours, screenshot sizes, Microsoft Store identity | |
 | `brand/plural.svg` | Shared vector mark: three recording tracks, off-white and coral on an ink tile | |
 | `brand/icon.png` | The logo (transparent, square, ≥1024 px). Every icon and tile is made from it | |
-| `<locale>/name.txt` | App name: App Store, Google Play title, Microsoft Store product name | 30 |
+| `<locale>/name.txt` | App name: Google Play title, Microsoft Store product name, and App Store name unless `app_store_name.txt` exists | 30 |
+| `<locale>/app_store_name.txt` | Optional App Store / Mac App Store name (en-US: "Plural Recorder", the name in App Store Connect) | 30 |
 | `<locale>/subtitle.txt` | App Store subtitle, also the tagline on the Play feature graphic | 30 |
 | `<locale>/short_description.txt` | Google Play short description, Microsoft Store short description | 80 |
 | `<locale>/description.txt` | Full description in every store | 4000 |

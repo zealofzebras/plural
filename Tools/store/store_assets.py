@@ -34,7 +34,8 @@ MARKETING = ROOT / "Marketing"
 
 # Store text limits (characters). The lowest limit across stores wins for shared fields.
 LIMITS = {
-    "name": 30,               # App Store name, Google Play title
+    "name": 30,               # Google Play title, Microsoft Store name (App Store unless app_store_name is set)
+    "app_store_name": 30,     # App Store / Mac App Store name, if different from name
     "subtitle": 30,           # App Store subtitle
     "short_description": 80,  # Google Play short description
     "description": 4000,      # App Store, Google Play (Microsoft allows 10000)
@@ -115,7 +116,7 @@ def validate(locale: str, t: dict, rep: Report) -> None:
     for field, limit in LIMITS.items():
         if len(t[field]) > limit:
             rep.errors.append(f"{locale}/{field}.txt is {len(t[field])} characters; the limit is {limit}")
-    for field in ("name", "subtitle", "keywords"):
+    for field in ("name", "app_store_name", "subtitle", "keywords"):
         low = t[field].lower()
         if any(tm in low for tm in TRADEMARKS):
             rep.errors.append(f"{locale}/{field}.txt uses a third-party trademark (SmartMike/Sabinetek); "
@@ -431,7 +432,7 @@ def apple_listing(cfg, locale, t, shots, logo, out: Path, platform: str) -> None
     app = cfg["app"]
     meta = out / platform / "metadata"
     base = meta / locale
-    write(base / "name.txt", t["name"])
+    write(base / "name.txt", t["app_store_name"] or t["name"])
     write(base / "subtitle.txt", t["subtitle"])
     write(base / "description.txt", t["description"])
     write(base / "keywords.txt", t["keywords"])

@@ -9,7 +9,8 @@ from unittest.mock import Mock, patch
 
 from google_play import PACKAGE_NAME, publish as publish_google_play
 from microsoft_store import IMAGE_TYPES, StoreClient, prepare_submission, publish, safe_message, wait_for_commit, write_archive
-from store_assets import LIMITS, load_texts, Report, render_logo, validate, windows_listing
+from store_assets import (LIMITS, apple_listing, load_config, load_texts, read_text, Report, render_logo, validate,
+                          windows_listing)
 
 
 class GooglePlayTests(unittest.TestCase):
@@ -104,6 +105,20 @@ class SharedLogoTests(unittest.TestCase):
 
 
 class StoreReleaseNotesTests(unittest.TestCase):
+    def test_app_store_name_overrides_apple_listing_name_only(self):
+        cfg = load_config()
+        texts = {f: "" for f in LIMITS}
+        texts.update(name="Plural", app_store_name="Plural Recorder")
+        with tempfile.TemporaryDirectory() as temp:
+            out = Path(temp)
+            apple_listing(cfg, "en-US", texts, {}, None, out, "macos")
+            self.assertEqual((out / "macos/metadata/en-US/name.txt").read_text(encoding="utf-8").strip(),
+                             "Plural Recorder")
+            texts["app_store_name"] = ""
+            apple_listing(cfg, "en-US", texts, {}, None, out, "macos")
+            self.assertEqual((out / "macos/metadata/en-US/name.txt").read_text(encoding="utf-8").strip(), "Plural")
+        self.assertEqual(read_text("en-US", "app_store_name"), "Plural Recorder")
+
     def load_notes(self, fallback, authored=""):
         fields = {"name": "Plural", "short_description": "Record audio", "description": "Record audio tracks",
                   "release_notes": authored}
