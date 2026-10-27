@@ -521,6 +521,10 @@ jobs:
           security find-identity "$kc"
           security find-identity -p codesigning "$kc"
           security find-identity -v -p codesigning "$kc"
+          security find-certificate -a -p "$kc" |
+            openssl crl2pkcs7 -nocrl -certfile /dev/stdin |
+            openssl pkcs7 -print_certs -text |
+            grep -A1 -E 'Issuer:|Subject:|Not Before:|Not After :|X509v3 (Extended Key Usage|Key Usage)|1\.2\.840\.113635'
       - name: Developer ID signing and notarization
         if: env.HAS_DEVID == 'true'
         env:
