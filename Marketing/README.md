@@ -119,8 +119,48 @@ Version numbers come from the tag: `v1.2.3` gives version 1.2.3, Android version
 1.2.3.0. Running the workflow by hand (Actions → Release → Run workflow) builds everything as run artifacts without
 touching a release or submitting to a store. GitHub prereleases also do not submit to Microsoft Store.
 
-Currently only Android files and the Google Play store ZIP are attached to releases. Windows builds remain available
-as workflow artifacts; Windows release uploads and Microsoft Store submissions are temporarily disabled.
+Currently only Android files and the Google Play store ZIP are attached to releases. Windows, macOS and iOS builds
+remain available as workflow artifacts; Windows release uploads and Microsoft Store submissions are temporarily disabled.
+
+## App Store and Mac App Store publishing
+
+Stable GitHub releases upload the Mac App Store `.pkg` and the iOS `.ipa` to App Store Connect (job `app-store`).
+Manual workflow runs and prereleases don't upload, because a build number can't be uploaded twice. Each part is
+skipped, not failed, while its secrets are missing:
+
+| Missing | Effect |
+|---|---|
+| `APP_STORE_CONNECT_KEY_ID` / `APP_STORE_CONNECT_ISSUER_ID` variables | The whole `app-store` job is skipped |
+| `APP_STORE_CONNECT_API_KEY` secret | The job runs but uploads nothing (warning) |
+| Any `MAS_*` secret or `APPLE_TEAM_ID` | No `.pkg` is built; only iOS is uploaded |
+| Any `IOS_*` secret | iOS is only compiled for the simulator; only macOS is uploaded |
+| Any `MACOS_*` secret / notarization secrets | The direct-download macOS apps are unsigned / not notarized (not used by the App Store) |
+
+An upload makes the build appear in App Store Connect and TestFlight after Apple's processing (about 5–30 minutes).
+You still choose the build and press **Submit for Review** in App Store Connect. Set the variable
+`APP_STORE_UPLOAD_LISTING` to `true` to also upload the generated listing (`ios/` and `macos/` from the store assets:
+text, URLs, categories, screenshots) with fastlane `deliver`. This creates the version in App Store Connect if needed
+but never submits it. Leave it off for the very first version until the app record is set up by hand, because
+"What's New" can't be set on a first version.
+
+### One-time Apple setup
+
+1. **App record:** in App Store Connect create one app with bundle ID `net.getplural.app` and add both the iOS and macOS
+   platforms. Register the bundle ID first under Certificates, Identifiers & Profiles → Identifiers (explicit App ID).
+   Fill in pricing, age rating, App Privacy and export compliance once (the apps declare `ITSAppUsesNonExemptEncryption = false`).
+2. **API key:** Users and Access → Integrations → App Store Connect API → Team Keys → generate a key with the
+   **App Manager** role. Download the `.p8` (only possible once). Copy the key ID and the issuer ID.
+3. **Mac App Store certificates:** create an **Apple Distribution** and a **Mac Installer Distribution** certificate,
+   export both from Keychain Access into one `.p12`, then `base64 -i mas.p12 | pbcopy`. Identity names are shown by
+   `security find-identity -v` (for example `Apple Distribution: Your Name (TEAMID)` and
+   `3rd Party Mac Developer Installer: Your Name (TEAMID)`).
+4. **Mac provisioning profile:** Profiles → + → **Mac App Store Connect**, App ID `net.getplural.app`, the Apple
+   Distribution certificate. Download the `.provisionprofile` and base64 it.
+5. **iOS certificate and profile:** export the Apple Distribution certificate as its own `.p12`. Create a profile of type
+   **App Store Connect** (iOS) for `net.getplural.app` and base64 the `.mobileprovision`. Add capabilities such as the
+   multicast entitlement to the App ID before creating the profile.
+
+The Mac App Store build is Apple silicon only (`LSMinimumSystemVersion` 12.0, as Apple requires for arm64-only apps).
 
 ## Google Play publishing
 
@@ -211,10 +251,11 @@ Add secrets under Settings → Secrets and variables → Actions.
 | `MSSTORE_CLIENT_SECRET` | Entra application client secret value for automated Microsoft Store submission |
 | `ANDROID_KEYSTORE_BASE64`, `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS`, `ANDROID_KEY_PASSWORD` | Signing the APK/AAB with your Play upload key (`base64 -w0 upload.keystore`) |
 | `WINDOWS_CERT_PFX_BASE64`, `WINDOWS_CERT_PASSWORD` | Signing the .msixbundle for sideloading. The Store signs it for you. The certificate subject must equal the publisher |
-| `MACOS_CERT_P12_BASE64`, `MACOS_CERT_PASSWORD`, `MACOS_SIGN_IDENTITY` | Developer ID signing of the macOS app (`Developer ID Application: Name (TEAMID)`) |
-| `APPLE_ID`, `APPLE_TEAM_ID`, `APPLE_APP_PASSWORD` | Notarizing the macOS app (app-specific password) |
-| `MAS_CERT_P12_BASE64`, `MAS_CERT_PASSWORD`, `MAS_APP_IDENTITY`, `MAS_INSTALLER_IDENTITY`, `MAS_PROVISIONING_PROFILE_BASE64` | Mac App Store `.pkg` (`Apple Distribution` and `Mac Installer Distribution` identities in one .p12) |
-| `IOS_CERT_P12_BASE64`, `IOS_CERT_PASSWORD`, `IOS_SIGN_IDENTITY`, `IOS_PROVISIONING_PROFILE_BASE64` | Signed iOS `.ipa` |
+| `MACOS_CERT_P12_BASE64`, `MACOS_CERT_PASSWORD`, `MACOS_SIGN_IDENTITY` | Developer ID signing of the direct-download macOS app (`Developer ID Application: Name (TEAMID)`) |
+| `APPLE_ID`, `APPLE_TEAM_ID`, `APPLE_APP_PASSWORD` | Notarizing the macOS app (app-specific password). `APPLE_TEAM_ID` (10 characters) is also needed for the Mac App Store `.pkg` |
+| `MAS_CERT_P12_BASE64`, `MAS_CERT_PASSWORD`, `MAS_APP_IDENTITY`, `MAS_INSTALLER_IDENTITY`, `MAS_PROVISIONING_PROFILE_BASE64` | Mac App Store `.pkg` (`Apple Distribution` and `Mac Installer Distribution` identities in one .p12, plus the Mac App Store provisioning profile) |
+| `IOS_CERT_P12_BASE64`, `IOS_CERT_PASSWORD`, `IOS_SIGN_IDENTITY`, `IOS_PROVISIONING_PROFILE_BASE64` | Signed App Store iOS `.ipa` (`Apple Distribution: Name (TEAMID)` and an App Store `.mobileprovision`) |
+| `APP_STORE_CONNECT_API_KEY` | Contents of the App Store Connect API `.p8` key (plain text or base64) for uploading to App Store Connect |
 
 | Variable | Needed for |
 |---|---|
@@ -225,6 +266,8 @@ Add secrets under Settings → Secrets and variables → Actions.
 | `MSSTORE_IDENTITY_NAME`, `MSSTORE_PUBLISHER`, `MSSTORE_PUBLISHER_DISPLAY_NAME` | The MSIX identity. Copy them from Partner Center → Product identity. They override `store.toml` |
 | `MSSTORE_APP_ID` | Microsoft Store ID of Plural, from Partner Center Product identity |
 | `MSSTORE_TENANT_ID`, `MSSTORE_CLIENT_ID` | Entra tenant and application IDs associated with Partner Center |
+| `APP_STORE_CONNECT_KEY_ID`, `APP_STORE_CONNECT_ISSUER_ID` | App Store Connect API key ID and issuer ID; the `app-store` job is skipped until both are set |
+| `APP_STORE_UPLOAD_LISTING` | Optional `true` to also upload the App Store listing text and screenshots with fastlane |
 
 ## Platform status
 

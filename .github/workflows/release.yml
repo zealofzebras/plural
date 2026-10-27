@@ -1,5 +1,6 @@
 # Builds Plural for every platform when a GitHub release is published, generates store listings and images
-# from Marketing/ and submits stable Android releases to Google Play using Workload Identity Federation.
+# from Marketing/, submits stable Android releases to Google Play using Workload Identity Federation and uploads
+# stable macOS/iOS builds to App Store Connect. Steps whose secrets are not set are skipped.
 # Secrets and variables: see Marketing/README.md ("Release workflow").
 name: Release
 
@@ -427,14 +428,17 @@ jobs:
   macos:
     name: macOS (arm64, x64)
     needs: [plan, store-assets]
-    if: ${{ false && !cancelled() && needs.store-assets.result == 'success' }}
+    if: ${{ !cancelled() && needs.store-assets.result == 'success' }}
     runs-on: macos-15
     env:
       VERSION: ${{ needs.plan.outputs.version }}
       BUILD: ${{ needs.plan.outputs.build }}
-      HAS_DEVID: ${{ secrets.MACOS_CERT_P12_BASE64 != '' }}
-      HAS_NOTARY: ${{ secrets.APPLE_APP_PASSWORD != '' }}
-      HAS_MAS: ${{ secrets.MAS_CERT_P12_BASE64 != '' }}
+      # Each signing path runs only when all of its secrets are set; otherwise it is skipped.
+      HAS_DEVID: ${{ secrets.MACOS_CERT_P12_BASE64 != '' && secrets.MACOS_CERT_PASSWORD != '' && secrets.MACOS_SIGN_IDENTITY != '' }}
+      HAS_NOTARY: ${{ secrets.APPLE_ID != '' && secrets.APPLE_TEAM_ID != '' && secrets.APPLE_APP_PASSWORD != '' }}
+      HAS_MAS: >-
+        ${{ secrets.MAS_CERT_P12_BASE64 != '' && secrets.MAS_CERT_PASSWORD != '' && secrets.MAS_APP_IDENTITY != ''
+        && secrets.MAS_INSTALLER_IDENTITY != '' && secrets.MAS_PROVISIONING_PROFILE_BASE64 != '' && secrets.APPLE_TEAM_ID != '' }}
       MACOSX_DEPLOYMENT_TARGET: "12.0"
     steps:
       - uses: actions/checkout@v7
@@ -477,9 +481,9 @@ jobs:
           security create-keychain -p "$kp" "$kc"
           security set-keychain-settings -lut 21600 "$kc"
           security unlock-keychain -p "$kp" "$kc"
-          for pair in DEVID_P12:DEVID_PASSWORD MAS_P12:MAS_PASSWORD; do
-            data_var="${pair%%:*}"; pass_var="${pair#*:}"
-            [ -n "${!data_var}" ] || continue
+          for pair in DEVID_P12:DEVID_PASSWORD:HAS_DEVID MAS_P12:MAS_PASSWORD:HAS_MAS; do
+            IFS=: read -r data_var pass_var flag_var <<< "$pair"
+            [ "${!flag_var}" = "true" ] || continue
             echo "${!data_var}" | base64 -d > "$RUNNER_TEMP/cert.p12"
             security import "$RUNNER_TEMP/cert.p12" -k "$kc" -P "${!pass_var}" -T /usr/bin/codesign -T /usr/bin/productbuild
             rm "$RUNNER_TEMP/cert.p12"
@@ -519,7 +523,8 @@ jobs:
             hdiutil create -volname Plural -srcfolder "out/app/$rid/Plural.app" -ov -format UDZO \
               "out/dist/Plural-$VERSION-macos-$arch.dmg"
           done
-          [ "$HAS_DEVID" = "true" ] || echo "::warning::No MACOS_CERT_P12_BASE64 secret: the macOS apps are unsigned (Gatekeeper will block them)."
+          [ "$HAS_DEVID" = "true" ] || echo "::warning::Developer ID secrets not set: the macOS apps are unsigned (Gatekeeper will block them)."
+          [ "$HAS_MAS" = "true" ] || echo "::notice::Mac App Store secrets not set: no App Store .pkg is built."
       - name: Mac App Store package
         if: env.HAS_MAS == 'true'
         env:
@@ -556,13 +561,15 @@ jobs:
   ios:
     name: iOS
     needs: [plan]
-    if: ${{ false && needs.plan.outputs.has_ios == 'true' }}
+    if: ${{ !cancelled() && needs.plan.outputs.has_ios == 'true' }}
     # The .NET iOS workload tracks the newest Xcode (27.x), which only the xcode-27 image has.
     runs-on: xcode-27
     env:
       VERSION: ${{ needs.plan.outputs.version }}
       BUILD: ${{ needs.plan.outputs.build }}
-      HAS_IOS_CERT: ${{ secrets.IOS_CERT_P12_BASE64 != '' }}
+      HAS_IOS_CERT: >-
+        ${{ secrets.IOS_CERT_P12_BASE64 != '' && secrets.IOS_CERT_PASSWORD != '' && secrets.IOS_SIGN_IDENTITY != ''
+        && secrets.IOS_PROVISIONING_PROFILE_BASE64 != '' }}
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-dotnet@v6
@@ -604,8 +611,11 @@ jobs:
           rm "$RUNNER_TEMP/cert.p12"
           security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$kp" "$kc" > /dev/null
           security list-keychains -d user -s "$kc" $(security list-keychains -d user | tr -d '"')
-          mkdir -p ~/Library/MobileDevice/Provisioning\ Profiles
-          echo "$PROFILE_BASE64" | base64 -d > ~/Library/MobileDevice/Provisioning\ Profiles/plural.mobileprovision
+          # Xcode 16+ reads profiles from UserData; older tooling from MobileDevice.
+          for dir in ~/Library/MobileDevice/Provisioning\ Profiles ~/Library/Developer/Xcode/UserData/Provisioning\ Profiles; do
+            mkdir -p "$dir"
+            echo "$PROFILE_BASE64" | base64 -d > "$dir/plural.mobileprovision"
+          done
       - name: Publish
         env:
           IDENTITY: ${{ secrets.IOS_SIGN_IDENTITY }}
@@ -618,7 +628,7 @@ jobs:
             ipa="$(find Src/Plural.App.iOS/bin/Release -name '*.ipa' | head -n 1)"
             cp "$ipa" "out/dist/Plural-$VERSION-ios.ipa"
           else
-            echo "::warning::No IOS_CERT_P12_BASE64 secret: iOS is compiled for the simulator but no .ipa is produced (Apple requires signing)."
+            echo "::warning::iOS signing secrets not set: iOS is compiled for the simulator but no .ipa is produced (Apple requires signing)."
             dotnet build Src/Plural.App.iOS -c Release -f net10.0-ios -r iossimulator-arm64 -p:Version="$VERSION"
             echo "unsigned build only" > out/dist/ios-unsigned.txt
           fi
@@ -629,6 +639,96 @@ jobs:
         with:
           name: ios
           path: out/dist
+
+  app-store:
+    name: App Store Connect upload (macOS, iOS)
+    needs: [plan, store-assets, macos, ios]
+    # Stable releases only (build numbers can't be reused); the whole job is skipped until the API key IDs are set.
+    if: >-
+      ${{ !cancelled() && github.event_name == 'release' && !github.event.release.prerelease
+      && needs.plan.result == 'success' && vars.APP_STORE_CONNECT_KEY_ID != '' && vars.APP_STORE_CONNECT_ISSUER_ID != '' }}
+    runs-on: macos-15
+    timeout-minutes: 60
+    concurrency:
+      group: app-store-publishing
+      cancel-in-progress: false
+    env:
+      VERSION: ${{ needs.plan.outputs.version }}
+      BUILD: ${{ needs.plan.outputs.build }}
+      KEY_ID: ${{ vars.APP_STORE_CONNECT_KEY_ID }}
+      ISSUER_ID: ${{ vars.APP_STORE_CONNECT_ISSUER_ID }}
+      HAS_KEY: ${{ secrets.APP_STORE_CONNECT_API_KEY != '' }}
+      UPLOAD_LISTING: ${{ vars.APP_STORE_UPLOAD_LISTING == 'true' }}
+    steps:
+      - uses: actions/checkout@v7
+      - name: Check API key
+        run: |
+          [ "$HAS_KEY" = "true" ] || echo "::warning::APP_STORE_CONNECT_API_KEY secret not set: nothing is uploaded to App Store Connect."
+      - uses: actions/download-artifact@v8
+        if: env.HAS_KEY == 'true' && needs.macos.result == 'success'
+        with:
+          name: macos
+          path: in/macos
+      - uses: actions/download-artifact@v8
+        if: env.HAS_KEY == 'true' && needs.ios.result == 'success'
+        with:
+          name: ios
+          path: in/ios
+      - uses: actions/download-artifact@v8
+        if: env.HAS_KEY == 'true' && env.UPLOAD_LISTING == 'true'
+        with:
+          name: store-assets
+          path: in/store-assets
+      - name: Install API key
+        if: env.HAS_KEY == 'true'
+        env:
+          API_KEY: ${{ secrets.APP_STORE_CONNECT_API_KEY }}
+        run: |
+          # altool looks for AuthKey_<id>.p8 here. The secret may be the .p8 text or its base64.
+          umask 077
+          mkdir -p ~/.appstoreconnect/private_keys
+          p8=~/.appstoreconnect/private_keys/"AuthKey_$KEY_ID.p8"
+          if printf '%s' "$API_KEY" | grep -q -- '-----BEGIN'; then printf '%s\n' "$API_KEY" > "$p8"
+          else printf '%s' "$API_KEY" | base64 -d > "$p8"; fi
+          grep -q -- '-----BEGIN PRIVATE KEY-----' "$p8" || { echo "::error::APP_STORE_CONNECT_API_KEY is not a .p8 private key"; exit 1; }
+          jq -n --arg k "$KEY_ID" --arg i "$ISSUER_ID" --rawfile p "$p8" \
+            '{key_id: $k, issuer_id: $i, key: $p, in_house: false}' > "$RUNNER_TEMP/asc-api-key.json"
+      - name: Upload to App Store Connect
+        id: upload
+        if: env.HAS_KEY == 'true'
+        run: |
+          upload() {  # upload <type> <file>
+            if [ ! -f "$2" ]; then
+              echo "::notice::$1: no $(basename "$2") was built (signing secrets not set), skipping"; return
+            fi
+            echo "Uploading $2"
+            xcrun altool --upload-app --type "$1" --file "$2" --apiKey "$KEY_ID" --apiIssuer "$ISSUER_ID"
+            echo "$1=true" >> "$GITHUB_OUTPUT"
+            echo "- $1: uploaded $(basename "$2") (version $VERSION, build $BUILD)" >> "$GITHUB_STEP_SUMMARY"
+          }
+          echo "## App Store Connect" >> "$GITHUB_STEP_SUMMARY"
+          upload macos "in/macos/Plural-$VERSION-macos-appstore.pkg"
+          upload ios "in/ios/Plural-$VERSION-ios.ipa"
+      - name: Upload App Store listing
+        if: env.HAS_KEY == 'true' && env.UPLOAD_LISTING == 'true' && (steps.upload.outputs.macos == 'true' || steps.upload.outputs.ios == 'true')
+        env:
+          IOS: ${{ steps.upload.outputs.ios }}
+          MACOS: ${{ steps.upload.outputs.macos }}
+        run: |
+          command -v fastlane > /dev/null || brew install fastlane
+          deliver() {  # deliver <fastlane platform> <store-assets folder>
+            fastlane deliver --api_key_path "$RUNNER_TEMP/asc-api-key.json" --app_identifier net.getplural.app \
+              --platform "$1" --app_version "$VERSION" \
+              --metadata_path "in/store-assets/$2/metadata" --screenshots_path "in/store-assets/$2/screenshots" \
+              --skip_binary_upload true --overwrite_screenshots true --submit_for_review false \
+              --run_precheck_before_submit false --force true
+          }
+          [ "$IOS" = "true" ] && deliver ios ios
+          [ "$MACOS" = "true" ] && deliver osx macos
+          true
+      - name: Remove API key
+        if: always()
+        run: rm -rf ~/.appstoreconnect/private_keys "$RUNNER_TEMP/asc-api-key.json"
 
   publish:
     name: Store packages and release upload
