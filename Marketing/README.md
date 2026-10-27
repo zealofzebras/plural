@@ -102,14 +102,12 @@ When you publish a release tagged `v1.2.3`, these files are attached to it:
 | File | What it is |
 |---|---|
 | `Plural-1.2.3-windows-x64.zip`, `-windows-arm64.zip` | Portable Windows app |
-| `Plural-1.2.3.msixbundle` | Windows package (x64 + arm64) for the Microsoft Store or sideloading |
 | `Plural-1.2.3-android.apk` | Android app for direct install |
-| `Plural-1.2.3-android.aab` | Android App Bundle for Google Play |
-| `Plural-1.2.3-macos-arm64.dmg/.zip`, `-macos-x64.dmg/.zip` | macOS app |
-| `Plural-1.2.3-macos-appstore.pkg` | Mac App Store upload (only when the Mac App Store secrets are set) |
-| `Plural-1.2.3-ios.ipa` | iOS app (only when the iOS signing secrets are set) |
-| `Plural-1.2.3-<store>-store.zip` | One per store: `listing/` (text and images in that store's layout), `binaries/`, `REPORT.md` |
-| `SHA256SUMS.txt` | Checksums |
+| `Plural-1.2.3-macos-arm64.dmg`, `-macos-x64.dmg` | Direct-download macOS app, signed and notarized when signing secrets are configured |
+| Source code (ZIP / tar.gz) | Added automatically by GitHub |
+
+Only runnable direct downloads are attached. AAB, MSIX, App Store PKG, IPA, listings and other store assets
+remain available as workflow artifacts for store publishing, not as public release downloads.
 
 The Google Play and App Store listings use the [fastlane](https://docs.fastlane.tools) `supply` and `deliver` folder
 layouts, so `fastlane supply --metadata_path listing/metadata/android` or `fastlane deliver` can upload them as they
@@ -120,8 +118,9 @@ Version numbers come from the tag: `v1.2.3` gives version 1.2.3, Android version
 1.2.3.0. Running the workflow by hand (Actions → Release → Run workflow) builds everything as run artifacts without
 touching a release or submitting to a store. GitHub prereleases also do not submit to Microsoft Store.
 
-Currently only Android files and the Google Play store ZIP are attached to releases. Windows, macOS and iOS builds
-remain available as workflow artifacts; Windows release uploads and Microsoft Store submissions are temporarily disabled.
+If the release **title** contains `(GH)`, for example `v1.2.3 (GH)`, the workflow publishes the same direct downloads
+but skips Google Play, Microsoft Store and App Store Connect uploads, including listings. The tag is still `v1.2.3`.
+Listing-only retries also reject GitHub-only releases. Signing and notarization still run for direct-download Mac apps.
 
 ## App Store and Mac App Store publishing
 

@@ -272,7 +272,7 @@ jobs:
   microsoft-store:
     name: Microsoft Store submission
     needs: [plan, windows, store-assets]
-    if: ${{ !cancelled() && !inputs.signing_only }}
+    if: ${{ !cancelled() && !inputs.signing_only && !contains(github.event.release.name, '(GH)') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     concurrency:
@@ -387,7 +387,7 @@ jobs:
   google-play:
     name: Google Play submission
     needs: [plan, android, store-assets]
-    if: ${{ !cancelled() && github.event_name == 'release' && !github.event.release.prerelease && needs.android.result == 'success' && needs.store-assets.result == 'success' }}
+    if: ${{ !cancelled() && github.event_name == 'release' && !github.event.release.prerelease && !contains(github.event.release.name, '(GH)') && needs.android.result == 'success' && needs.store-assets.result == 'success' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     permissions:
@@ -688,7 +688,7 @@ jobs:
     needs: [plan, store-assets, macos, ios]
     # Stable releases only (build numbers can't be reused); the whole job is skipped until the API key IDs are set.
     if: >-
-      ${{ !cancelled() && ((github.event_name == 'release' && !github.event.release.prerelease
+      ${{ !cancelled() && ((github.event_name == 'release' && !github.event.release.prerelease && !contains(github.event.release.name, '(GH)')
       && needs.plan.result == 'success') || inputs.listing_run_id != '')
       && vars.APP_STORE_CONNECT_KEY_ID != '' && vars.APP_STORE_CONNECT_ISSUER_ID != '' }}
     runs-on: macos-15
@@ -708,6 +708,18 @@ jobs:
       UPLOAD_LISTING: ${{ vars.APP_STORE_UPLOAD_LISTING == 'true' }}
     steps:
       - uses: actions/checkout@v7
+      - name: Check listing retry release
+        if: inputs.listing_run_id != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          LISTING_RUN_ID: ${{ inputs.listing_run_id }}
+        run: |
+          tag="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$LISTING_RUN_ID" --jq 'if .event == "release" then .head_branch else error("Listing retries require a release run") end')"
+          [ "${tag#v}" = "$VERSION" ] || { echo "::error::Listing retry version does not match the source release"; exit 1; }
+          title="$(gh release view "$tag" --repo "$GITHUB_REPOSITORY" --json name --jq .name)"
+          if printf '%s' "$title" | grep -Fqi '(GH)'; then
+            echo "::error::GitHub-only releases cannot update App Store listings"; exit 1
+          fi
       - name: Check API key
         run: |
           [ "$HAS_KEY" = "true" ] || echo "::warning::APP_STORE_CONNECT_API_KEY secret not set: nothing is uploaded to App Store Connect."
@@ -782,9 +794,9 @@ jobs:
         run: rm -rf ~/.appstoreconnect/private_keys "$RUNNER_TEMP/asc-api-key.json"
 
   publish:
-    name: Store packages and release upload
-    needs: [plan, store-assets, android]
-    if: ${{ !cancelled() && needs.plan.result == 'success' && needs.store-assets.result == 'success' && needs.android.result == 'success' }}
+    name: GitHub release downloads
+    needs: [plan, android, windows, macos]
+    if: ${{ !cancelled() && needs.plan.result == 'success' && needs.android.result == 'success' && needs.windows.result == 'success' && needs.macos.result == 'success' }}
     runs-on: ubuntu-24.04
     permissions:
       contents: write
@@ -793,27 +805,16 @@ jobs:
     steps:
       - uses: actions/download-artifact@v8
         with:
-          pattern: "{android,store-assets}"
+          pattern: "{android,windows,macos}"
           path: in
-      - name: Assemble store packages
+      - name: Assemble direct downloads
         run: |
           mkdir -p dist
-          s=in/store-assets
-          pack() {  # pack <store> <listing dir> <binary files...>: listing + binaries in one zip
-            local store="$1" listing="$2"; shift 2
-            local dir="pkg/Plural-$VERSION-$store-store"
-            mkdir -p "$dir"
-            cp -R "$listing/." "$dir/listing/"
-            cp "$s/REPORT.md" "$dir/"
-            for f in "$@"; do [ -f "$f" ] && mkdir -p "$dir/binaries" && cp "$f" "$dir/binaries/"; done
-            (cd pkg && zip -qr "../dist/Plural-$VERSION-$store-store.zip" "$(basename "$dir")")
-          }
-          pack google-play "$s/android" in/android/*.aab
-          # Apps for direct download.
-          for f in in/android/*; do
-            [ -f "$f" ] && cp "$f" dist/
+          cp "in/android/Plural-$VERSION-android.apk" dist/
+          for arch in x64 arm64; do
+            cp "in/windows/Plural-$VERSION-windows-$arch.zip" dist/
+            cp "in/macos/Plural-$VERSION-macos-$arch.dmg" dist/
           done
-          (cd dist && sha256sum * > SHA256SUMS.txt)
           ls -l dist
       - name: Summary
         run: |
@@ -821,7 +822,7 @@ jobs:
             echo "## Release files"; echo
             for f in dist/*; do echo "- $(basename "$f") ($(du -h "$f" | cut -f1))"; done
             echo
-            echo "Android build: ${{ needs.android.result }}. Windows uploads are temporarily disabled."
+            echo "Android, Windows and macOS direct downloads. Store packages remain workflow artifacts."
           } >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/upload-artifact@v7
         with:
