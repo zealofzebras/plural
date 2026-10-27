@@ -490,7 +490,9 @@ jobs:
           for rid in osx-arm64 osx-x64; do
             app="out/app/$rid/Plural.app"
             mkdir -p "$app/Contents/MacOS"
-            printf 'int main(void) { return 0; }\n' | clang -x c -arch "${rid#osx-}" -o "$app/Contents/MacOS/Plural" -
+            arch="${rid#osx-}"
+            arch="${arch/x64/x86_64}"
+            printf 'int main(void) { return 0; }\n' | clang -x c -arch "$arch" -o "$app/Contents/MacOS/Plural" -
             sed -e 's/{{BUNDLE_ID}}/net.getplural.app/g' -e 's/{{VERSION}}/0.0.0/g' \
               -e 's/{{BUILD}}/1/g' -e 's/{{COPYRIGHT}}/Signing test/g' \
               Packaging/macos/Info.plist > "$app/Contents/Info.plist"
